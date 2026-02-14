@@ -101,10 +101,10 @@ const CSS = `
   .field { margin-bottom: 20px; }
   .field label { display: block; font-size: 14px; font-weight: 500; color: #333; margin-bottom: 6px; }
   .field input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; outline: none; transition: border-color 0.15s; }
-  .field input:focus { border-color: #0085ff; }
-  .btn-primary { width: 100%; padding: 12px; background: #0085ff; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; transition: background 0.15s; }
-  .btn-primary:hover { background: #006acc; }
-  .btn-secondary { display: inline-block; margin-top: 12px; color: #0085ff; text-decoration: none; font-size: 14px; }
+  .field input:focus { border-color: #0f1828; }
+  .btn-primary { width: 100%; padding: 12px; background: #0f1828; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; transition: background 0.15s; }
+  .btn-primary:hover { background: #1a2a40; }
+  .btn-secondary { display: inline-block; margin-top: 12px; color: #0f1828; text-decoration: none; font-size: 14px; }
   .error { color: #dc3545; background: #fdf0f0; padding: 12px; border-radius: 8px; margin-top: 12px; }
   .info { color: #666; font-size: 14px; margin-top: 16px; line-height: 1.5; }
   .check-icon { font-size: 48px; margin-bottom: 16px; }

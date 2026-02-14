@@ -55,6 +55,7 @@ COPY --from=build /app/packages/shared/dist ./packages/shared/dist
 COPY --from=build /app/packages/shared/package.json ./packages/shared/
 COPY --from=build /app/packages/auth-service/dist ./packages/auth-service/dist
 COPY --from=build /app/packages/auth-service/package.json ./packages/auth-service/
+COPY packages/auth-service/public ./packages/auth-service/public
 COPY --from=build /app/package.json ./
 COPY --from=build /app/pnpm-workspace.yaml ./
 RUN mkdir -p /data && chown appuser:appuser /data

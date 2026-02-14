@@ -102,7 +102,7 @@ export class EmailSender {
   <p>Click the button below to continue:</p>
   <p style="margin: 30px 0;">
     <a href="${this.escapeHtml(magicLinkUrl)}"
-       style="background-color: #0085ff; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500; display: inline-block;">
+       style="background-color: #0f1828; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500; display: inline-block;">
       Sign in to ${this.escapeHtml(clientAppName)}
     </a>
   </p>
@@ -137,7 +137,7 @@ export class EmailSender {
       text: `Verify your backup email by clicking this link:\n\n${verifyUrl}\n\nThis link expires in 24 hours.\n\n--\n${pdsName} (${pdsDomain})`,
       html: `
 <p>Verify your backup email by clicking the link below:</p>
-<p style="margin: 20px 0;"><a href="${this.escapeHtml(verifyUrl)}" style="background-color: #0085ff; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none;">Verify Email</a></p>
+<p style="margin: 20px 0;"><a href="${this.escapeHtml(verifyUrl)}" style="background-color: #0f1828; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none;">Verify Email</a></p>
 <p style="color: #666; font-size: 14px;">This link expires in 24 hours.</p>
 <hr style="border: none; border-top: 1px solid #eee;"><p style="color: #999; font-size: 12px;">${this.escapeHtml(pdsName)} (${this.escapeHtml(pdsDomain)})</p>`,
     })

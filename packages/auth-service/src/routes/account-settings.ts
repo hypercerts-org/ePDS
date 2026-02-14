@@ -381,9 +381,9 @@ const SETTINGS_CSS = `
   .info { color: #666; font-size: 14px; line-height: 1.5; margin-bottom: 12px; }
   .inline-form { display: flex; gap: 8px; margin-top: 12px; }
   .inline-form input[type="email"] { flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
-  .btn-primary-sm { padding: 8px 16px; background: #0085ff; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; white-space: nowrap; }
-  .btn-primary-sm:hover { background: #006acc; }
-  .btn-secondary { color: #0085ff; background: none; border: none; font-size: 14px; cursor: pointer; text-decoration: underline; }
+  .btn-primary-sm { padding: 8px 16px; background: #0f1828; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; white-space: nowrap; }
+  .btn-primary-sm:hover { background: #1a2a40; }
+  .btn-secondary { color: #0f1828; background: none; border: none; font-size: 14px; cursor: pointer; text-decoration: underline; }
   .btn-danger { padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
   .btn-danger:hover { background: #c82333; }
   .btn-danger-sm { padding: 4px 12px; background: none; color: #dc3545; border: 1px solid #dc3545; border-radius: 4px; font-size: 12px; cursor: pointer; }

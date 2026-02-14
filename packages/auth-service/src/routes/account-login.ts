@@ -199,7 +199,7 @@ function renderLoginForm(opts: {
         <input type="email" id="email" name="email" required autofocus
                placeholder="you@example.com">
       </div>
-      <button type="submit" class="btn-primary">Sign in</button>
+      <button type="submit" class="btn-primary"><img src="/static/certified_brandmark_white.png" alt="" style="height: 18px; vertical-align: middle; margin-right: 10px;"><span style="vertical-align: middle;">Sign in with Certified</span></button>
     </form>
   </div>
 </body>
@@ -281,9 +281,9 @@ const CSS = `
   .field { margin-bottom: 20px; text-align: left; }
   .field label { display: block; font-size: 14px; font-weight: 500; color: #333; margin-bottom: 6px; }
   .field input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; outline: none; }
-  .field input:focus { border-color: #0085ff; }
-  .btn-primary { width: 100%; padding: 12px; background: #0085ff; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; }
-  .btn-primary:hover { background: #006acc; }
+  .field input:focus { border-color: #0f1828; }
+  .btn-primary { width: 100%; padding: 12px; background: #0f1828; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; }
+  .btn-primary:hover { background: #1a2a40; }
   .error { color: #dc3545; background: #fdf0f0; padding: 12px; border-radius: 8px; margin: 12px 0; }
   .info { color: #999; font-size: 14px; }
   .check-icon { font-size: 48px; margin-bottom: 16px; }

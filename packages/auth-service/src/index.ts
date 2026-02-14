@@ -1,6 +1,8 @@
 import { createLogger } from '@magic-pds/shared'
 import express from 'express'
 import cookieParser from 'cookie-parser'
+import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { AuthServiceContext, type AuthServiceConfig } from './context.js'
 import { csrfProtection } from './middleware/csrf.js'
 import { requestRateLimit } from './middleware/rate-limit.js'
@@ -25,6 +27,7 @@ export function createAuthService(config: AuthServiceConfig): { app: express.Exp
   app.use(express.urlencoded({ extended: true }))
   app.use(express.json())
   app.use(cookieParser())
+  app.use('/static', express.static(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public')))
   app.use(csrfProtection(config.csrfSecret))
   app.use(requestRateLimit({ windowMs: 60_000, maxRequests: 60 }))
 

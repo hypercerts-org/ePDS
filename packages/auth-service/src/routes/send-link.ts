@@ -220,5 +220,5 @@ const CSS = `
   .error { color: #dc3545; background: #fdf0f0; padding: 12px; border-radius: 8px; margin: 12px 0; text-align: left; }
   .info { color: #999; font-size: 14px; }
   .check-icon { font-size: 48px; margin-bottom: 16px; }
-  .btn-secondary { display: inline-block; margin-top: 8px; color: #0085ff; background: none; border: none; font-size: 14px; cursor: pointer; text-decoration: underline; }
+  .btn-secondary { display: inline-block; margin-top: 8px; color: #0f1828; background: none; border: none; font-size: 14px; cursor: pointer; text-decoration: underline; }
 `

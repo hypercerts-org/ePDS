@@ -102,8 +102,8 @@ function renderConsent(opts: {
     .account-info { background: #f0f7ff; border-radius: 8px; padding: 12px; margin-bottom: 24px; font-size: 14px; color: #0056b3; }
     .actions { display: flex; gap: 12px; }
     .btn { flex: 1; padding: 12px; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; }
-    .btn-approve { background: #0085ff; color: white; }
-    .btn-approve:hover { background: #006acc; }
+    .btn-approve { background: #0f1828; color: white; }
+    .btn-approve:hover { background: #1a2a40; }
     .btn-deny { background: #f0f0f0; color: #333; }
     .btn-deny:hover { background: #e0e0e0; }
   </style>
