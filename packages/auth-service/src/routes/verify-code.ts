@@ -1,7 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import type { AuthServiceContext } from '../context.js'
 import { createLogger } from '@magic-pds/shared'
-import { autoProvisionAccount } from '../lib/auto-provision.js'
 import { renderOtpForm } from './send-code.js'
 
 const logger = createLogger('auth:verify-code')
@@ -35,19 +34,12 @@ export function createVerifyCodeRouter(ctx: AuthServiceContext): Router {
       return
     }
 
-    // Check if account exists, auto-provision if not
+    // Check if account exists (for display purposes only)
+    // Account creation is handled by the PDS magic callback
     let did = ctx.db.getDidByEmail(result.email)
     if (!did) did = ctx.db.getDidByBackupEmail(result.email)
 
     const isNewAccount = !did
-
-    if (!did) {
-      did = await autoProvisionAccount(ctx, result.email) ?? undefined
-      if (!did) {
-        res.status(500).send('<p>Failed to create your account. Please try again.</p>')
-        return
-      }
-    }
 
     // Redirect to consent screen
     const consentUrl = `/auth/consent?request_uri=${encodeURIComponent(result.authRequestId)}&email=${encodeURIComponent(result.email)}&new=${isNewAccount ? '1' : '0'}${result.clientId ? '&client_id=' + encodeURIComponent(result.clientId) : ''}`
