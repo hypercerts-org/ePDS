@@ -102,11 +102,11 @@ export function renderOtpForm(opts: {
   const maskedEmail = maskEmail(opts.email)
   const b = opts.branding || {}
   const appName = b.client_name || 'Certified'
-  const brandColor = b.brand_color || '#0f1828'
-  const brandColorHover = b.brand_color ? adjustBrightness(b.brand_color, -15) : '#1a2a40'
-  const bgColor = b.background_color || '#f5f5f5'
+  const brandColor = b.brand_color || '#1A130F'
+  const brandColorHover = b.brand_color ? adjustBrightness(b.brand_color, -15) : '#2a231f'
+  const bgColor = b.background_color || '#F2EBE4'
   const logoHtml = b.logo_uri
-    ? `<img src="${escapeHtml(b.logo_uri)}" alt="${escapeHtml(appName)}" style="height: 36px; margin-bottom: 24px;">`
+    ? `<img src="${escapeHtml(b.logo_uri)}" alt="${escapeHtml(appName)}" style="height: 80px; margin-bottom: 24px;">`
     : ''
 
   return `<!DOCTYPE html>
@@ -119,14 +119,14 @@ export function renderOtpForm(opts: {
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: ${bgColor}; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
     .container { background: white; border-radius: 12px; padding: 40px; max-width: 420px; width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: center; }
-    h1 { font-size: 24px; margin-bottom: 8px; color: #111; }
+    h1 { font-size: 24px; margin-bottom: 8px; color: #1A130F; }
     .subtitle { color: #666; margin-bottom: 20px; font-size: 15px; line-height: 1.5; }
     .field { margin-bottom: 20px; }
     .otp-input { width: 100%; padding: 14px; border: 1px solid #ddd; border-radius: 8px; font-size: 28px; text-align: center; letter-spacing: 8px; font-family: 'SF Mono', Menlo, Consolas, monospace; outline: none; }
     .otp-input:focus { border-color: ${brandColor}; }
     .btn-primary { width: 100%; padding: 12px; background: ${brandColor}; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; }
     .btn-primary:hover { background: ${brandColorHover}; }
-    .btn-secondary { display: inline-block; color: ${brandColor}; background: none; border: none; font-size: 14px; cursor: pointer; text-decoration: underline; }
+    .btn-secondary { display: inline-block; color: #1A130F; background: none; border: none; font-size: 14px; cursor: pointer; text-decoration: underline; }
     .error { color: #dc3545; background: #fdf0f0; padding: 12px; border-radius: 8px; margin: 12px 0; }
   </style>
 </head>
