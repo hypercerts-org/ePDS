@@ -92,6 +92,22 @@ export function createAccountLoginRouter(ctx: AuthServiceContext): Router {
     if (!did) did = ctx.db.getDidByBackupEmail(result.email)
 
     if (!did) {
+      // Check PDS (source of truth) for existing account
+      try {
+        const pdsUrl = process.env.PDS_INTERNAL_URL || ctx.config.pdsPublicUrl
+        const checkRes = await fetch(`${pdsUrl}/_magic/check-email?email=${encodeURIComponent(result.email)}`, { signal: AbortSignal.timeout(3000) })
+        if (checkRes.ok) {
+          const data = await checkRes.json() as { exists: boolean; did?: string }
+          if (data.exists && data.did) {
+            did = data.did
+            // Sync the mapping to auth DB
+            ctx.db.setAccountEmail(result.email, did)
+          }
+        }
+      } catch { /* fall through to auto-provision */ }
+    }
+
+    if (!did) {
       did = await autoProvisionAccount(ctx, result.email) ?? undefined
       if (!did) {
         res.status(500).send('<p>Failed to create your account. Please try again.</p>')

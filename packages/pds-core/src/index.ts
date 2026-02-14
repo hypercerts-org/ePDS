@@ -270,7 +270,7 @@ async function main() {
     }
     let did = magicDb.getDidByEmail(email)
     if (!did) did = magicDb.getDidByBackupEmail(email)
-    res.json({ exists: !!did })
+    res.json({ exists: !!did, did: did || undefined })
   })
 
   pds.app.get('/health', (_req, res) => {
