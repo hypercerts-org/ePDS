@@ -1,8 +1,7 @@
 {
     email admin@{$PDS_HOSTNAME:pds.example}
     on_demand_tls {
-        interval 1m
-        burst 10
+        permission http://localhost:3000/xrpc/_health
     }
 }
 
