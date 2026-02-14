@@ -1,14 +1,18 @@
 {
     email admin@{$PDS_HOSTNAME:pds.example}
+    on_demand_tls {
+        interval 1m
+        burst 10
+    }
 }
 
-# PDS API + handle resolution (wildcard via DNS-01)
-{$PDS_HOSTNAME:pds.example}, *.{$PDS_HOSTNAME:pds.example} {
+# PDS API + handle subdomains (on-demand TLS for handle resolution)
+:443 {
     tls {
-        dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+        on_demand
     }
 
-    # Auth service gets its own handling
+    # Auth service
     @auth host auth.{$PDS_HOSTNAME:pds.example}
     handle @auth {
         reverse_proxy {$AUTH_UPSTREAM:auth:3001}
