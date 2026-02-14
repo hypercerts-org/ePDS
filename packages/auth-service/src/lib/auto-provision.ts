@@ -15,8 +15,8 @@ export async function autoProvisionAccount(ctx: AuthServiceContext, email: strin
   // Use internal Docker URL to avoid going through Caddy
   const pdsUrl = process.env.PDS_INTERNAL_URL || ctx.config.pdsPublicUrl
 
-  const localPart = (email.split('@')[0]?.replace(/[^a-zA-Z0-9]/g, '') || 'user').slice(0, 12)
-  const suffix = crypto.randomBytes(4).toString('hex')
+  const localPart = (email.split('@')[0]?.replace(/[^a-zA-Z0-9]/g, '') || 'user').slice(0, 11).toLowerCase()
+  const suffix = crypto.randomBytes(3).toString('hex')
   const handle = `${localPart}-${suffix}.${ctx.config.pdsHostname}`
 
   const password = crypto.randomBytes(32).toString('hex')
