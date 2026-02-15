@@ -1,7 +1,10 @@
 import { Router, type Request, type Response } from 'express'
 import type { AuthServiceContext } from '../context.js'
-import { resolveClientName } from '../lib/client-metadata.js'
-import { escapeHtml } from '@magic-pds/shared'
+import { resolveClientName, resolveClientMetadata } from '../lib/client-metadata.js'
+import { escapeHtml, createLogger } from '@magic-pds/shared'
+import { renderOtpForm } from './send-code.js'
+
+const logger = createLogger('auth:authorize')
 
 /**
  * GET /oauth/authorize
@@ -23,14 +26,71 @@ export function createAuthorizeRouter(ctx: AuthServiceContext): Router {
       return
     }
 
-    // If login_hint contains an email, skip the email form and auto-submit to send-code
+    // If login_hint contains an email, send OTP directly and show code entry form
     if (loginHint && loginHint.includes('@')) {
-      res.type('html').send(renderAutoSubmit({
-        email: loginHint,
-        requestUri,
-        clientId: clientId || '',
-        csrfToken: res.locals.csrfToken,
-      }))
+      const email = loginHint.trim().toLowerCase()
+      const cid = clientId || ''
+      const clientMeta = cid ? await resolveClientMetadata(cid) : {}
+
+      const ip = req.ip || req.socket.remoteAddress || null
+      const rateLimitError = ctx.rateLimiter.check(email, ip)
+      if (rateLimitError) {
+        res.send(renderOtpForm({
+          email,
+          sessionId: '',
+          requestUri,
+          clientId: cid,
+          csrfToken: res.locals.csrfToken,
+          error: 'Too many requests. Please wait a moment.',
+          branding: clientMeta,
+        }))
+        return
+      }
+
+      try {
+        const deviceInfo = req.headers['user-agent'] || null
+        const { code, sessionId } = ctx.tokenService.create({
+          email,
+          authRequestId: requestUri,
+          clientId: cid || null,
+          deviceInfo,
+        })
+
+        const isNewUser = !ctx.db.hasClientLogin(email, cid || 'account-settings')
+        const clientName = clientMeta.client_name || 'your application'
+
+        await ctx.emailSender.sendOtpCode({
+          to: email,
+          code,
+          clientAppName: clientName,
+          clientId: cid || undefined,
+          pdsName: ctx.config.hostname,
+          pdsDomain: ctx.config.pdsHostname,
+          isNewUser,
+        })
+
+        ctx.rateLimiter.record(email, ip)
+
+        res.send(renderOtpForm({
+          email,
+          sessionId,
+          requestUri,
+          clientId: cid,
+          csrfToken: res.locals.csrfToken,
+          branding: clientMeta,
+        }))
+      } catch (err) {
+        logger.error({ err }, 'Failed to send OTP via login_hint')
+        res.status(500).send(renderOtpForm({
+          email,
+          sessionId: '',
+          requestUri,
+          clientId: cid,
+          csrfToken: res.locals.csrfToken,
+          error: 'Failed to send code. Please try again.',
+          branding: clientMeta,
+        }))
+      }
       return
     }
 
@@ -48,39 +108,6 @@ export function createAuthorizeRouter(ctx: AuthServiceContext): Router {
   })
 
   return router
-}
-
-function renderAutoSubmit(opts: {
-  email: string
-  requestUri: string
-  clientId: string
-  csrfToken: string
-}): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Signing in...</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-    .container { text-align: center; color: #666; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <p>Sending verification code...</p>
-  </div>
-  <form id="autoForm" method="POST" action="/auth/send-code">
-    <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
-    <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
-    <input type="hidden" name="client_id" value="${escapeHtml(opts.clientId)}">
-    <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
-    <input type="hidden" name="is_signup" value="0">
-  </form>
-  <script>document.getElementById('autoForm').submit();</script>
-</body>
-</html>`
 }
 
 function renderEmailForm(opts: {
