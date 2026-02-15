@@ -3,6 +3,7 @@ import type { AuthServiceContext } from '../context.js'
 import { createLogger } from '@magic-pds/shared'
 import { requireAuth, type AuthenticatedRequest } from '../middleware/account-auth.js'
 import { hashToken, generateMagicLinkToken } from '@magic-pds/shared'
+import { escapeHtml } from '@magic-pds/shared'
 
 const logger = createLogger('auth:account-settings')
 
@@ -73,9 +74,39 @@ export function createAccountSettingsRouter(ctx: AuthServiceContext): Router {
     }
   })
 
-  // GET /account/backup-email/verify?token=...
+  // GET /account/backup-email/verify?token=... - show confirmation form
   router.get('/account/backup-email/verify', (req: AuthenticatedRequest, res: Response) => {
     const token = req.query.token as string | undefined
+    if (!token) {
+      res.status(400).send('<p>Missing verification token.</p>')
+      return
+    }
+
+    res.type('html').send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Verify Backup Email</title>
+  <style>${SETTINGS_CSS}</style>
+</head>
+<body>
+  <div class="container" style="max-width: 420px; text-align: center;">
+    <h1>Verify Backup Email</h1>
+    <p style="color: #666; margin: 16px 0;">Click the button below to confirm your backup email.</p>
+    <form method="POST" action="/account/backup-email/verify">
+      <input type="hidden" name="csrf" value="${escapeHtml(res.locals.csrfToken)}">
+      <input type="hidden" name="token" value="${escapeHtml(token)}">
+      <button type="submit" class="btn-primary-sm" style="padding: 12px 24px; font-size: 16px;">Confirm verification</button>
+    </form>
+  </div>
+</body>
+</html>`)
+  })
+
+  // POST /account/backup-email/verify - perform actual verification
+  router.post('/account/backup-email/verify', (req: AuthenticatedRequest, res: Response) => {
+    const token = (req.body.token as string || '').trim()
     if (!token) {
       res.status(400).send('<p>Missing verification token.</p>')
       return
@@ -361,9 +392,6 @@ function renderDeletedPage(): string {
 </html>`
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-}
 
 const SETTINGS_CSS = `
   * { box-sizing: border-box; margin: 0; padding: 0; }

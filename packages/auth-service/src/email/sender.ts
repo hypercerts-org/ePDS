@@ -3,6 +3,7 @@ import { createLogger } from '@magic-pds/shared'
 import type { Transporter } from 'nodemailer'
 import type SMTPTransport from 'nodemailer/lib/smtp-transport'
 import type { EmailConfig } from '@magic-pds/shared'
+import { escapeHtml } from '@magic-pds/shared'
 import { resolveClientMetadata } from '../lib/client-metadata.js'
 
 const logger = createLogger('auth:email')
@@ -11,9 +12,26 @@ const logger = createLogger('auth:email')
 const templateCache = new Map<string, { html: string; fetchedAt: number }>()
 const TEMPLATE_CACHE_TTL = 10 * 60 * 1000 // 10 minutes
 
+const MAX_TEMPLATE_SIZE = 100_000 // 100KB
+
 async function fetchTemplate(uri: string): Promise<string | null> {
   // Only allow HTTPS
   if (!uri.startsWith('https://')) return null
+
+  // Optional domain allowlist via env var (comma-separated)
+  const allowedDomains = process.env.EMAIL_TEMPLATE_ALLOWED_DOMAINS
+  if (allowedDomains) {
+    try {
+      const domains = allowedDomains.split(',').map(d => d.trim())
+      const hostname = new URL(uri).hostname
+      if (!domains.includes(hostname)) {
+        logger.warn({ uri, hostname }, 'Email template domain not in allowlist, ignoring')
+        return null
+      }
+    } catch {
+      return null
+    }
+  }
 
   const cached = templateCache.get(uri)
   if (cached && Date.now() - cached.fetchedAt < TEMPLATE_CACHE_TTL) {
@@ -22,7 +40,20 @@ async function fetchTemplate(uri: string): Promise<string | null> {
   try {
     const res = await fetch(uri, { signal: AbortSignal.timeout(5000) })
     if (!res.ok) return null
+
+    // Reject oversized responses
+    const contentLength = res.headers.get('content-length')
+    if (contentLength && parseInt(contentLength, 10) > MAX_TEMPLATE_SIZE) {
+      logger.warn({ uri, contentLength }, 'Email template too large, ignoring')
+      return null
+    }
+
     const html = await res.text()
+    if (html.length > MAX_TEMPLATE_SIZE) {
+      logger.warn({ uri, size: html.length }, 'Email template too large, ignoring')
+      return null
+    }
+
     // Basic validation: must contain {{code}} placeholder
     if (!html.includes('{{code}}')) {
       logger.warn({ uri }, 'Email template missing {{code}} placeholder, ignoring')
@@ -318,10 +349,3 @@ export class EmailSender {
   }
 }
 
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}

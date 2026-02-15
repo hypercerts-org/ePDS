@@ -21,3 +21,4 @@ export type {
 } from './types.js'
 export { DEFAULT_RATE_LIMITS } from './types.js'
 export { createLogger } from './logger.js'
+export { escapeHtml, maskEmail } from './html.js'

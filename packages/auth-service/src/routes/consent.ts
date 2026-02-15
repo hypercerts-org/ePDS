@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express'
 import type { AuthServiceContext } from '../context.js'
 import { resolveClientName } from '../lib/client-metadata.js'
+import { escapeHtml } from '@magic-pds/shared'
 
 /**
  * GET /auth/consent
@@ -139,6 +140,3 @@ function renderConsent(opts: {
 </html>`
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-}
