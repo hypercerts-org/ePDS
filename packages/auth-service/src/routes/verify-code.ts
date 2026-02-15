@@ -39,10 +39,19 @@ export function createVerifyCodeRouter(ctx: AuthServiceContext): Router {
     if (!did) did = ctx.db.getDidByBackupEmail(result.email)
     const isNewAccount = !did
 
+    // Existing user + first time on this client: show consent screen
+    const needsConsent = !isNewAccount && clientId && !ctx.db.hasClientLogin(result.email, clientId)
+
     // Record this client login (for per-client welcome vs sign-in emails)
     ctx.db.recordClientLogin(result.email, clientId || 'account-settings')
 
-    // Skip consent — OTP verification is sufficient confirmation.
+    if (needsConsent) {
+      const consentUrl = `/auth/consent?request_uri=${encodeURIComponent(result.authRequestId)}&email=${encodeURIComponent(result.email)}&new=0&client_id=${encodeURIComponent(clientId)}`
+      res.redirect(303, consentUrl)
+      return
+    }
+
+    // New user: skip consent — account creation implies consent.
     // Account creation (if new) is handled by the PDS magic callback.
     const params = new URLSearchParams({
       request_uri: result.authRequestId,
