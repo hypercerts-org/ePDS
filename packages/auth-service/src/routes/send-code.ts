@@ -127,6 +127,7 @@ export function renderOtpForm(opts: {
     .otp-input:focus { border-color: ${brandColor}; }
     .btn-primary { width: 100%; padding: 12px; background: #1A130F; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; }
     .btn-primary:hover { background: #2a231f; }
+    .btn-primary:disabled { opacity: 0.7; cursor: not-allowed; }
     .btn-secondary { display: inline-block; color: #1A130F; background: none; border: none; font-size: 14px; cursor: pointer; text-decoration: underline; }
     .error { color: #dc3545; background: #fdf0f0; padding: 12px; border-radius: 8px; margin: 12px 0; }
   </style>
@@ -158,6 +159,13 @@ export function renderOtpForm(opts: {
       <button type="submit" class="btn-secondary">Resend code</button>
     </form>
   </div>
+  <script>
+    document.querySelector("form[action=\"/auth/verify-code\"]").addEventListener("submit", function() {
+      var btn = this.querySelector("button[type=submit]");
+      btn.disabled = true;
+      btn.textContent = "Verifying...";
+    });
+  </script>
 </body>
 </html>`
 }
