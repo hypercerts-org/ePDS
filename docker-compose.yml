@@ -30,7 +30,7 @@ services:
     environment:
       - AUTH_PORT=3001
     volumes:
-      - auth-data:/data
+      - pds-data:/data  # shared with PDS for single magic-pds.sqlite
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/health"]
@@ -67,6 +67,5 @@ services:
 
 volumes:
   pds-data:
-  auth-data:
   caddy-data:
   caddy-config:
