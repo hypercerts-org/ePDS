@@ -160,10 +160,10 @@ export function renderOtpForm(opts: {
     </form>
   </div>
   <script>
-    document.querySelector("form[action=\"/auth/verify-code\"]").addEventListener("submit", function() {
-      var btn = this.querySelector("button[type=submit]");
+    document.querySelector('form[action="/auth/verify-code"]').addEventListener('submit', function() {
+      var btn = this.querySelector('button[type=submit]');
       btn.disabled = true;
-      btn.textContent = "Verifying...";
+      btn.textContent = 'Verifying...';
     });
   </script>
 </body>
