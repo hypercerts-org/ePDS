@@ -2,8 +2,7 @@ services:
   pds:
     build:
       context: .
-      dockerfile: Dockerfile
-      target: pds-core
+      dockerfile: Dockerfile.pds
     ports:
       - "${PDS_PORT:-3000}:3000"
     env_file: .env
@@ -22,8 +21,7 @@ services:
   auth:
     build:
       context: .
-      dockerfile: Dockerfile
-      target: auth-service
+      dockerfile: Dockerfile.auth
     ports:
       - "${AUTH_PORT:-3001}:3001"
     env_file: .env
