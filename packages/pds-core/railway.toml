@@ -1,0 +1,14 @@
+$schema = "https://railway.com/railway.schema.json"
+
+[build]
+builder = "DOCKERFILE"
+# Path is relative to the repository root, not this package directory.
+# Railway does not support --target for multi-stage builds, so we use a
+# dedicated Dockerfile that produces only the pds-core image.
+dockerfilePath = "Dockerfile.pds"
+watchPatterns = ["packages/pds-core/**", "packages/shared/**", "Dockerfile.pds"]
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ALWAYS"

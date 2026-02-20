@@ -1,0 +1,14 @@
+$schema = "https://railway.com/railway.schema.json"
+
+[build]
+builder = "DOCKERFILE"
+# Path is relative to the repository root, not this package directory.
+# Railway does not support --target for multi-stage builds, so we use a
+# dedicated Dockerfile that produces only the auth-service image.
+dockerfilePath = "Dockerfile.auth"
+watchPatterns = ["packages/auth-service/**", "packages/shared/**", "Dockerfile.auth"]
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ALWAYS"
