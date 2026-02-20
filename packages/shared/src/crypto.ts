@@ -31,10 +31,10 @@ export function timingSafeEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b))
 }
 
-/** Generate a 6-digit OTP code. Returns the code and its SHA-256 hash. */
+/** Generate an 8-digit OTP code. Returns the code and its SHA-256 hash. */
 export function generateOtpCode(): { code: string; codeHash: string } {
-  const num = crypto.randomInt(0, 1_000_000)
-  const code = num.toString().padStart(6, '0')
+  const num = crypto.randomInt(0, 100_000_000)
+  const code = num.toString().padStart(8, '0')
   const codeHash = hashToken(code)
   return { code, codeHash }
 }
@@ -42,6 +42,80 @@ export function generateOtpCode(): { code: string; codeHash: string } {
 /** Generate a CSRF token. */
 export function generateCsrfToken(): string {
   return crypto.randomBytes(32).toString('hex')
+}
+
+export interface CallbackParams {
+  request_uri: string
+  email: string
+  approved: string
+  new_account: string
+}
+
+/**
+ * Sign the magic-callback redirect parameters with HMAC-SHA256.
+ * Returns the hex signature and the Unix timestamp (seconds) used.
+ *
+ * Payload: request_uri, email, approved, new_account, and ts joined by newlines.
+ * A timestamp is included so signatures expire (see verifyCallback).
+ */
+export function signCallback(
+  params: CallbackParams,
+  secret: string,
+): { sig: string; ts: string } {
+  const ts = Math.floor(Date.now() / 1000).toString()
+  const payload = [
+    params.request_uri,
+    params.email,
+    params.approved,
+    params.new_account,
+    ts,
+  ].join('\n')
+  const sig = crypto
+    .createHmac('sha256', secret)
+    .update(payload)
+    .digest('hex')
+  return { sig, ts }
+}
+
+const CALLBACK_MAX_AGE_SECONDS = 5 * 60 // 5 minutes
+
+/**
+ * Verify a signed magic-callback redirect URL.
+ * Returns true only when the signature is valid and the timestamp is fresh.
+ * Uses timingSafeEqual to avoid timing side-channels.
+ */
+export function verifyCallback(
+  params: CallbackParams,
+  ts: string,
+  sig: string,
+  secret: string,
+): boolean {
+  const tsNum = parseInt(ts, 10)
+  if (isNaN(tsNum)) return false
+
+  const now = Math.floor(Date.now() / 1000)
+  const age = now - tsNum
+  if (age < 0 || age > CALLBACK_MAX_AGE_SECONDS) return false
+
+  const payload = [
+    params.request_uri,
+    params.email,
+    params.approved,
+    params.new_account,
+    ts,
+  ].join('\n')
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(payload)
+    .digest('hex')
+
+  // Both are hex-encoded HMAC-SHA256 (always 64 chars / 32 bytes).
+  // Guard against wrong-length input to keep timingSafeEqual happy.
+  if (sig.length !== expected.length) return false
+  return crypto.timingSafeEqual(
+    Buffer.from(expected, 'hex'),
+    Buffer.from(sig, 'hex'),
+  )
 }
 
 /**

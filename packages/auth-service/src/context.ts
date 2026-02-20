@@ -9,6 +9,8 @@ export interface AuthServiceConfig {
   port: number
   sessionSecret: string
   csrfSecret: string
+  /** Shared HMAC-SHA256 secret for signing magic-callback redirect URLs. */
+  magicCallbackSecret: string
   pdsHostname: string
   pdsPublicUrl: string
   magicLink: {
@@ -54,6 +56,7 @@ export class AuthServiceContext {
         logger.debug({ sessions }, 'Cleaned up expired account sessions')
       }
       this.db.cleanupOldRateLimitEntries()
+      this.db.cleanupOldOtpFailures()
     }, 5 * 60 * 1000)
   }
 

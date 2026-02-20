@@ -12,7 +12,10 @@ export {
   generateCsrfToken,
   generateOtpCode,
   generateRandomHandle,
+  signCallback,
+  verifyCallback,
 } from './crypto.js'
+export type { CallbackParams } from './crypto.js'
 export type {
   MagicLinkConfig,
   EmailConfig,

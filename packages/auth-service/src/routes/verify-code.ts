@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import type { AuthServiceContext } from '../context.js'
-import { createLogger } from '@magic-pds/shared'
+import { createLogger, signCallback } from '@magic-pds/shared'
 import { renderOtpForm } from './send-code.js'
 
 const logger = createLogger('auth:verify-code')
@@ -53,12 +53,14 @@ export function createVerifyCodeRouter(ctx: AuthServiceContext): Router {
 
     // New user: skip consent — account creation implies consent.
     // Account creation (if new) is handled by the PDS magic callback.
-    const params = new URLSearchParams({
+    const callbackParams = {
       request_uri: result.authRequestId,
       email: result.email,
       approved: '1',
       new_account: isNewAccount ? '1' : '0',
-    })
+    }
+    const { sig, ts } = signCallback(callbackParams, ctx.config.magicCallbackSecret)
+    const params = new URLSearchParams({ ...callbackParams, ts, sig })
     res.redirect(303, `${ctx.config.pdsPublicUrl}/oauth/magic-callback?${params.toString()}`)
   })
 

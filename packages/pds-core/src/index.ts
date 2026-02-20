@@ -19,7 +19,7 @@ dotenv.config()
 import * as crypto from 'node:crypto'
 import * as http from 'node:http'
 import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
-import { MagicPdsDb, generateRandomHandle, createLogger } from '@magic-pds/shared'
+import { MagicPdsDb, generateRandomHandle, createLogger, verifyCallback } from '@magic-pds/shared'
 
 const logger = createLogger('pds-core')
 
@@ -52,6 +52,8 @@ async function main() {
   // Called by the auth service after magic link verification + user consent.
   // Steps: load device -> resolve account -> issue code -> redirect to client
 
+  const magicCallbackSecret = process.env.MAGIC_CALLBACK_SECRET || 'dev-callback-secret-change-me'
+
   pds.app.get('/oauth/magic-callback', async (req, res) => {
     // We use `as any` casts for branded OAuth types (RequestUri, Code, etc.)
     // since these internal types aren't cleanly exported from @atproto/oauth-provider.
@@ -60,9 +62,40 @@ async function main() {
     const email = (req.query.email as string || '').toLowerCase()
     const approved = req.query.approved === '1'
     const isNewAccount = req.query.new_account === '1'
+    const ts = req.query.ts as string
+    const sig = req.query.sig as string
 
     if (!requestUri || !email || !approved) {
       res.status(400).json({ error: 'Missing required parameters' })
+      return
+    }
+
+    // Verify HMAC-SHA256 signature before performing any account operations.
+    // This prevents an attacker with a valid request_uri from forging a callback
+    // with an arbitrary victim email.
+    if (!ts || !sig) {
+      res.status(403).json({ error: 'Missing signature' })
+      return
+    }
+
+    const approvedStr = req.query.approved as string
+    const newAccountStr = req.query.new_account as string
+    const signatureValid = verifyCallback(
+      { request_uri: requestUri, email, approved: approvedStr, new_account: newAccountStr },
+      ts,
+      sig,
+      magicCallbackSecret,
+    )
+
+    if (!signatureValid) {
+      // Distinguish expired from invalid to help with clock-skew debugging
+      const tsNum = parseInt(ts, 10)
+      const age = Math.floor(Date.now() / 1000) - tsNum
+      if (!isNaN(tsNum) && age > 5 * 60) {
+        res.status(400).json({ error: 'Callback signature expired' })
+      } else {
+        res.status(403).json({ error: 'Invalid callback signature' })
+      }
       return
     }
 

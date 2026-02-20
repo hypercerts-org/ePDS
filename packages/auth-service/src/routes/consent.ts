@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express'
 import type { AuthServiceContext } from '../context.js'
 import { resolveClientName } from '../lib/client-metadata.js'
-import { escapeHtml } from '@magic-pds/shared'
+import { escapeHtml, signCallback } from '@magic-pds/shared'
 
 /**
  * GET /auth/consent
@@ -59,14 +59,16 @@ export function createConsentRouter(ctx: AuthServiceContext): Router {
     // 2. Signal to the PDS oauth-provider that the user is authenticated
     // 3. The PDS will issue the authorization code and redirect back to the client
 
-    // For now, redirect to the PDS with the auth info
-    // The PDS core will handle the actual OAuth code issuance
-    const params = new URLSearchParams({
+    // Redirect to the PDS with HMAC-signed auth info so pds-core can verify
+    // the redirect was produced by a legitimate auth-service flow.
+    const callbackParams = {
       request_uri: requestUri,
       email,
       approved: '1',
       new_account: isNew ? '1' : '0',
-    })
+    }
+    const { sig, ts } = signCallback(callbackParams, ctx.config.magicCallbackSecret)
+    const params = new URLSearchParams({ ...callbackParams, ts, sig })
 
     res.redirect(303, `${ctx.config.pdsPublicUrl}/oauth/magic-callback?${params.toString()}`)
   })

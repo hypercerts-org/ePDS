@@ -104,6 +104,7 @@ function main() {
     port: parseInt(process.env.AUTH_PORT || '3001', 10),
     sessionSecret: process.env.AUTH_SESSION_SECRET || 'dev-session-secret-change-me',
     csrfSecret: process.env.AUTH_CSRF_SECRET || 'dev-csrf-secret-change-me',
+    magicCallbackSecret: process.env.MAGIC_CALLBACK_SECRET || 'dev-callback-secret-change-me',
     pdsHostname: process.env.PDS_HOSTNAME || 'localhost',
     pdsPublicUrl: process.env.PDS_PUBLIC_URL || 'http://localhost:3000',
     magicLink: {
