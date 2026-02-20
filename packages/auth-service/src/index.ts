@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 import { toNodeHandler } from 'better-auth/node'
 import { AuthServiceContext, type AuthServiceConfig } from './context.js'
-import { createBetterAuth } from './better-auth.js'
+import { createBetterAuth, runBetterAuthMigrations } from './better-auth.js'
 import { csrfProtection } from './middleware/csrf.js'
 import { requestRateLimit } from './middleware/rate-limit.js'
 import { createLoginPageRouter } from './routes/login-page.js'
@@ -100,7 +100,7 @@ export function createAuthService(config: AuthServiceConfig): { app: express.Exp
 }
 
 // Entry point when run directly
-function main() {
+async function main() {
   const config: AuthServiceConfig = {
     hostname: process.env.AUTH_HOSTNAME || 'auth.localhost',
     port: parseInt(process.env.AUTH_PORT || '3001', 10),
@@ -120,6 +120,8 @@ function main() {
     },
     dbLocation: process.env.DB_LOCATION || './data/magic-pds.sqlite',
   }
+
+  await runBetterAuthMigrations(config.dbLocation, config.hostname)
 
   const { app, ctx } = createAuthService(config)
 

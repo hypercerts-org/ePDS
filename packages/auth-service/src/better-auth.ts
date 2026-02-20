@@ -11,6 +11,7 @@
  */
 import Database from 'better-sqlite3'
 import { betterAuth } from 'better-auth'
+import { getMigrations } from 'better-auth/db'
 import { emailOTP } from 'better-auth/plugins'
 import { createLogger } from '@magic-pds/shared'
 import type { MagicPdsDb } from '@magic-pds/shared'
@@ -55,6 +56,38 @@ export let socialProviders: Record<string, { clientId: string; clientSecret: str
  * The `db` parameter is used to look up `auth_flow` rows during OTP sending
  * so that client branding can be applied based on the active OAuth flow.
  */
+/**
+ * Run better-auth migrations at startup — creates user, session, account,
+ * and verification tables if they don't exist yet. Safe to call on every
+ * startup (no-ops when tables are already present).
+ */
+export async function runBetterAuthMigrations(dbLocation: string, authHostname: string): Promise<void> {
+  const betterAuthDb = new Database(dbLocation)
+  const tempAuth = betterAuth({
+    database: betterAuthDb,
+    baseURL: `https://${authHostname}`,
+    basePath: '/api/auth',
+    plugins: [
+      emailOTP({
+        otpLength: 8,
+        expiresIn: 600,
+        allowedAttempts: 5,
+        storeOTP: 'hashed',
+        async sendVerificationOTP() {},
+      }),
+    ],
+  })
+  const { toBeCreated, toBeAdded, runMigrations } = await getMigrations(tempAuth.options)
+  if (toBeCreated.length > 0 || toBeAdded.length > 0) {
+    logger.info({ toBeCreated: toBeCreated.map(t => t.table), toBeAdded: toBeAdded.map(t => t.table) }, 'Running better-auth migrations')
+    await runMigrations()
+    logger.info('better-auth migrations complete')
+  } else {
+    logger.info('better-auth schema up to date, no migrations needed')
+  }
+  betterAuthDb.close()
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createBetterAuth(emailSender: EmailSender, db: MagicPdsDb): any {
   const dbLocation = process.env.DB_LOCATION ?? './data/magic-pds.sqlite'
