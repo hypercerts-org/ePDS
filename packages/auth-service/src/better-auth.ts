@@ -12,7 +12,13 @@
 import Database from 'better-sqlite3'
 import { betterAuth } from 'better-auth'
 import { emailOTP } from 'better-auth/plugins'
+import { createLogger } from '@magic-pds/shared'
+import type { MagicPdsDb } from '@magic-pds/shared'
 import type { EmailSender } from './email/sender.js'
+
+const logger = createLogger('auth:better-auth')
+
+const AUTH_FLOW_COOKIE = 'magic_auth_flow'
 
 /**
  * Build the social providers config from env vars.
@@ -40,14 +46,17 @@ function buildSocialProviders(): Record<string, { clientId: string; clientSecret
 export let socialProviders: Record<string, { clientId: string; clientSecret: string }> = {}
 
 /**
- * Create a better-auth instance wired to the given EmailSender.
+ * Create a better-auth instance wired to the given EmailSender and MagicPdsDb.
  *
  * Called once during app startup from index.ts.
  * Returns `unknown` to avoid leaking the better-sqlite3 type into declaration files;
  * callers cast to the actual type via the `BetterAuthInstance` helper below.
+ *
+ * The `db` parameter is used to look up `auth_flow` rows during OTP sending
+ * so that client branding can be applied based on the active OAuth flow.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createBetterAuth(emailSender: EmailSender): any {
+export function createBetterAuth(emailSender: EmailSender, db: MagicPdsDb): any {
   const dbLocation = process.env.DB_LOCATION ?? './data/magic-pds.sqlite'
   const authHostname = process.env.AUTH_HOSTNAME ?? 'auth.localhost'
   const pdsName = process.env.SMTP_FROM_NAME ?? 'Magic PDS'
@@ -59,10 +68,10 @@ export function createBetterAuth(emailSender: EmailSender): any {
 
   socialProviders = buildSocialProviders()
 
-  const db = new Database(dbLocation)
+  const betterAuthDb = new Database(dbLocation)
 
   return betterAuth({
-    database: db,
+    database: betterAuthDb,
     baseURL: `https://${authHostname}`,
     basePath: '/api/auth',
 
@@ -80,25 +89,48 @@ export function createBetterAuth(emailSender: EmailSender): any {
         allowedAttempts: 5,
         storeOTP: 'hashed',
 
-        // Wire OTP sending to the existing EmailSender.
-        // Not awaited internally to avoid timing side-channels (fire and forget).
-        async sendVerificationOTP({ email, otp, type }) {
+        /**
+         * Wire OTP sending to the existing EmailSender.
+         *
+         * Resolves client branding by reading the magic_auth_flow cookie from
+         * the request context (if present) and looking up the auth_flow row to
+         * get the client_id. Falls back to the default PDS template when no
+         * client context is available (e.g. account settings login).
+         *
+         * Not awaited to avoid timing side-channels (fire and forget).
+         */
+        async sendVerificationOTP({ email, otp, type }, ctx) {
           const isNewUser = type === 'sign-in'
+
+          // Try to resolve client_id from the active auth_flow via cookie
+          let clientId: string | undefined
+          try {
+            const flowId = ctx?.getCookie(AUTH_FLOW_COOKIE) ?? null
+            if (flowId) {
+              const flow = db.getAuthFlow(flowId)
+              if (flow?.clientId) {
+                clientId = flow.clientId
+              }
+            }
+          } catch (err) {
+            // Non-fatal: cookie or DB lookup failure just means no branding
+            logger.warn({ err, email }, 'Failed to resolve auth_flow for client branding')
+          }
+
           emailSender.sendOtpCode({
             to: email,
             code: otp,
             clientAppName: pdsName,
+            clientId,
             pdsName,
             pdsDomain,
             isNewUser,
           }).catch((err: unknown) => {
             // Log and swallow — caller does not await this
-            console.error({ err, email, type }, 'better-auth: failed to send OTP email')
+            logger.error({ err, email, type }, 'better-auth: failed to send OTP email')
           })
         },
       }),
     ],
   })
 }
-
-

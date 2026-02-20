@@ -24,7 +24,7 @@ export function createAuthService(config: AuthServiceConfig): { app: express.Exp
 
   // Mount better-auth BEFORE express.json() so it can parse its own request bodies.
   // All better-auth endpoints live under /api/auth/*.
-  const betterAuthInstance = createBetterAuth(ctx.emailSender)
+  const betterAuthInstance = createBetterAuth(ctx.emailSender, ctx.db)
   app.all('/api/auth/*', toNodeHandler(betterAuthInstance))
 
   // Middleware
