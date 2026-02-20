@@ -36,8 +36,6 @@ function makeMockContext(db: MagicPdsDb): AuthServiceContext {
   return {
     db,
     config,
-    tokenService: null as any,
-    rateLimiter: null as any,
     emailSender: null as any,
     destroy: () => db.close(),
   }

@@ -7,9 +7,7 @@ import { AuthServiceContext, type AuthServiceConfig } from './context.js'
 import { createBetterAuth } from './better-auth.js'
 import { csrfProtection } from './middleware/csrf.js'
 import { requestRateLimit } from './middleware/rate-limit.js'
-import { createAuthorizeRouter } from './routes/authorize.js'
-import { createSendCodeRouter } from './routes/send-code.js'
-import { createVerifyCodeRouter } from './routes/verify-code.js'
+import { createLoginPageRouter } from './routes/login-page.js'
 import { createConsentRouter } from './routes/consent.js'
 import { createRecoveryRouter } from './routes/recovery.js'
 import { createAccountLoginRouter } from './routes/account-login.js'
@@ -66,16 +64,13 @@ export function createAuthService(config: AuthServiceConfig): { app: express.Exp
   })
 
   // Routes
-  app.use(createAuthorizeRouter(ctx))
-  app.use(createSendCodeRouter(ctx))
-  app.use(createVerifyCodeRouter(ctx))
+  app.use(createLoginPageRouter(ctx))
   app.use(createConsentRouter(ctx))
-  app.use(createRecoveryRouter(ctx))
+  app.use(createRecoveryRouter(ctx, betterAuthInstance))
   app.use(createAccountLoginRouter(betterAuthInstance))
   app.use(createAccountSettingsRouter(ctx, betterAuthInstance))
   app.use(createCompleteRouter(ctx, betterAuthInstance))
 
-  // Health check
   // Metrics endpoint (protect with admin auth in production)
   app.get('/metrics', (req, res) => {
     const adminPassword = process.env.PDS_ADMIN_PASSWORD
@@ -112,10 +107,6 @@ function main() {
     magicCallbackSecret: process.env.MAGIC_CALLBACK_SECRET || 'dev-callback-secret-change-me',
     pdsHostname: process.env.PDS_HOSTNAME || 'localhost',
     pdsPublicUrl: process.env.PDS_PUBLIC_URL || 'http://localhost:3000',
-    magicLink: {
-      expiryMinutes: parseInt(process.env.MAGIC_LINK_EXPIRY_MINUTES || '10', 10),
-      maxAttemptsPerToken: 5,
-    },
     email: {
       provider: (process.env.EMAIL_PROVIDER || 'smtp') as 'smtp',
       smtpHost: process.env.SMTP_HOST || 'localhost',

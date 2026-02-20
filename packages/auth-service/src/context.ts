@@ -1,7 +1,5 @@
 import { createLogger } from '@magic-pds/shared'
 import { MagicPdsDb } from '@magic-pds/shared'
-import { MagicLinkTokenService } from './magic-link/token.js'
-import { RateLimiter } from './magic-link/rate-limit.js'
 import { EmailSender } from './email/sender.js'
 
 export interface AuthServiceConfig {
@@ -13,10 +11,6 @@ export interface AuthServiceConfig {
   magicCallbackSecret: string
   pdsHostname: string
   pdsPublicUrl: string
-  magicLink: {
-    expiryMinutes: number
-    maxAttemptsPerToken: number
-  }
   email: {
     provider: 'smtp' | 'sendgrid' | 'ses' | 'postmark'
     smtpHost?: string
@@ -33,24 +27,16 @@ const logger = createLogger('auth-service')
 
 export class AuthServiceContext {
   public readonly db: MagicPdsDb
-  public readonly tokenService: MagicLinkTokenService
-  public readonly rateLimiter: RateLimiter
   public readonly emailSender: EmailSender
   public readonly config: AuthServiceConfig
 
   constructor(config: AuthServiceConfig) {
     this.config = config
     this.db = new MagicPdsDb(config.dbLocation)
-    this.tokenService = new MagicLinkTokenService(this.db, config.magicLink)
-    this.rateLimiter = new RateLimiter(this.db)
     this.emailSender = new EmailSender(config.email)
 
     // Cleanup expired tokens every 5 minutes
     setInterval(() => {
-      const cleaned = this.tokenService.cleanup()
-      if (cleaned > 0) {
-        logger.debug({ cleaned }, 'Cleaned up expired magic link tokens')
-      }
       const flows = this.db.cleanupExpiredAuthFlows()
       if (flows > 0) {
         logger.debug({ flows }, 'Cleaned up expired auth flows')

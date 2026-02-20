@@ -1,3 +1,19 @@
+/**
+ * Account recovery via backup email.
+ *
+ * Flow:
+ *   1. User enters their backup email address
+ *   2. We look up the DID via backup_email table (auth-service-owned data)
+ *   3. If found, send OTP to backup email via better-auth emailOTP plugin
+ *   4. User enters OTP; we verify via better-auth
+ *   5. Redirect to /auth/complete to complete the AT Protocol flow
+ *
+ * This follows the same bridge pattern as the main login flow:
+ *   better-auth session → /auth/complete → HMAC-signed magic-callback
+ *
+ * Note: recovery uses the backup email as the verified identity. The auth_flow
+ * table threads request_uri through the flow via magic_auth_flow cookie.
+ */
 import { Router, type Request, type Response } from 'express'
 import type { AuthServiceContext } from '../context.js'
 import { createLogger } from '@magic-pds/shared'
@@ -5,7 +21,9 @@ import { escapeHtml, maskEmail } from '@magic-pds/shared'
 
 const logger = createLogger('auth:recovery')
 
-export function createRecoveryRouter(ctx: AuthServiceContext): Router {
+const AUTH_FLOW_COOKIE = 'magic_auth_flow'
+
+export function createRecoveryRouter(ctx: AuthServiceContext, auth: any): Router {
   const router = Router()
 
   router.get('/auth/recover', (req: Request, res: Response) => {
@@ -44,40 +62,39 @@ export function createRecoveryRouter(ctx: AuthServiceContext): Router {
       return
     }
 
-    const ip = req.ip || req.socket.remoteAddress || null
-    const rateLimitError = ctx.rateLimiter.check(email, ip)
-    if (rateLimitError) {
-      // Anti-enumeration: show OTP form even if rate limited
-      res.send(renderOtpForm({ email, sessionId: '', csrfToken: res.locals.csrfToken, requestUri, error: 'Too many requests. Please wait a moment.' }))
-      return
-    }
-
     // Look up backup email - ALWAYS show OTP form (anti-enumeration)
     const did = ctx.db.getDidByBackupEmail(email)
 
     if (did) {
       try {
-        const deviceInfo = req.headers['user-agent'] || null
-        const { code, sessionId } = ctx.tokenService.create({
-          email,
-          authRequestId: requestUri,
-          clientId: null,
-          deviceInfo,
+        // Ensure the auth_flow cookie is set so /auth/complete can thread the request_uri.
+        // If one already exists from a previous step, we keep it; otherwise create a new one.
+        let flowId = req.cookies[AUTH_FLOW_COOKIE] as string | undefined
+        if (!flowId || !ctx.db.getAuthFlow(flowId)) {
+          const { randomBytes } = await import('node:crypto')
+          flowId = randomBytes(16).toString('hex')
+          ctx.db.createAuthFlow({
+            flowId,
+            requestUri,
+            clientId: null,
+            expiresAt: Date.now() + 10 * 60 * 1000,
+          })
+          res.cookie(AUTH_FLOW_COOKIE, flowId, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV !== 'development',
+            sameSite: 'lax',
+            maxAge: 10 * 60 * 1000,
+          })
+        }
+
+        // Send OTP via better-auth emailOTP plugin
+        await auth.api.sendVerificationOTP({
+          body: { email, type: 'sign-in' },
         })
 
-        await ctx.emailSender.sendOtpCode({
-          to: email,
-          code,
-          clientAppName: 'account recovery',
-          pdsName: ctx.config.hostname,
-          pdsDomain: ctx.config.pdsHostname,
-        })
-
-        ctx.rateLimiter.record(email, ip)
-
+        logger.info({ email }, 'Recovery OTP sent via better-auth')
         res.send(renderOtpForm({
           email,
-          sessionId,
           csrfToken: res.locals.csrfToken,
           requestUri,
         }))
@@ -85,7 +102,6 @@ export function createRecoveryRouter(ctx: AuthServiceContext): Router {
         logger.error({ err }, 'Failed to send recovery OTP')
         res.status(500).send(renderOtpForm({
           email,
-          sessionId: '',
           csrfToken: res.locals.csrfToken,
           requestUri,
           error: 'Failed to send code. Please try again.',
@@ -95,41 +111,54 @@ export function createRecoveryRouter(ctx: AuthServiceContext): Router {
       // No backup email found, but show OTP form anyway (anti-enumeration)
       res.send(renderOtpForm({
         email,
-        sessionId: '',
         csrfToken: res.locals.csrfToken,
         requestUri,
       }))
     }
   })
 
-  // POST /auth/recover/verify - verify recovery OTP
+  // POST /auth/recover/verify - verify recovery OTP via better-auth
   router.post('/auth/recover/verify', async (req: Request, res: Response) => {
-    const sessionId = req.body.session_id as string
     const code = (req.body.code as string || '').trim()
     const email = (req.body.email as string || '').trim().toLowerCase()
     const requestUri = req.body.request_uri as string
 
-    if (!sessionId || !code || !email || !requestUri) {
+    if (!code || !email || !requestUri) {
       res.status(400).send('<p>Missing required fields.</p>')
       return
     }
 
-    const result = ctx.tokenService.verifyCode(sessionId, code)
+    try {
+      // Verify OTP via better-auth — this creates/updates a session
+      const response = await auth.api.signInEmailOTP({
+        body: { email, otp: code },
+        asResponse: true,
+      })
 
-    if ('error' in result) {
+      // Forward better-auth's session cookie
+      if (response instanceof Response || (response && typeof response.headers?.get === 'function')) {
+        const setCookie = response.headers.get('set-cookie')
+        if (setCookie) {
+          res.setHeader('Set-Cookie', setCookie)
+        }
+      }
+
+      // Redirect to /auth/complete which will read the better-auth session
+      // and issue the HMAC-signed callback to pds-core
+      logger.info({ email }, 'Recovery OTP verified, redirecting to /auth/complete')
+      res.redirect(303, '/auth/complete')
+    } catch (err: any) {
+      logger.warn({ err, email }, 'Recovery OTP verification failed')
+      const errMsg = err?.message?.includes('invalid') || err?.message?.includes('expired')
+        ? 'Invalid or expired code. Please try again.'
+        : 'Verification failed. Please try again.'
       res.send(renderOtpForm({
         email,
-        sessionId,
         csrfToken: res.locals.csrfToken,
         requestUri,
-        error: result.error,
+        error: errMsg,
       }))
-      return
     }
-
-    // Recovery verified - redirect to consent
-    const consentUrl = `/auth/consent?request_uri=${encodeURIComponent(result.authRequestId)}&email=${encodeURIComponent(result.email)}&new=0`
-    res.redirect(303, consentUrl)
   })
 
   return router
@@ -172,7 +201,6 @@ function renderRecoveryForm(opts: {
 
 function renderOtpForm(opts: {
   email: string
-  sessionId: string
   csrfToken: string
   requestUri: string
   error?: string
@@ -191,17 +219,16 @@ function renderOtpForm(opts: {
 <body>
   <div class="container">
     <h1>Enter recovery code</h1>
-    <p class="subtitle">If a backup email matches, we sent a 6-digit code to <strong>${escapeHtml(maskedEmail)}</strong></p>
+    <p class="subtitle">If a backup email matches, we sent an 8-digit code to <strong>${escapeHtml(maskedEmail)}</strong></p>
     ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
     <form method="POST" action="/auth/recover/verify">
       <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
-      <input type="hidden" name="session_id" value="${escapeHtml(opts.sessionId)}">
       <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
       <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
       <div class="field">
         <input type="text" id="code" name="code" required autofocus
-               maxlength="6" pattern="[0-9]{6}" inputmode="numeric" autocomplete="one-time-code"
-               placeholder="000000" class="otp-input">
+               maxlength="8" pattern="[0-9]{8}" inputmode="numeric" autocomplete="one-time-code"
+               placeholder="00000000" class="otp-input">
       </div>
       <button type="submit" class="btn-primary">Verify</button>
     </form>
