@@ -22,7 +22,6 @@ function makeMockContext(db: MagicPdsDb): AuthServiceContext {
     magicCallbackSecret: 'test-callback-secret-32-chars-long!!',
     pdsHostname: 'pds.localhost',
     pdsPublicUrl: 'http://pds.localhost:3000',
-    magicLink: { expiryMinutes: 10, maxAttemptsPerToken: 5 },
     email: {
       provider: 'smtp',
       smtpHost: 'localhost',
