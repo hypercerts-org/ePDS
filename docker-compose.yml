@@ -1,5 +1,5 @@
 services:
-  pds:
+  epds-core:
     build:
       context: .
       dockerfile: Dockerfile.pds
@@ -18,7 +18,7 @@ services:
       retries: 3
       start_period: 15s
 
-  auth:
+  epds-auth:
     build:
       context: .
       dockerfile: Dockerfile.auth
@@ -49,9 +49,9 @@ services:
     env_file: .env
     restart: unless-stopped
     depends_on:
-      pds:
+      epds-core:
         condition: service_healthy
-      auth:
+      epds-auth:
         condition: service_healthy
 
   # Local email trap for development
