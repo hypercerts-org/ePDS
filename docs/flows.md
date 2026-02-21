@@ -51,8 +51,92 @@ The client app has no email form. The auth server collects the email itself.
 
 ## Sequence Diagrams
 
-> Mermaid sequence diagrams for both flows will be added here once
-> [atproto-y1l] is resolved.
+### Flow 1 — App has its own email form
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant App as Client App
+    participant PDS as PDS Core
+    participant Auth as Auth Service
+    participant Email as User's Inbox
+
+    User->>App: Enters email, clicks Login
+    App->>App: Generates DPoP key pair, PKCE verifier
+    App->>PDS: POST /oauth/par<br/>(client_id, redirect_uri, login_hint=email, DPoP proof)
+    PDS-->>App: { request_uri }
+    App->>App: Stores state in signed session cookie
+    App-->>User: 302 redirect to /oauth/authorize<br/>?request_uri=...&login_hint=email
+
+    User->>Auth: GET /oauth/authorize?request_uri=...&login_hint=email
+    Auth->>Auth: Creates auth_flow row (flow_id, request_uri)<br/>Sets magic_auth_flow cookie
+    Auth->>Auth: Sends OTP to email (via better-auth, server-side JS call)
+    Auth-->>User: Renders page with OTP input visible<br/>(email step hidden)
+    Auth->>Email: Sends 8-digit OTP code
+
+    User->>Email: Reads OTP code
+    User->>Auth: Submits OTP code
+    Auth->>Auth: Verifies OTP via better-auth<br/>Creates better-auth session
+    Auth-->>User: 302 redirect to /auth/complete
+
+    User->>Auth: GET /auth/complete
+    Auth->>Auth: Reads magic_auth_flow cookie → flow_id → request_uri<br/>Gets email from better-auth session
+    Auth->>PDS: GET /oauth/magic-callback<br/>?request_uri=...&email=...&approved=1&ts=...&sig=HMAC
+    PDS->>PDS: Verifies HMAC signature<br/>Creates PDS account if new user<br/>Issues authorization code
+    PDS-->>User: 302 redirect to client redirect_uri?code=...&state=...
+
+    User->>App: GET /api/oauth/callback?code=...&state=...
+    App->>PDS: POST /oauth/token<br/>(code, code_verifier, DPoP proof)
+    PDS-->>App: { access_token, refresh_token, sub (DID) }
+    App->>App: Creates user session
+    App-->>User: Logged in
+```
+
+### Flow 2 — App has a simple login button
+
+> **Not yet tested end-to-end.** Tracked in atproto-daj.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant App as Client App
+    participant PDS as PDS Core
+    participant Auth as Auth Service
+    participant Email as User's Inbox
+
+    User->>App: Clicks Login
+    App->>App: Generates DPoP key pair, PKCE verifier
+    App->>PDS: POST /oauth/par<br/>(client_id, redirect_uri, no login_hint, DPoP proof)
+    PDS-->>App: { request_uri }
+    App->>App: Stores state in signed session cookie
+    App-->>User: 302 redirect to /oauth/authorize?request_uri=...
+
+    User->>Auth: GET /oauth/authorize?request_uri=...
+    Auth->>Auth: Creates auth_flow row (flow_id, request_uri)<br/>Sets magic_auth_flow cookie
+    Auth-->>User: Renders page with email input form visible
+
+    User->>Auth: Submits email address
+    Auth->>Auth: Sends OTP to email (via better-auth JS call)
+    Auth-->>User: Shows OTP input
+    Auth->>Email: Sends 8-digit OTP code
+
+    User->>Email: Reads OTP code
+    User->>Auth: Submits OTP code
+    Auth->>Auth: Verifies OTP via better-auth<br/>Creates better-auth session
+    Auth-->>User: 302 redirect to /auth/complete
+
+    User->>Auth: GET /auth/complete
+    Auth->>Auth: Reads magic_auth_flow cookie → flow_id → request_uri<br/>Gets email from better-auth session
+    Auth->>PDS: GET /oauth/magic-callback<br/>?request_uri=...&email=...&approved=1&ts=...&sig=HMAC
+    PDS->>PDS: Verifies HMAC signature<br/>Creates PDS account if new user<br/>Issues authorization code
+    PDS-->>User: 302 redirect to client redirect_uri?code=...&state=...
+
+    User->>App: GET /api/oauth/callback?code=...&state=...
+    App->>PDS: POST /oauth/token<br/>(code, code_verifier, DPoP proof)
+    PDS-->>App: { access_token, refresh_token, sub (DID) }
+    App->>App: Creates user session
+    App-->>User: Logged in
+```
 
 ## Integration Reference
 
