@@ -46,8 +46,7 @@ Two patterns are supported depending on whether your app collects the user's ema
   app, you pass it to ePDS, and the user lands directly on the OTP input. No ePDS
   email form shown.
 - **Flow 2** — your app has a simple "Login" button: ePDS shows its own email input
-  form and handles the whole login UI. (Not yet tested end-to-end — tracked in
-  atproto-daj.)
+  form and handles the whole login UI.
 
 See [docs/flows.md](docs/flows.md) for the full integration guide including PAR
 request format, authorization redirect, token exchange, and client metadata.
