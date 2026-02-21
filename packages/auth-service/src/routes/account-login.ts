@@ -32,17 +32,24 @@ export function createAccountLoginRouter(auth: any): Router {
         res.redirect(303, '/account')
         return
       }
-    } catch { /* not logged in, continue */ }
+    } catch {
+      /* not logged in, continue */
+    }
 
     res.type('html').send(renderLoginForm({ csrfToken: res.locals.csrfToken }))
   })
 
   // POST /account/send-otp - send OTP via better-auth, show OTP form
   router.post('/account/send-otp', async (req: Request, res: Response) => {
-    const email = (req.body.email as string || '').trim().toLowerCase()
+    const email = ((req.body.email as string) || '').trim().toLowerCase()
 
     if (!email) {
-      res.status(400).send(renderLoginForm({ csrfToken: res.locals.csrfToken, error: 'Email is required.' }))
+      res.status(400).send(
+        renderLoginForm({
+          csrfToken: res.locals.csrfToken,
+          error: 'Email is required.',
+        }),
+      )
       return
     }
 
@@ -56,16 +63,24 @@ export function createAccountLoginRouter(auth: any): Router {
       // Anti-enumeration: show OTP form even on failure
     }
 
-    res.type('html').send(renderOtpForm({ email, csrfToken: res.locals.csrfToken }))
+    res
+      .type('html')
+      .send(renderOtpForm({ email, csrfToken: res.locals.csrfToken }))
   })
 
   // POST /account/verify-otp - verify OTP via better-auth, redirect to /account
   router.post('/account/verify-otp', async (req: Request, res: Response) => {
-    const email = (req.body.email as string || '').trim().toLowerCase()
-    const otp = (req.body.otp as string || '').trim()
+    const email = ((req.body.email as string) || '').trim().toLowerCase()
+    const otp = ((req.body.otp as string) || '').trim()
 
     if (!email || !otp) {
-      res.status(400).send(renderOtpForm({ email, csrfToken: res.locals.csrfToken, error: 'Email and code are required.' }))
+      res.status(400).send(
+        renderOtpForm({
+          email,
+          csrfToken: res.locals.csrfToken,
+          error: 'Email and code are required.',
+        }),
+      )
       return
     }
 
@@ -78,7 +93,10 @@ export function createAccountLoginRouter(auth: any): Router {
         asResponse: true,
       })
 
-      if (response instanceof Response || (response && typeof response.headers?.get === 'function')) {
+      if (
+        response instanceof Response ||
+        (response && typeof response.headers?.get === 'function')
+      ) {
         // Forward the Set-Cookie header from better-auth's response
         const setCookie = response.headers.get('set-cookie')
         if (setCookie) {
@@ -92,9 +110,16 @@ export function createAccountLoginRouter(auth: any): Router {
       res.redirect(303, '/account')
     } catch (err: any) {
       logger.warn({ err, email }, 'OTP verification failed')
-      const errMsg = err?.message?.includes('invalid') ? 'Invalid or expired code. Please try again.'
+      const errMsg = err?.message?.includes('invalid')
+        ? 'Invalid or expired code. Please try again.'
         : 'Verification failed. Please try again.'
-      res.type('html').send(renderOtpForm({ email, csrfToken: res.locals.csrfToken, error: errMsg }))
+      res.type('html').send(
+        renderOtpForm({
+          email,
+          csrfToken: res.locals.csrfToken,
+          error: errMsg,
+        }),
+      )
     }
   })
 
@@ -129,7 +154,11 @@ function renderLoginForm(opts: { csrfToken: string; error?: string }): string {
 </html>`
 }
 
-function renderOtpForm(opts: { email: string; csrfToken: string; error?: string }): string {
+function renderOtpForm(opts: {
+  email: string
+  csrfToken: string
+  error?: string
+}): string {
   const maskedEmail = maskEmail(opts.email)
 
   return `<!DOCTYPE html>
@@ -164,7 +193,6 @@ function renderOtpForm(opts: { email: string; csrfToken: string; error?: string 
 </body>
 </html>`
 }
-
 
 const CSS = `
   * { box-sizing: border-box; margin: 0; padding: 0; }

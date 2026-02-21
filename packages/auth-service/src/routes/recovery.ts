@@ -23,7 +23,10 @@ const logger = createLogger('auth:recovery')
 
 const AUTH_FLOW_COOKIE = 'magic_auth_flow'
 
-export function createRecoveryRouter(ctx: AuthServiceContext, auth: any): Router {
+export function createRecoveryRouter(
+  ctx: AuthServiceContext,
+  auth: any,
+): Router {
   const router = Router()
 
   router.get('/auth/recover', (req: Request, res: Response) => {
@@ -34,31 +37,37 @@ export function createRecoveryRouter(ctx: AuthServiceContext, auth: any): Router
       return
     }
 
-    res.type('html').send(renderRecoveryForm({
-      requestUri,
-      csrfToken: res.locals.csrfToken,
-    }))
+    res.type('html').send(
+      renderRecoveryForm({
+        requestUri,
+        csrfToken: res.locals.csrfToken,
+      }),
+    )
   })
 
   router.post('/auth/recover', async (req: Request, res: Response) => {
-    const email = (req.body.email as string || '').trim().toLowerCase()
+    const email = ((req.body.email as string) || '').trim().toLowerCase()
     const requestUri = req.body.request_uri as string
 
     if (!email || !requestUri) {
-      res.status(400).send(renderRecoveryForm({
-        requestUri: requestUri || '',
-        csrfToken: res.locals.csrfToken,
-        error: 'Email and request URI are required.',
-      }))
+      res.status(400).send(
+        renderRecoveryForm({
+          requestUri: requestUri || '',
+          csrfToken: res.locals.csrfToken,
+          error: 'Email and request URI are required.',
+        }),
+      )
       return
     }
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      res.status(400).send(renderRecoveryForm({
-        requestUri,
-        csrfToken: res.locals.csrfToken,
-        error: 'Please enter a valid email address.',
-      }))
+      res.status(400).send(
+        renderRecoveryForm({
+          requestUri,
+          csrfToken: res.locals.csrfToken,
+          error: 'Please enter a valid email address.',
+        }),
+      )
       return
     }
 
@@ -93,34 +102,40 @@ export function createRecoveryRouter(ctx: AuthServiceContext, auth: any): Router
         })
 
         logger.info({ email }, 'Recovery OTP sent via better-auth')
-        res.send(renderOtpForm({
-          email,
-          csrfToken: res.locals.csrfToken,
-          requestUri,
-        }))
+        res.send(
+          renderOtpForm({
+            email,
+            csrfToken: res.locals.csrfToken,
+            requestUri,
+          }),
+        )
       } catch (err) {
         logger.error({ err }, 'Failed to send recovery OTP')
-        res.status(500).send(renderOtpForm({
-          email,
-          csrfToken: res.locals.csrfToken,
-          requestUri,
-          error: 'Failed to send code. Please try again.',
-        }))
+        res.status(500).send(
+          renderOtpForm({
+            email,
+            csrfToken: res.locals.csrfToken,
+            requestUri,
+            error: 'Failed to send code. Please try again.',
+          }),
+        )
       }
     } else {
       // No backup email found, but show OTP form anyway (anti-enumeration)
-      res.send(renderOtpForm({
-        email,
-        csrfToken: res.locals.csrfToken,
-        requestUri,
-      }))
+      res.send(
+        renderOtpForm({
+          email,
+          csrfToken: res.locals.csrfToken,
+          requestUri,
+        }),
+      )
     }
   })
 
   // POST /auth/recover/verify - verify recovery OTP via better-auth
   router.post('/auth/recover/verify', async (req: Request, res: Response) => {
-    const code = (req.body.code as string || '').trim()
-    const email = (req.body.email as string || '').trim().toLowerCase()
+    const code = ((req.body.code as string) || '').trim()
+    const email = ((req.body.email as string) || '').trim().toLowerCase()
     const requestUri = req.body.request_uri as string
 
     if (!code || !email || !requestUri) {
@@ -136,7 +151,10 @@ export function createRecoveryRouter(ctx: AuthServiceContext, auth: any): Router
       })
 
       // Forward better-auth's session cookie
-      if (response instanceof Response || (response && typeof response.headers?.get === 'function')) {
+      if (
+        response instanceof Response ||
+        (response && typeof response.headers?.get === 'function')
+      ) {
         const setCookie = response.headers.get('set-cookie')
         if (setCookie) {
           res.setHeader('Set-Cookie', setCookie)
@@ -145,19 +163,25 @@ export function createRecoveryRouter(ctx: AuthServiceContext, auth: any): Router
 
       // Redirect to /auth/complete which will read the better-auth session
       // and issue the HMAC-signed callback to pds-core
-      logger.info({ email }, 'Recovery OTP verified, redirecting to /auth/complete')
+      logger.info(
+        { email },
+        'Recovery OTP verified, redirecting to /auth/complete',
+      )
       res.redirect(303, '/auth/complete')
     } catch (err: any) {
       logger.warn({ err, email }, 'Recovery OTP verification failed')
-      const errMsg = err?.message?.includes('invalid') || err?.message?.includes('expired')
-        ? 'Invalid or expired code. Please try again.'
-        : 'Verification failed. Please try again.'
-      res.send(renderOtpForm({
-        email,
-        csrfToken: res.locals.csrfToken,
-        requestUri,
-        error: errMsg,
-      }))
+      const errMsg =
+        err?.message?.includes('invalid') || err?.message?.includes('expired')
+          ? 'Invalid or expired code. Please try again.'
+          : 'Verification failed. Please try again.'
+      res.send(
+        renderOtpForm({
+          email,
+          csrfToken: res.locals.csrfToken,
+          requestUri,
+          error: errMsg,
+        }),
+      )
     }
   })
 
@@ -251,8 +275,6 @@ function renderError(message: string): string {
 <body><div class="container"><h1>Error</h1><p class="error">${escapeHtml(message)}</p></div></body>
 </html>`
 }
-
-
 
 const CSS = `
   * { box-sizing: border-box; margin: 0; padding: 0; }

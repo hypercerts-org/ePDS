@@ -70,10 +70,7 @@ export function signCallback(
     params.new_account,
     ts,
   ].join('\n')
-  const sig = crypto
-    .createHmac('sha256', secret)
-    .update(payload)
-    .digest('hex')
+  const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex')
   return { sig, ts }
 }
 

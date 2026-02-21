@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile.pds
     ports:
-      - "${PDS_PORT:-3000}:3000"
+      - '${PDS_PORT:-3000}:3000'
     env_file: .env
     environment:
       - PDS_PORT=3000
@@ -12,7 +12,7 @@ services:
       - pds-data:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3000/health']
       interval: 10s
       timeout: 3s
       retries: 3
@@ -23,7 +23,7 @@ services:
       context: .
       dockerfile: Dockerfile.auth
     ports:
-      - "${AUTH_PORT:-3001}:3001"
+      - '${AUTH_PORT:-3001}:3001'
     env_file: .env
     environment:
       - AUTH_PORT=3001
@@ -31,7 +31,7 @@ services:
       - auth-data:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/health"]
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3001/health']
       interval: 10s
       timeout: 3s
       retries: 3
@@ -40,8 +40,8 @@ services:
   caddy:
     image: caddy:2-alpine
     ports:
-      - "80:80"
-      - "443:443"
+      - '80:80'
+      - '443:443'
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy-data:/data
@@ -58,8 +58,8 @@ services:
   mailhog:
     image: mailhog/mailhog:latest
     ports:
-      - "1025:1025"
-      - "8025:8025"
+      - '1025:1025'
+      - '8025:8025'
     profiles:
       - dev
 

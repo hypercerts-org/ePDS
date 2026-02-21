@@ -3,12 +3,15 @@ import type { Request, Response, NextFunction } from 'express'
 const requestCounts = new Map<string, { count: number; resetAt: number }>()
 
 // Cleanup expired entries every 5 minutes to prevent memory leaks
-setInterval(() => {
-  const now = Date.now()
-  for (const [key, entry] of requestCounts) {
-    if (entry.resetAt < now) requestCounts.delete(key)
-  }
-}, 5 * 60 * 1000).unref()
+setInterval(
+  () => {
+    const now = Date.now()
+    for (const [key, entry] of requestCounts) {
+      if (entry.resetAt < now) requestCounts.delete(key)
+    }
+  },
+  5 * 60 * 1000,
+).unref()
 
 /**
  * In-memory request rate limiter (per IP).
@@ -31,7 +34,9 @@ export function requestRateLimit(opts: {
 
     entry.count++
     if (entry.count > opts.maxRequests) {
-      res.status(429).json({ error: 'Too many requests. Please try again later.' })
+      res
+        .status(429)
+        .json({ error: 'Too many requests. Please try again later.' })
       return
     }
 

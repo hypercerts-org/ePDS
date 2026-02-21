@@ -43,11 +43,11 @@ endpoint to issue an AT Protocol authorization code.
 
 ## Packages
 
-| Package | Description |
-|---------|-------------|
-| `@certified-app/shared` | Database (SQLite), crypto utilities, types, logger |
+| Package                       | Description                                              |
+| ----------------------------- | -------------------------------------------------------- |
+| `@certified-app/shared`       | Database (SQLite), crypto utilities, types, logger       |
 | `@certified-app/auth-service` | Auth UI, OTP code flow via better-auth, account settings |
-| `@certified-app/pds-core` | Wraps `@atproto/pds` with magic-callback integration |
+| `@certified-app/pds-core`     | Wraps `@atproto/pds` with magic-callback integration     |
 
 ## Key Design Decisions
 

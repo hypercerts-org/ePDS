@@ -10,7 +10,10 @@ const logger = createLogger('auth:auto-provision')
  *
  * Returns the new DID on success, or null on failure.
  */
-export async function autoProvisionAccount(ctx: AuthServiceContext, email: string): Promise<string | null> {
+export async function autoProvisionAccount(
+  ctx: AuthServiceContext,
+  email: string,
+): Promise<string | null> {
   // Use internal Docker URL to avoid going through Caddy
   const pdsUrl = process.env.PDS_INTERNAL_URL || ctx.config.pdsPublicUrl
 
@@ -31,8 +34,11 @@ export async function autoProvisionAccount(ctx: AuthServiceContext, email: strin
       return null
     }
 
-    const data = await res.json() as { did: string; handle: string }
-    logger.info({ did: data.did, handle: data.handle, email }, 'Auto-provisioned new account')
+    const data = (await res.json()) as { did: string; handle: string }
+    logger.info(
+      { did: data.did, handle: data.handle, email },
+      'Auto-provisioned new account',
+    )
 
     return data.did
   } catch (err) {

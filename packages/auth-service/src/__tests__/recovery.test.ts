@@ -25,7 +25,9 @@ describe('Recovery flow: backup email lookup', () => {
 
   afterEach(() => {
     db.close()
-    try { fs.unlinkSync(dbPath) } catch {}
+    try {
+      fs.unlinkSync(dbPath)
+    } catch {}
   })
 
   it('finds DID for a registered backup email', () => {
@@ -43,7 +45,11 @@ describe('Recovery flow: backup email lookup', () => {
   })
 
   it('returns undefined for unverified backup email', () => {
-    db.addBackupEmail('did:plc:test456', 'unverified@example.com', 'unverified-hash')
+    db.addBackupEmail(
+      'did:plc:test456',
+      'unverified@example.com',
+      'unverified-hash',
+    )
     // Do NOT call verifyBackupEmail
     const did = db.getDidByBackupEmail('unverified@example.com')
     expect(did).toBeUndefined()
@@ -70,7 +76,9 @@ describe('Recovery flow: auth_flow creation for request_uri threading', () => {
 
   afterEach(() => {
     db.close()
-    try { fs.unlinkSync(dbPath) } catch {}
+    try {
+      fs.unlinkSync(dbPath)
+    } catch {}
   })
 
   it('creates auth_flow with requestUri when backup email is found', () => {
@@ -144,7 +152,9 @@ describe('Recovery flow: /auth/complete bridge integration', () => {
 
   afterEach(() => {
     db.close()
-    try { fs.unlinkSync(dbPath) } catch {}
+    try {
+      fs.unlinkSync(dbPath)
+    } catch {}
   })
 
   it('auth_flow contains requestUri needed by /auth/complete', () => {

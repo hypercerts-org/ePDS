@@ -36,14 +36,17 @@ export class AuthServiceContext {
     this.emailSender = new EmailSender(config.email)
 
     // Cleanup expired tokens every 5 minutes
-    setInterval(() => {
-      const flows = this.db.cleanupExpiredAuthFlows()
-      if (flows > 0) {
-        logger.debug({ flows }, 'Cleaned up expired auth flows')
-      }
-      this.db.cleanupOldRateLimitEntries()
-      this.db.cleanupOldOtpFailures()
-    }, 5 * 60 * 1000)
+    setInterval(
+      () => {
+        const flows = this.db.cleanupExpiredAuthFlows()
+        if (flows > 0) {
+          logger.debug({ flows }, 'Cleaned up expired auth flows')
+        }
+        this.db.cleanupOldRateLimitEntries()
+        this.db.cleanupOldOtpFailures()
+      },
+      5 * 60 * 1000,
+    )
   }
 
   destroy(): void {

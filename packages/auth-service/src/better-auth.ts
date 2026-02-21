@@ -25,8 +25,12 @@ const AUTH_FLOW_COOKIE = 'magic_auth_flow'
  * Build the social providers config from env vars.
  * Only includes providers where both client ID and secret are set.
  */
-function buildSocialProviders(): Record<string, { clientId: string; clientSecret: string }> {
-  const providers: Record<string, { clientId: string; clientSecret: string }> = {}
+function buildSocialProviders(): Record<
+  string,
+  { clientId: string; clientSecret: string }
+> {
+  const providers: Record<string, { clientId: string; clientSecret: string }> =
+    {}
 
   const googleId = process.env.GOOGLE_CLIENT_ID
   const googleSecret = process.env.GOOGLE_CLIENT_SECRET
@@ -44,7 +48,10 @@ function buildSocialProviders(): Record<string, { clientId: string; clientSecret
 }
 
 /** Social providers that were configured — exported for use by the login page. */
-export let socialProviders: Record<string, { clientId: string; clientSecret: string }> = {}
+export let socialProviders: Record<
+  string,
+  { clientId: string; clientSecret: string }
+> = {}
 
 /**
  * Create a better-auth instance wired to the given EmailSender and EpdsDb.
@@ -61,7 +68,10 @@ export let socialProviders: Record<string, { clientId: string; clientSecret: str
  * and verification tables if they don't exist yet. Safe to call on every
  * startup (no-ops when tables are already present).
  */
-export async function runBetterAuthMigrations(dbLocation: string, authHostname: string): Promise<void> {
+export async function runBetterAuthMigrations(
+  dbLocation: string,
+  authHostname: string,
+): Promise<void> {
   const betterAuthDb = new Database(dbLocation)
   const tempAuth = betterAuth({
     database: betterAuthDb,
@@ -77,9 +87,17 @@ export async function runBetterAuthMigrations(dbLocation: string, authHostname: 
       }),
     ],
   })
-  const { toBeCreated, toBeAdded, runMigrations } = await getMigrations(tempAuth.options)
+  const { toBeCreated, toBeAdded, runMigrations } = await getMigrations(
+    tempAuth.options,
+  )
   if (toBeCreated.length > 0 || toBeAdded.length > 0) {
-    logger.info({ toBeCreated: toBeCreated.map(t => t.table), toBeAdded: toBeAdded.map(t => t.table) }, 'Running better-auth migrations')
+    logger.info(
+      {
+        toBeCreated: toBeCreated.map((t) => t.table),
+        toBeAdded: toBeAdded.map((t) => t.table),
+      },
+      'Running better-auth migrations',
+    )
     await runMigrations()
     logger.info('better-auth migrations complete')
   } else {
@@ -96,8 +114,14 @@ export function createBetterAuth(emailSender: EmailSender, db: EpdsDb): any {
   const pdsDomain = process.env.PDS_HOSTNAME ?? 'localhost'
 
   // Session lifetime from env (in seconds, default 7 days / 1 day update age)
-  const sessionExpiresIn = parseInt(process.env.SESSION_EXPIRES_IN ?? String(7 * 24 * 60 * 60), 10)
-  const sessionUpdateAge = parseInt(process.env.SESSION_UPDATE_AGE ?? String(24 * 60 * 60), 10)
+  const sessionExpiresIn = parseInt(
+    process.env.SESSION_EXPIRES_IN ?? String(7 * 24 * 60 * 60),
+    10,
+  )
+  const sessionUpdateAge = parseInt(
+    process.env.SESSION_UPDATE_AGE ?? String(24 * 60 * 60),
+    10,
+  )
 
   socialProviders = buildSocialProviders()
 
@@ -147,21 +171,29 @@ export function createBetterAuth(emailSender: EmailSender, db: EpdsDb): any {
             }
           } catch (err) {
             // Non-fatal: cookie or DB lookup failure just means no branding
-            logger.warn({ err, email }, 'Failed to resolve auth_flow for client branding')
+            logger.warn(
+              { err, email },
+              'Failed to resolve auth_flow for client branding',
+            )
           }
 
-          emailSender.sendOtpCode({
-            to: email,
-            code: otp,
-            clientAppName: pdsName,
-            clientId,
-            pdsName,
-            pdsDomain,
-            isNewUser,
-          }).catch((err: unknown) => {
-            // Log and swallow — caller does not await this
-            logger.error({ err, email, type }, 'better-auth: failed to send OTP email')
-          })
+          emailSender
+            .sendOtpCode({
+              to: email,
+              code: otp,
+              clientAppName: pdsName,
+              clientId,
+              pdsName,
+              pdsDomain,
+              isNewUser,
+            })
+            .catch((err: unknown) => {
+              // Log and swallow — caller does not await this
+              logger.error(
+                { err, email, type },
+                'better-auth: failed to send OTP email',
+              )
+            })
         },
       }),
     ],

@@ -56,8 +56,12 @@ export class EpdsDb {
 
   private migrate(): void {
     // Versioned migration system
-    this.db.exec('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)')
-    const row = this.db.prepare('SELECT version FROM schema_version').get() as { version: number } | undefined
+    this.db.exec(
+      'CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)',
+    )
+    const row = this.db.prepare('SELECT version FROM schema_version').get() as
+      | { version: number }
+      | undefined
     let currentVersion = row?.version ?? 0
 
     if (currentVersion === 0 && !row) {
@@ -117,7 +121,9 @@ export class EpdsDb {
       },
 
       // v2: Add code_hash column for OTP support
-      () => { this.db.exec('ALTER TABLE magic_link_token ADD COLUMN code_hash TEXT') },
+      () => {
+        this.db.exec('ALTER TABLE magic_link_token ADD COLUMN code_hash TEXT')
+      },
 
       // v3: Per-client login tracking for welcome vs sign-in emails
       () => {
@@ -190,118 +196,144 @@ export class EpdsDb {
     codeHash?: string | null
   }): void {
     const now = Date.now()
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO magic_link_token (token_hash, email, created_at, expires_at, auth_request_id, client_id, device_info, csrf_token, code_hash)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      data.tokenHash,
-      data.email.toLowerCase(),
-      now,
-      data.expiresAt,
-      data.authRequestId,
-      data.clientId,
-      data.deviceInfo,
-      data.csrfToken,
-      data.codeHash || null,
-    )
+    `,
+      )
+      .run(
+        data.tokenHash,
+        data.email.toLowerCase(),
+        now,
+        data.expiresAt,
+        data.authRequestId,
+        data.clientId,
+        data.deviceInfo,
+        data.csrfToken,
+        data.codeHash || null,
+      )
   }
 
   getMagicLinkToken(tokenHash: string): MagicLinkTokenRow | undefined {
-    return this.db.prepare(`
+    return this.db
+      .prepare(
+        `
       SELECT
         token_hash as tokenHash, email, created_at as createdAt,
         expires_at as expiresAt, used, auth_request_id as authRequestId,
         client_id as clientId, device_info as deviceInfo, csrf_token as csrfToken, code_hash as codeHash, attempts
       FROM magic_link_token WHERE token_hash = ?
-    `).get(tokenHash) as MagicLinkTokenRow | undefined
+    `,
+      )
+      .get(tokenHash) as MagicLinkTokenRow | undefined
   }
 
   markMagicLinkTokenUsed(tokenHash: string): void {
-    this.db.prepare(
-      `UPDATE magic_link_token SET used = 1 WHERE token_hash = ?`
-    ).run(tokenHash)
+    this.db
+      .prepare(`UPDATE magic_link_token SET used = 1 WHERE token_hash = ?`)
+      .run(tokenHash)
   }
 
   incrementTokenAttempts(tokenHash: string): number {
-    this.db.prepare(
-      `UPDATE magic_link_token SET attempts = attempts + 1 WHERE token_hash = ?`
-    ).run(tokenHash)
-    const row = this.db.prepare(
-      `SELECT attempts FROM magic_link_token WHERE token_hash = ?`
-    ).get(tokenHash) as { attempts: number } | undefined
+    this.db
+      .prepare(
+        `UPDATE magic_link_token SET attempts = attempts + 1 WHERE token_hash = ?`,
+      )
+      .run(tokenHash)
+    const row = this.db
+      .prepare(`SELECT attempts FROM magic_link_token WHERE token_hash = ?`)
+      .get(tokenHash) as { attempts: number } | undefined
     return row?.attempts ?? 0
   }
 
   cleanupExpiredTokens(): number {
-    const result = this.db.prepare(
-      `DELETE FROM magic_link_token WHERE expires_at < ?`
-    ).run(Date.now())
+    const result = this.db
+      .prepare(`DELETE FROM magic_link_token WHERE expires_at < ?`)
+      .run(Date.now())
     return result.changes
   }
 
   // ── Backup Email Operations ──
 
-  addBackupEmail(did: string, email: string, verificationTokenHash: string): void {
-    this.db.prepare(
-      `INSERT INTO backup_email (did, email, verification_token_hash, created_at) VALUES (?, ?, ?, ?)`
-    ).run(did, email.toLowerCase(), verificationTokenHash, Date.now())
+  addBackupEmail(
+    did: string,
+    email: string,
+    verificationTokenHash: string,
+  ): void {
+    this.db
+      .prepare(
+        `INSERT INTO backup_email (did, email, verification_token_hash, created_at) VALUES (?, ?, ?, ?)`,
+      )
+      .run(did, email.toLowerCase(), verificationTokenHash, Date.now())
   }
 
   verifyBackupEmail(verificationTokenHash: string): boolean {
-    const result = this.db.prepare(
-      `UPDATE backup_email SET verified = 1, verification_token_hash = NULL
-       WHERE verification_token_hash = ? AND verified = 0`
-    ).run(verificationTokenHash)
+    const result = this.db
+      .prepare(
+        `UPDATE backup_email SET verified = 1, verification_token_hash = NULL
+       WHERE verification_token_hash = ? AND verified = 0`,
+      )
+      .run(verificationTokenHash)
     return result.changes > 0
   }
 
   getBackupEmails(did: string): BackupEmailRow[] {
-    return this.db.prepare(
-      `SELECT id, did, email, verified, verification_token_hash as verificationTokenHash,
-       created_at as createdAt FROM backup_email WHERE did = ?`
-    ).all(did) as BackupEmailRow[]
+    return this.db
+      .prepare(
+        `SELECT id, did, email, verified, verification_token_hash as verificationTokenHash,
+       created_at as createdAt FROM backup_email WHERE did = ?`,
+      )
+      .all(did) as BackupEmailRow[]
   }
 
   getDidByBackupEmail(email: string): string | undefined {
-    const row = this.db.prepare(
-      `SELECT did FROM backup_email WHERE email = ? AND verified = 1`
-    ).get(email.toLowerCase()) as { did: string } | undefined
+    const row = this.db
+      .prepare(`SELECT did FROM backup_email WHERE email = ? AND verified = 1`)
+      .get(email.toLowerCase()) as { did: string } | undefined
     return row?.did
   }
 
   removeBackupEmail(did: string, email: string): void {
-    this.db.prepare(
-      `DELETE FROM backup_email WHERE did = ? AND email = ?`
-    ).run(did, email.toLowerCase())
+    this.db
+      .prepare(`DELETE FROM backup_email WHERE did = ? AND email = ?`)
+      .run(did, email.toLowerCase())
   }
 
   // ── Rate Limiting ──
 
   recordEmailSend(email: string, ipAddress: string | null): void {
-    this.db.prepare(
-      `INSERT INTO email_rate_limit (email, ip_address, sent_at) VALUES (?, ?, ?)`
-    ).run(email.toLowerCase(), ipAddress, Date.now())
+    this.db
+      .prepare(
+        `INSERT INTO email_rate_limit (email, ip_address, sent_at) VALUES (?, ?, ?)`,
+      )
+      .run(email.toLowerCase(), ipAddress, Date.now())
   }
 
   getEmailSendCount(email: string, sinceMs: number): number {
-    const row = this.db.prepare(
-      `SELECT COUNT(*) as count FROM email_rate_limit WHERE email = ? AND sent_at > ?`
-    ).get(email.toLowerCase(), Date.now() - sinceMs) as { count: number }
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) as count FROM email_rate_limit WHERE email = ? AND sent_at > ?`,
+      )
+      .get(email.toLowerCase(), Date.now() - sinceMs) as { count: number }
     return row.count
   }
 
   getIpSendCount(ipAddress: string, sinceMs: number): number {
-    const row = this.db.prepare(
-      `SELECT COUNT(*) as count FROM email_rate_limit WHERE ip_address = ? AND sent_at > ?`
-    ).get(ipAddress, Date.now() - sinceMs) as { count: number }
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) as count FROM email_rate_limit WHERE ip_address = ? AND sent_at > ?`,
+      )
+      .get(ipAddress, Date.now() - sinceMs) as { count: number }
     return row.count
   }
 
   cleanupOldRateLimitEntries(): number {
     const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000
-    const result = this.db.prepare(
-      `DELETE FROM email_rate_limit WHERE sent_at < ?`
-    ).run(oneDayAgo)
+    const result = this.db
+      .prepare(`DELETE FROM email_rate_limit WHERE sent_at < ?`)
+      .run(oneDayAgo)
     return result.changes
   }
 
@@ -309,9 +341,11 @@ export class EpdsDb {
 
   /** Record a failed OTP verification attempt for an email. */
   recordOtpFailure(email: string): void {
-    this.db.prepare(
-      `INSERT INTO otp_failed_attempts (email, failed_at) VALUES (?, ?)`
-    ).run(email.toLowerCase(), Date.now())
+    this.db
+      .prepare(
+        `INSERT INTO otp_failed_attempts (email, failed_at) VALUES (?, ?)`,
+      )
+      .run(email.toLowerCase(), Date.now())
   }
 
   /**
@@ -319,32 +353,37 @@ export class EpdsDb {
    * Used to enforce per-email lockout independent of per-token attempt limits.
    */
   getOtpFailureCount(email: string, sinceMs: number): number {
-    const row = this.db.prepare(
-      `SELECT COUNT(*) as count FROM otp_failed_attempts WHERE email = ? AND failed_at > ?`
-    ).get(email.toLowerCase(), Date.now() - sinceMs) as { count: number }
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) as count FROM otp_failed_attempts WHERE email = ? AND failed_at > ?`,
+      )
+      .get(email.toLowerCase(), Date.now() - sinceMs) as { count: number }
     return row.count
   }
 
   /** Remove old OTP failure records (call during periodic cleanup). */
   cleanupOldOtpFailures(): number {
     const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000
-    const result = this.db.prepare(
-      `DELETE FROM otp_failed_attempts WHERE failed_at < ?`
-    ).run(oneDayAgo)
+    const result = this.db
+      .prepare(`DELETE FROM otp_failed_attempts WHERE failed_at < ?`)
+      .run(oneDayAgo)
     return result.changes
   }
-
 
   // ── Magic Link Token by CSRF (for polling) ──
 
   getMagicLinkTokenByCsrf(csrfToken: string): MagicLinkTokenRow | undefined {
-    return this.db.prepare(`
+    return this.db
+      .prepare(
+        `
       SELECT
         token_hash as tokenHash, email, created_at as createdAt,
         expires_at as expiresAt, used, auth_request_id as authRequestId,
         client_id as clientId, device_info as deviceInfo, csrf_token as csrfToken, code_hash as codeHash, attempts
       FROM magic_link_token WHERE csrf_token = ? ORDER BY created_at DESC LIMIT 1
-    `).get(csrfToken) as MagicLinkTokenRow | undefined
+    `,
+      )
+      .get(csrfToken) as MagicLinkTokenRow | undefined
   }
 
   // Delete all data for a DID (account deletion / GDPR).
@@ -363,28 +402,40 @@ export class EpdsDb {
     clientId: string | null
     expiresAt: number
   }): void {
-    this.db.prepare(
-      `INSERT INTO auth_flow (flow_id, request_uri, client_id, created_at, expires_at)
-       VALUES (?, ?, ?, ?, ?)`
-    ).run(data.flowId, data.requestUri, data.clientId, Date.now(), data.expiresAt)
+    this.db
+      .prepare(
+        `INSERT INTO auth_flow (flow_id, request_uri, client_id, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(
+        data.flowId,
+        data.requestUri,
+        data.clientId,
+        Date.now(),
+        data.expiresAt,
+      )
   }
 
   getAuthFlow(flowId: string): AuthFlowRow | undefined {
-    return this.db.prepare(
-      `SELECT flow_id as flowId, request_uri as requestUri, client_id as clientId,
+    return this.db
+      .prepare(
+        `SELECT flow_id as flowId, request_uri as requestUri, client_id as clientId,
        email, created_at as createdAt, expires_at as expiresAt
-       FROM auth_flow WHERE flow_id = ? AND expires_at > ?`
-    ).get(flowId, Date.now()) as AuthFlowRow | undefined
+       FROM auth_flow WHERE flow_id = ? AND expires_at > ?`,
+      )
+      .get(flowId, Date.now()) as AuthFlowRow | undefined
   }
 
   /** Look up a non-expired auth_flow by request_uri (for idempotency on duplicate GETs). */
   getAuthFlowByRequestUri(requestUri: string): AuthFlowRow | undefined {
-    return this.db.prepare(
-      `SELECT flow_id as flowId, request_uri as requestUri, client_id as clientId,
+    return this.db
+      .prepare(
+        `SELECT flow_id as flowId, request_uri as requestUri, client_id as clientId,
        email, created_at as createdAt, expires_at as expiresAt
        FROM auth_flow WHERE request_uri = ? AND expires_at > ?
-       ORDER BY created_at DESC LIMIT 1`
-    ).get(requestUri, Date.now()) as AuthFlowRow | undefined
+       ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(requestUri, Date.now()) as AuthFlowRow | undefined
   }
 
   deleteAuthFlow(flowId: string): void {
@@ -392,10 +443,11 @@ export class EpdsDb {
   }
 
   cleanupExpiredAuthFlows(): number {
-    const result = this.db.prepare(`DELETE FROM auth_flow WHERE expires_at < ?`).run(Date.now())
+    const result = this.db
+      .prepare(`DELETE FROM auth_flow WHERE expires_at < ?`)
+      .run(Date.now())
     return result.changes
   }
-
 
   // ── Metrics ──
 
@@ -405,25 +457,41 @@ export class EpdsDb {
     rateLimitEntries: number
   } {
     const now = Date.now()
-    const pendingTokens = (this.db.prepare('SELECT COUNT(*) as c FROM magic_link_token WHERE used = 0 AND expires_at > ?').get(now) as { c: number }).c
-    const backupEmails = (this.db.prepare('SELECT COUNT(*) as c FROM backup_email WHERE verified = 1').get() as { c: number }).c
-    const rateLimitEntries = (this.db.prepare('SELECT COUNT(*) as c FROM email_rate_limit').get() as { c: number }).c
+    const pendingTokens = (
+      this.db
+        .prepare(
+          'SELECT COUNT(*) as c FROM magic_link_token WHERE used = 0 AND expires_at > ?',
+        )
+        .get(now) as { c: number }
+    ).c
+    const backupEmails = (
+      this.db
+        .prepare('SELECT COUNT(*) as c FROM backup_email WHERE verified = 1')
+        .get() as { c: number }
+    ).c
+    const rateLimitEntries = (
+      this.db.prepare('SELECT COUNT(*) as c FROM email_rate_limit').get() as {
+        c: number
+      }
+    ).c
     return { pendingTokens, backupEmails, rateLimitEntries }
   }
 
   // ── Per-Client Login Tracking ──
 
   hasClientLogin(email: string, clientId: string): boolean {
-    const row = this.db.prepare(
-      `SELECT 1 FROM client_logins WHERE email = ? AND client_id = ?`
-    ).get(email.toLowerCase(), clientId)
+    const row = this.db
+      .prepare(`SELECT 1 FROM client_logins WHERE email = ? AND client_id = ?`)
+      .get(email.toLowerCase(), clientId)
     return !!row
   }
 
   recordClientLogin(email: string, clientId: string): void {
-    this.db.prepare(
-      `INSERT OR IGNORE INTO client_logins (email, client_id, first_login_at) VALUES (?, ?, ?)`
-    ).run(email.toLowerCase(), clientId, Date.now())
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO client_logins (email, client_id, first_login_at) VALUES (?, ?, ?)`,
+      )
+      .run(email.toLowerCase(), clientId, Date.now())
   }
 
   close(): void {

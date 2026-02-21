@@ -23,7 +23,11 @@
 import { Router, type Request, type Response } from 'express'
 import { randomBytes } from 'node:crypto'
 import type { AuthServiceContext } from '../context.js'
-import { resolveClientMetadata, resolveClientName, type ClientMetadata } from '../lib/client-metadata.js'
+import {
+  resolveClientMetadata,
+  resolveClientName,
+  type ClientMetadata,
+} from '../lib/client-metadata.js'
 import { escapeHtml, createLogger } from '@certified-app/shared'
 import { socialProviders } from '../better-auth.js'
 
@@ -41,17 +45,25 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     const loginHint = req.query.login_hint as string | undefined
 
     if (!requestUri) {
-      res.status(400).type('html').send(renderError('Missing request_uri parameter'))
+      res
+        .status(400)
+        .type('html')
+        .send(renderError('Missing request_uri parameter'))
       return
     }
 
-    logger.debug({
-      requestUri: requestUri.slice(0, 60),
-      loginHint: loginHint ? loginHint.replace(/(.{2})[^@]*(@.*)/, '$1***$2') : undefined,
-      userAgent: req.headers['user-agent'],
-      referer: req.headers['referer'],
-      ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
-    }, 'GET /oauth/authorize')
+    logger.debug(
+      {
+        requestUri: requestUri.slice(0, 60),
+        loginHint: loginHint
+          ? loginHint.replace(/(.{2})[^@]*(@.*)/, '$1***$2')
+          : undefined,
+        userAgent: req.headers['user-agent'],
+        referer: req.headers['referer'],
+        ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+      },
+      'GET /oauth/authorize',
+    )
 
     // Idempotency: if a flow already exists for this request_uri, reuse it rather
     // than creating a second row (and triggering a second OTP send). This protects
@@ -60,12 +72,15 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     const existingFlow = ctx.db.getAuthFlowByRequestUri(requestUri)
     if (existingFlow) {
       flowId = existingFlow.flowId
-      logger.warn({
-        flowId,
-        requestUri: requestUri.slice(0, 60),
-        userAgent: req.headers['user-agent'],
-        ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
-      }, 'Duplicate GET /oauth/authorize for existing request_uri — reusing flow, dropping duplicate')
+      logger.warn(
+        {
+          flowId,
+          requestUri: requestUri.slice(0, 60),
+          userAgent: req.headers['user-agent'],
+          ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+        },
+        'Duplicate GET /oauth/authorize for existing request_uri — reusing flow, dropping duplicate',
+      )
     } else {
       flowId = randomBytes(16).toString('hex')
       try {
@@ -77,7 +92,10 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
         })
       } catch (err) {
         logger.error({ err }, 'Failed to create auth_flow')
-        res.status(500).type('html').send(renderError('Internal server error. Please try again.'))
+        res
+          .status(500)
+          .type('html')
+          .send(renderError('Internal server error. Please try again.'))
         return
       }
     }
@@ -91,8 +109,12 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     })
 
     // Resolve client branding
-    const clientMeta: ClientMetadata = clientId ? await resolveClientMetadata(clientId) : {}
-    const clientName = clientMeta.client_name ?? (clientId ? await resolveClientName(clientId) : 'an application')
+    const clientMeta: ClientMetadata = clientId
+      ? await resolveClientMetadata(clientId)
+      : {}
+    const clientName =
+      clientMeta.client_name ??
+      (clientId ? await resolveClientName(clientId) : 'an application')
 
     // Pillar 1 — State Determination: decide which step to render based on
     // login_hint presence. No method-assuming side effects in the GET handler.
@@ -104,20 +126,32 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     // script that OTP was already sent so it skips the auto-send.
     const otpAlreadySent = hasLoginHint && !!existingFlow
 
-    logger.info({ flowId, clientId, requestUri: requestUri.slice(0, 50), reused: !!existingFlow, initialStep, otpAlreadySent }, 'Serving login page for auth_flow')
+    logger.info(
+      {
+        flowId,
+        clientId,
+        requestUri: requestUri.slice(0, 50),
+        reused: !!existingFlow,
+        initialStep,
+        otpAlreadySent,
+      },
+      'Serving login page for auth_flow',
+    )
 
-    res.type('html').send(renderLoginPage({
-      flowId,
-      clientId: clientId ?? '',
-      clientName,
-      branding: clientMeta,
-      loginHint: loginHint ?? '',
-      initialStep,
-      otpAlreadySent,
-      csrfToken: res.locals.csrfToken,
-      authBasePath: '/api/auth',
-      pdsPublicUrl: ctx.config.pdsPublicUrl,
-    }))
+    res.type('html').send(
+      renderLoginPage({
+        flowId,
+        clientId: clientId ?? '',
+        clientName,
+        branding: clientMeta,
+        loginHint: loginHint ?? '',
+        initialStep,
+        otpAlreadySent,
+        csrfToken: res.locals.csrfToken,
+        authBasePath: '/api/auth',
+        pdsPublicUrl: ctx.config.pdsPublicUrl,
+      }),
+    )
   })
 
   return router
@@ -148,10 +182,13 @@ function renderLoginPage(opts: {
   const hasSocialProviders = hasGoogle || hasGithub
 
   // Social login buttons — redirect to better-auth provider endpoints
-  const socialButtonsHtml = hasSocialProviders ? `
+  const socialButtonsHtml = hasSocialProviders
+    ? `
     <div class="divider"><span>or continue with</span></div>
     <div class="social-buttons">
-      ${hasGoogle ? `
+      ${
+        hasGoogle
+          ? `
       <a href="${opts.authBasePath}/sign-in/social?provider=google&callbackURL=/auth/complete" class="btn-social btn-google">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
           <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
@@ -160,17 +197,24 @@ function renderLoginPage(opts: {
           <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
         </svg>
         Sign in with Google
-      </a>` : ''}
-      ${hasGithub ? `
+      </a>`
+          : ''
+      }
+      ${
+        hasGithub
+          ? `
       <a href="${opts.authBasePath}/sign-in/social?provider=github&callbackURL=/auth/complete" class="btn-social btn-github">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
           <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
         </svg>
         Sign in with GitHub
-      </a>` : ''}
+      </a>`
+          : ''
+      }
     </div>
     <div class="divider"><span>or use email</span></div>
-  ` : ''
+  `
+    : ''
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -232,11 +276,13 @@ function renderLoginPage(opts: {
 
     <!-- Step 2: OTP entry (calls better-auth verifyOtp) -->
     <div id="step-otp" class="step-otp${opts.initialStep === 'otp' ? ' active' : ''}">
-      <p class="subtitle" id="otp-subtitle">${opts.initialStep === 'otp'
-        ? (opts.otpAlreadySent
-          ? `Code already sent to ${escapeHtml(opts.loginHint.replace(/(.{2})[^@]*(@.*)/, '$1***$2'))}`
-          : `Sending code to ${escapeHtml(opts.loginHint.replace(/(.{2})[^@]*(@.*)/, '$1***$2'))}…`)
-        : 'We sent a code to your email'}</p>
+      <p class="subtitle" id="otp-subtitle">${
+        opts.initialStep === 'otp'
+          ? opts.otpAlreadySent
+            ? `Code already sent to ${escapeHtml(opts.loginHint.replace(/(.{2})[^@]*(@.*)/, '$1***$2'))}`
+            : `Sending code to ${escapeHtml(opts.loginHint.replace(/(.{2})[^@]*(@.*)/, '$1***$2'))}…`
+          : 'We sent a code to your email'
+      }</p>
       <form id="form-verify-otp">
         <input type="hidden" id="otp-email" name="email" value="${escapeHtml(opts.loginHint)}">
         <div class="field">

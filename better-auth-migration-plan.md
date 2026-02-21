@@ -34,7 +34,7 @@ and incorporate architectural ideas from
 ### What auth-service currently owns
 
 | Component                             | Files                                                   | Replaced by better-auth?                   |
-|---------------------------------------|---------------------------------------------------------|--------------------------------------------|
+| ------------------------------------- | ------------------------------------------------------- | ------------------------------------------ |
 | OTP generation, hashing, verification | `magic-link/token.ts`                                   | Yes — `emailOTP` plugin                    |
 | Email-specific rate limiting          | `magic-link/rate-limit.ts`                              | Yes — built-in rate limiting               |
 | Request rate limiting (per-IP)        | `middleware/rate-limit.ts`                              | Yes — built-in rate limiting               |
@@ -75,12 +75,12 @@ weeks this becomes non-trivial for a targeted attack.
 
 ### Additional medium-severity issues to address
 
-| ID | Issue | Fix |
-|----|-------|-----|
-| MED-3 | Random password is a backdoor credential | Stop assigning random passwords; create accounts passwordless |
+| ID    | Issue                                                      | Fix                                                                 |
+| ----- | ---------------------------------------------------------- | ------------------------------------------------------------------- |
+| MED-3 | Random password is a backdoor credential                   | Stop assigning random passwords; create accounts passwordless       |
 | MED-4 | `/_magic/check-email` is unauthenticated email enumeration | Replace with `/_internal/account-by-email` (shared secret required) |
-| MED-5 | Consent screen hardcodes permissions | Show actual requested scopes |
-| MED-6 | Admin password in auth-service memory | Use scoped tokens if possible |
+| MED-5 | Consent screen hardcodes permissions                       | Show actual requested scopes                                        |
+| MED-6 | Admin password in auth-service memory                      | Use scoped tokens if possible                                       |
 
 ---
 
@@ -184,26 +184,27 @@ appends it. pds-core verifies it before proceeding.
 2. In auth-service, when building the redirect URL to `/oauth/magic-callback`:
 
    ```typescript
-   import { createHmac } from "crypto";
+   import { createHmac } from 'crypto'
 
-   function signCallback(params: {
-     request_uri: string;
-     email: string;
-     approved: string;
-     new_account: string;
-   }, secret: string): string {
-     const ts = Math.floor(Date.now() / 1000).toString();
+   function signCallback(
+     params: {
+       request_uri: string
+       email: string
+       approved: string
+       new_account: string
+     },
+     secret: string,
+   ): string {
+     const ts = Math.floor(Date.now() / 1000).toString()
      const payload = [
        params.request_uri,
        params.email,
        params.approved,
        params.new_account,
        ts,
-     ].join("\n");
-     const sig = createHmac("sha256", secret)
-       .update(payload)
-       .digest("hex");
-     return sig;
+     ].join('\n')
+     const sig = createHmac('sha256', secret).update(payload).digest('hex')
+     return sig
    }
 
    // Add &ts=...&sig=... to the redirect URL
@@ -213,18 +214,18 @@ appends it. pds-core verifies it before proceeding.
    operations:
 
    ```typescript
-   const { request_uri, email, approved, new_account, ts, sig } = req.query;
+   const { request_uri, email, approved, new_account, ts, sig } = req.query
 
    // Reject if timestamp is older than 5 minutes
-   const age = Math.floor(Date.now() / 1000) - parseInt(ts);
-   if (age > 300 || age < 0) return res.status(400).json({ error: "Expired" });
+   const age = Math.floor(Date.now() / 1000) - parseInt(ts)
+   if (age > 300 || age < 0) return res.status(400).json({ error: 'Expired' })
 
    // Verify HMAC
-   const expected = createHmac("sha256", secret)
-     .update([request_uri, email, approved, new_account, ts].join("\n"))
-     .digest("hex");
+   const expected = createHmac('sha256', secret)
+     .update([request_uri, email, approved, new_account, ts].join('\n'))
+     .digest('hex')
    if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
-     return res.status(403).json({ error: "Invalid signature" });
+     return res.status(403).json({ error: 'Invalid signature' })
    }
    ```
 
@@ -261,6 +262,7 @@ dump, DB access), it bypasses the entire auth service.
 **Fix:** Pass `password: undefined` when creating accounts. The PDS
 `accountManager.createAccount()` already handles this — it sets
 `passwordScrypt` to `undefined`, meaning:
+
 - `createSession` rejects login (no hash to compare against)
 - Password reset has nothing to reset
 - Users who later set a password explicitly (via account settings) can use
@@ -271,6 +273,7 @@ for users who choose to have a password, while making passwordless accounts
 genuinely passwordless.
 
 **Changes:**
+
 - `pds-core/src/index.ts:130`: change `password: randomBytes(64).toString('hex')`
   to `password: undefined`
 - `auto-provision.ts:20`: same change
@@ -290,21 +293,22 @@ for any email with no authentication. It's an email enumeration oracle. It
 also reads from the `account_email` mirror table, which we're eliminating.
 
 **Fix:** Replace it with `/_internal/account-by-email`, which:
+
 - Requires `x-internal-secret` header matching `MAGIC_INTERNAL_SECRET`
 - Queries `pds.ctx.accountManager.getAccountByEmail()` directly — no mirror table
 - Returns `{ did: string } | { did: null }` — no redundant `exists` field
 
 ```typescript
 // In pds-core:
-app.get("/_internal/account-by-email", (req, res) => {
-  if (req.headers["x-internal-secret"] !== process.env.MAGIC_INTERNAL_SECRET) {
-    return res.status(401).json({ error: "Unauthorized" });
+app.get('/_internal/account-by-email', (req, res) => {
+  if (req.headers['x-internal-secret'] !== process.env.MAGIC_INTERNAL_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized' })
   }
-  const email = req.query.email as string;
-  if (!email) return res.status(400).json({ error: "Missing email" });
-  const account = await pds.ctx.accountManager.getAccountByEmail(email);
-  res.json({ did: account?.did ?? null });
-});
+  const email = req.query.email as string
+  if (!email) return res.status(400).json({ error: 'Missing email' })
+  const account = await pds.ctx.accountManager.getAccountByEmail(email)
+  res.json({ did: account?.did ?? null })
+})
 ```
 
 Delete `/_magic/check-email` once auth-service is updated to call the new
@@ -326,40 +330,41 @@ pnpm add better-auth better-sqlite3
 Create `packages/auth-service/src/better-auth.ts`:
 
 ```typescript
-import { betterAuth } from "better-auth";
-import { emailOTP } from "better-auth/plugins";
-import Database from "better-sqlite3";
+import { betterAuth } from 'better-auth'
+import { emailOTP } from 'better-auth/plugins'
+import Database from 'better-sqlite3'
 
 // Build social providers object from env vars — only providers
 // with both client ID and secret configured will be enabled.
 function buildSocialProviders() {
-  const providers: Record<string, { clientId: string; clientSecret: string }> = {};
+  const providers: Record<string, { clientId: string; clientSecret: string }> =
+    {}
 
   if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     providers.google = {
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    };
+    }
   }
 
   if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
     providers.github = {
       clientId: process.env.GITHUB_CLIENT_ID,
       clientSecret: process.env.GITHUB_CLIENT_SECRET,
-    };
+    }
   }
 
   // Add more providers following the same pattern.
 
-  return providers;
+  return providers
 }
 
-export const socialProviders = buildSocialProviders();
+export const socialProviders = buildSocialProviders()
 
 export const auth = betterAuth({
-  database: new Database(process.env.DB_LOCATION ?? "./data/magic-pds.sqlite"),
+  database: new Database(process.env.DB_LOCATION ?? './data/magic-pds.sqlite'),
   baseURL: `https://${process.env.AUTH_HOSTNAME}`,
-  basePath: "/api/auth",  // keep better-auth routes namespaced
+  basePath: '/api/auth', // keep better-auth routes namespaced
 
   // Email OTP replaces custom token service
   plugins: [
@@ -368,10 +373,10 @@ export const auth = betterAuth({
         // Reuse existing EmailSender from email/sender.ts
         // Wire up here — details in Phase 2
       },
-      otpLength: 8,        // CRITICAL-2 fix: 8 digits, not 6
-      expiresIn: 600,      // 10 minutes, matching current config
-      allowedAttempts: 5,  // matching current maxAttemptsPerToken
-      storeOTP: "hashed",
+      otpLength: 8, // CRITICAL-2 fix: 8 digits, not 6
+      expiresIn: 600, // 10 minutes, matching current config
+      allowedAttempts: 5, // matching current maxAttemptsPerToken
+      storeOTP: 'hashed',
     }),
   ],
 
@@ -380,10 +385,12 @@ export const auth = betterAuth({
 
   // Session config — values in seconds, defaults match current behaviour
   session: {
-    expiresIn: parseInt(process.env.SESSION_EXPIRES_IN  ?? String(60 * 60 * 24 * 7)),  // default 7 days
-    updateAge:  parseInt(process.env.SESSION_UPDATE_AGE ?? String(60 * 60 * 24)),       // default 1 day
+    expiresIn: parseInt(
+      process.env.SESSION_EXPIRES_IN ?? String(60 * 60 * 24 * 7),
+    ), // default 7 days
+    updateAge: parseInt(process.env.SESSION_UPDATE_AGE ?? String(60 * 60 * 24)), // default 1 day
   },
-});
+})
 ```
 
 The `socialProviders` object is also exported so the login page template
@@ -405,14 +412,14 @@ In `packages/auth-service/src/index.ts`, mount the better-auth handler
 alongside existing routes:
 
 ```typescript
-import { toNodeHandler } from "better-auth/node";
-import { auth } from "./better-auth";
+import { toNodeHandler } from 'better-auth/node'
+import { auth } from './better-auth'
 
 // Mount better-auth BEFORE express.json() (per better-auth docs)
-app.all("/api/auth/*", toNodeHandler(auth));
+app.all('/api/auth/*', toNodeHandler(auth))
 
 // Existing routes continue to work
-app.use(express.json());
+app.use(express.json())
 // ... existing route mounts
 ```
 
@@ -585,13 +592,13 @@ established → redirect to auth-service `/account`.
 These routes interact with PDS admin APIs and custom DB tables — they cannot
 be replaced by better-auth:
 
-| Route | Reason it stays custom |
-|-------|----------------------|
-| `POST /account/handle` | Calls `com.atproto.admin.updateAccountHandle` |
-| `POST /account/delete` | Calls `com.atproto.admin.deleteAccount` |
-| `POST /account/backup-email/*` | Custom backup_email table + verification |
-| `POST /account/session/revoke` | Delegates to better-auth `revokeSession` |
-| `POST /account/sessions/revoke-all` | Delegates to better-auth `revokeSessions` |
+| Route                               | Reason it stays custom                        |
+| ----------------------------------- | --------------------------------------------- |
+| `POST /account/handle`              | Calls `com.atproto.admin.updateAccountHandle` |
+| `POST /account/delete`              | Calls `com.atproto.admin.deleteAccount`       |
+| `POST /account/backup-email/*`      | Custom backup_email table + verification      |
+| `POST /account/session/revoke`      | Delegates to better-auth `revokeSession`      |
+| `POST /account/sessions/revoke-all` | Delegates to better-auth `revokeSessions`     |
 
 ### 3.3 Metrics endpoint
 
@@ -787,13 +794,13 @@ outweighs the friction.
 
 ## Migration Order Summary
 
-| Phase | Scope | Risk | Can be deployed independently? |
-|-------|-------|------|-------------------------------|
+| Phase | Scope                                                                                      | Risk    | Can be deployed independently?                  |
+| ----- | ------------------------------------------------------------------------------------------ | ------- | ----------------------------------------------- |
 | **0** | **Fix critical vulns: HMAC callback, 8-digit OTP, block stock login, protect check-email** | **Low** | **Yes — apply to current codebase immediately** |
-| 1 | Install better-auth, mount alongside existing routes | Low | Yes — no behavior change |
-| 2 | Build bridge layer, new login page with email OTP; delete replaced code | Medium | Yes — feature flag the new `/oauth/authorize` |
-| 3 | Migrate account settings to better-auth sessions; delete replaced code | Low | Yes — after Phase 2 |
-| 4 | Add social providers, captcha, migration-only mode | Low | Yes — just config + UI |
+| 1     | Install better-auth, mount alongside existing routes                                       | Low     | Yes — no behavior change                        |
+| 2     | Build bridge layer, new login page with email OTP; delete replaced code                    | Medium  | Yes — feature flag the new `/oauth/authorize`   |
+| 3     | Migrate account settings to better-auth sessions; delete replaced code                     | Low     | Yes — after Phase 2                             |
+| 4     | Add social providers, captcha, migration-only mode                                         | Low     | Yes — just config + UI                          |
 
 **Phase 0 is non-negotiable and should ship before anything else.** The
 unsigned callback (CRITICAL-1) is an account-takeover vulnerability that
@@ -810,56 +817,56 @@ staging environment first.
 
 ### Phase 0 changes (security fixes — apply to current codebase)
 
-| File | Changes |
-|------|---------|
-| `packages/pds-core/src/index.ts` | Add HMAC verification to `/oauth/magic-callback`; add `/_internal/account-by-email` endpoint (replaces `/_magic/check-email`); change `password` to `undefined` in `createAccount` call |
-| `packages/auth-service/src/routes/verify-code.ts` | Add HMAC signing to redirect URL |
-| `packages/auth-service/src/routes/consent.ts` | Add HMAC signing to redirect URL |
-| `packages/auth-service/src/lib/auto-provision.ts` | Change `password` to `undefined` in `createAccount` call |
-| `packages/shared/src/crypto.ts` | Add `signCallback()` and `verifyCallback()` functions; change OTP to 8 digits |
-| `.env.example` | Add `MAGIC_CALLBACK_SECRET`, `MAGIC_INTERNAL_SECRET` |
+| File                                              | Changes                                                                                                                                                                                 |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/pds-core/src/index.ts`                  | Add HMAC verification to `/oauth/magic-callback`; add `/_internal/account-by-email` endpoint (replaces `/_magic/check-email`); change `password` to `undefined` in `createAccount` call |
+| `packages/auth-service/src/routes/verify-code.ts` | Add HMAC signing to redirect URL                                                                                                                                                        |
+| `packages/auth-service/src/routes/consent.ts`     | Add HMAC signing to redirect URL                                                                                                                                                        |
+| `packages/auth-service/src/lib/auto-provision.ts` | Change `password` to `undefined` in `createAccount` call                                                                                                                                |
+| `packages/shared/src/crypto.ts`                   | Add `signCallback()` and `verifyCallback()` functions; change OTP to 8 digits                                                                                                           |
+| `.env.example`                                    | Add `MAGIC_CALLBACK_SECRET`, `MAGIC_INTERNAL_SECRET`                                                                                                                                    |
 
 ### New files (Phase 1+)
 
-| File | Purpose |
-|------|---------|
-| `packages/auth-service/src/better-auth.ts` | better-auth configuration |
-| `packages/auth-service/src/routes/complete.ts` | Bridge route: better-auth session → HMAC-signed AT Proto redirect |
-| `packages/auth-service/src/routes/login-page.ts` | Unified login page with multiple methods |
+| File                                             | Purpose                                                           |
+| ------------------------------------------------ | ----------------------------------------------------------------- |
+| `packages/auth-service/src/better-auth.ts`       | better-auth configuration                                         |
+| `packages/auth-service/src/routes/complete.ts`   | Bridge route: better-auth session → HMAC-signed AT Proto redirect |
+| `packages/auth-service/src/routes/login-page.ts` | Unified login page with multiple methods                          |
 
 ### Modified files (Phase 1+)
 
-| File | Changes |
-|------|---------|
-| `packages/pds-core/src/index.ts` | Replace `magicDb.*` calls in magic-callback with `pds.ctx.accountManager.getAccountByEmail()`; remove `MagicPdsDb` instantiation |
-| `packages/auth-service/src/index.ts` | Mount better-auth handler, remove old middleware |
-| `packages/auth-service/src/context.ts` | Remove tokenService, rateLimiter; add auth reference |
-| `packages/auth-service/src/routes/consent.ts` | Read from auth_flow table |
-| `packages/auth-service/src/routes/recovery.ts` | Use better-auth OTP; call `/_internal/account-by-email` for backup email lookup |
-| `packages/auth-service/src/routes/account-settings.ts` | Use better-auth session instead of custom session |
-| `packages/auth-service/src/email/sender.ts` | Keep; wire into sendVerificationOTP callback |
-| `packages/shared/src/db.ts` | Add auth_flow table; remove account_email, getDidByEmail, getDidFromPdsAccount, setAccountEmail; drop magic_link_token + account_session |
-| `packages/auth-service/package.json` | Add better-auth dependency |
-| `.env.example` | Add `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_EXPIRES_IN`, `SESSION_UPDATE_AGE` |
+| File                                                   | Changes                                                                                                                                  |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/pds-core/src/index.ts`                       | Replace `magicDb.*` calls in magic-callback with `pds.ctx.accountManager.getAccountByEmail()`; remove `MagicPdsDb` instantiation         |
+| `packages/auth-service/src/index.ts`                   | Mount better-auth handler, remove old middleware                                                                                         |
+| `packages/auth-service/src/context.ts`                 | Remove tokenService, rateLimiter; add auth reference                                                                                     |
+| `packages/auth-service/src/routes/consent.ts`          | Read from auth_flow table                                                                                                                |
+| `packages/auth-service/src/routes/recovery.ts`         | Use better-auth OTP; call `/_internal/account-by-email` for backup email lookup                                                          |
+| `packages/auth-service/src/routes/account-settings.ts` | Use better-auth session instead of custom session                                                                                        |
+| `packages/auth-service/src/email/sender.ts`            | Keep; wire into sendVerificationOTP callback                                                                                             |
+| `packages/shared/src/db.ts`                            | Add auth_flow table; remove account_email, getDidByEmail, getDidFromPdsAccount, setAccountEmail; drop magic_link_token + account_session |
+| `packages/auth-service/package.json`                   | Add better-auth dependency                                                                                                               |
+| `.env.example`                                         | Add `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_EXPIRES_IN`, `SESSION_UPDATE_AGE`   |
 
 ### Deleted files (inline with each phase)
 
-| File | Deleted in |
-|------|-----------|
-| `packages/auth-service/src/magic-link/token.ts` | Phase 2 |
-| `packages/auth-service/src/magic-link/rate-limit.ts` | Phase 2 |
-| `packages/auth-service/src/middleware/csrf.ts` | Phase 2 |
-| `packages/auth-service/src/middleware/rate-limit.ts` | Phase 2 |
-| `packages/auth-service/src/middleware/session.ts` | Phase 2 |
-| `packages/auth-service/src/routes/authorize.ts` | Phase 2 |
-| `packages/auth-service/src/routes/send-code.ts` | Phase 2 |
-| `packages/auth-service/src/routes/verify-code.ts` | Phase 2 |
-| `packages/auth-service/src/middleware/account-auth.ts` | Phase 3 |
-| `packages/auth-service/src/routes/account-login.ts` | Phase 3 |
+| File                                                   | Deleted in |
+| ------------------------------------------------------ | ---------- |
+| `packages/auth-service/src/magic-link/token.ts`        | Phase 2    |
+| `packages/auth-service/src/magic-link/rate-limit.ts`   | Phase 2    |
+| `packages/auth-service/src/middleware/csrf.ts`         | Phase 2    |
+| `packages/auth-service/src/middleware/rate-limit.ts`   | Phase 2    |
+| `packages/auth-service/src/middleware/session.ts`      | Phase 2    |
+| `packages/auth-service/src/routes/authorize.ts`        | Phase 2    |
+| `packages/auth-service/src/routes/send-code.ts`        | Phase 2    |
+| `packages/auth-service/src/routes/verify-code.ts`      | Phase 2    |
+| `packages/auth-service/src/middleware/account-auth.ts` | Phase 3    |
+| `packages/auth-service/src/routes/account-login.ts`    | Phase 3    |
 
 ### Unchanged
 
-| File | Reason |
-|------|--------|
-| `packages/auth-service/src/lib/client-metadata.ts` | Still needed for branding |
-| `packages/auth-service/src/lib/auto-provision.ts` | Still used by recovery path |
+| File                                               | Reason                      |
+| -------------------------------------------------- | --------------------------- |
+| `packages/auth-service/src/lib/client-metadata.ts` | Still needed for branding   |
+| `packages/auth-service/src/lib/auto-provision.ts`  | Still used by recovery path |

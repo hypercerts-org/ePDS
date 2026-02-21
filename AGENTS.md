@@ -6,11 +6,11 @@ AI agent instructions for the ePDS repository.
 
 Pnpm monorepo with three packages:
 
-| Package | Path | Description |
-|---------|------|-------------|
-| `@certified-app/shared` | `packages/shared/` | SQLite DB, crypto utils, logger, types |
-| `@certified-app/auth-service` | `packages/auth-service/` | Login UI, OTP, social login, account settings |
-| `@certified-app/pds-core` | `packages/pds-core/` | Wraps `@atproto/pds` with magic-callback endpoint |
+| Package                       | Path                     | Description                                       |
+| ----------------------------- | ------------------------ | ------------------------------------------------- |
+| `@certified-app/shared`       | `packages/shared/`       | SQLite DB, crypto utils, logger, types            |
+| `@certified-app/auth-service` | `packages/auth-service/` | Login UI, OTP, social login, account settings     |
+| `@certified-app/pds-core`     | `packages/pds-core/`     | Wraps `@atproto/pds` with magic-callback endpoint |
 
 ## Build / Dev Commands
 
@@ -21,6 +21,8 @@ pnpm typecheck             # type-check without emitting
 pnpm dev                   # run all packages in dev/watch mode
 pnpm dev:auth              # auth-service only (tsx watch)
 pnpm dev:pds               # pds-core only (tsx watch)
+pnpm format                # format all files with Prettier
+pnpm format:check          # check formatting (CI)
 ```
 
 ## Test Commands
@@ -76,6 +78,7 @@ sudo -g docker bash -c "cd /data/projects/ePDS && docker compose up -d"
 ### Imports
 
 Order (no enforced linter, but follow this convention):
+
 1. Node built-ins (`node:crypto`, `node:path`, etc.) — always use the `node:`
    prefix
 2. External packages
@@ -121,7 +124,7 @@ import { AuthServiceContext } from './context.js'
 
 - File-level JSDoc block at the top of route files explaining the route's
   purpose, flow steps, and any non-obvious behaviour.
-- Inline comments explain *why*, not *what*.
+- Inline comments explain _why_, not _what_.
 - Do not add comments that merely restate what the code does.
 
 ### HTML / Templates

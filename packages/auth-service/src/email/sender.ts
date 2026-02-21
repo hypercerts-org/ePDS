@@ -21,10 +21,13 @@ async function fetchTemplate(uri: string): Promise<string | null> {
   const allowedDomains = process.env.EMAIL_TEMPLATE_ALLOWED_DOMAINS
   if (allowedDomains) {
     try {
-      const domains = allowedDomains.split(',').map(d => d.trim())
+      const domains = allowedDomains.split(',').map((d) => d.trim())
       const hostname = new URL(uri).hostname
       if (!domains.includes(hostname)) {
-        logger.warn({ uri, hostname }, 'Email template domain not in allowlist, ignoring')
+        logger.warn(
+          { uri, hostname },
+          'Email template domain not in allowlist, ignoring',
+        )
         return null
       }
     } catch {
@@ -49,13 +52,19 @@ async function fetchTemplate(uri: string): Promise<string | null> {
 
     const html = await res.text()
     if (html.length > MAX_TEMPLATE_SIZE) {
-      logger.warn({ uri, size: html.length }, 'Email template too large, ignoring')
+      logger.warn(
+        { uri, size: html.length },
+        'Email template too large, ignoring',
+      )
       return null
     }
 
     // Basic validation: must contain {{code}} placeholder
     if (!html.includes('{{code}}')) {
-      logger.warn({ uri }, 'Email template missing {{code}} placeholder, ignoring')
+      logger.warn(
+        { uri },
+        'Email template missing {{code}} placeholder, ignoring',
+      )
       return null
     }
     templateCache.set(uri, { html, fetchedAt: Date.now() })
@@ -66,14 +75,23 @@ async function fetchTemplate(uri: string): Promise<string | null> {
   }
 }
 
-function renderTemplate(template: string, vars: Record<string, string | boolean>): string {
+function renderTemplate(
+  template: string,
+  vars: Record<string, string | boolean>,
+): string {
   let html = template
 
   // Handle conditional sections first: {{#key}}...{{/key}} and {{^key}}...{{/key}}
   for (const [key, value] of Object.entries(vars)) {
     if (typeof value === 'boolean') {
-      const showRegex = new RegExp(`\\{\\{#${key}\\}\\}([\\s\\S]*?)\\{\\{/${key}\\}\\}`, 'g')
-      const hideRegex = new RegExp(`\\{\\{\\^${key}\\}\\}([\\s\\S]*?)\\{\\{/${key}\\}\\}`, 'g')
+      const showRegex = new RegExp(
+        `\\{\\{#${key}\\}\\}([\\s\\S]*?)\\{\\{/${key}\\}\\}`,
+        'g',
+      )
+      const hideRegex = new RegExp(
+        `\\{\\{\\^${key}\\}\\}([\\s\\S]*?)\\{\\{/${key}\\}\\}`,
+        'g',
+      )
       html = html.replace(showRegex, value ? '$1' : '')
       html = html.replace(hideRegex, value ? '' : '$1')
     }
@@ -89,7 +107,10 @@ function renderTemplate(template: string, vars: Record<string, string | boolean>
   return html
 }
 
-function renderSubjectTemplate(template: string, vars: Record<string, string>): string {
+function renderSubjectTemplate(
+  template: string,
+  vars: Record<string, string>,
+): string {
   let subject = template
   for (const [key, value] of Object.entries(vars)) {
     subject = subject.replaceAll(`{{${key}}}`, value)
@@ -129,7 +150,9 @@ export class EmailSender {
 
       case 'ses':
         return nodemailer.createTransport({
-          host: this.config.smtpHost || `email-smtp.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com`,
+          host:
+            this.config.smtpHost ||
+            `email-smtp.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com`,
           port: 587,
           secure: false,
           auth: {
@@ -144,8 +167,10 @@ export class EmailSender {
           port: 587,
           secure: false,
           auth: {
-            user: this.config.smtpPass || process.env.POSTMARK_SERVER_TOKEN || '',
-            pass: this.config.smtpPass || process.env.POSTMARK_SERVER_TOKEN || '',
+            user:
+              this.config.smtpPass || process.env.POSTMARK_SERVER_TOKEN || '',
+            pass:
+              this.config.smtpPass || process.env.POSTMARK_SERVER_TOKEN || '',
           },
         })
 
@@ -205,12 +230,22 @@ export class EmailSender {
               html: customHtml,
             })
 
-            logger.info({ to, clientId: opts.clientId, templateUri: metadata.email_template_uri }, 'Sent client-branded OTP email')
+            logger.info(
+              {
+                to,
+                clientId: opts.clientId,
+                templateUri: metadata.email_template_uri,
+              },
+              'Sent client-branded OTP email',
+            )
             return
           }
         }
       } catch (err) {
-        logger.warn({ err, clientId: opts.clientId }, 'Failed to use client email template, falling back to default')
+        logger.warn(
+          { err, clientId: opts.clientId },
+          'Failed to use client email template, falling back to default',
+        )
       }
     }
 
@@ -347,4 +382,3 @@ export class EmailSender {
     })
   }
 }
-

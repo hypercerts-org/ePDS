@@ -15,7 +15,9 @@ describe('escapeHtml', () => {
   })
 
   it('escapes all special chars in one string', () => {
-    expect(escapeHtml('<a href="x">a & b</a>')).toBe('&lt;a href=&quot;x&quot;&gt;a &amp; b&lt;/a&gt;')
+    expect(escapeHtml('<a href="x">a & b</a>')).toBe(
+      '&lt;a href=&quot;x&quot;&gt;a &amp; b&lt;/a&gt;',
+    )
   })
 
   it('returns plain strings unchanged', () => {

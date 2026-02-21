@@ -3,9 +3,7 @@
     "target": "ES2022",
     "module": "Node16",
     "moduleResolution": "Node16",
-    "lib": [
-      "ES2022"
-    ],
+    "lib": ["ES2022"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -18,9 +16,7 @@
     "rootDir": "src",
     "composite": true
   },
-  "include": [
-    "src"
-  ],
+  "include": ["src"],
   "references": [
     {
       "path": "../shared"

@@ -50,16 +50,25 @@ function makeMockRes() {
     locals: { csrfToken: 'test-csrf-token' },
   }
 
-  res.status = (code: number) => { res._status = code; return res }
+  res.status = (code: number) => {
+    res._status = code
+    return res
+  }
   res._status = 200
   res.type = (_t: string) => res
-  res.send = (body: string) => { res.body = body; return res }
+  res.send = (body: string) => {
+    res.body = body
+    return res
+  }
   res.redirect = (code: number, url: string) => {
     res._status = code
     res.redirectTo = url
     return res
   }
-  res.clearCookie = (name: string) => { res.cleared.push(name); return res }
+  res.clearCookie = (name: string) => {
+    res.cleared.push(name)
+    return res
+  }
 
   return res
 }
@@ -68,7 +77,9 @@ function makeMockRes() {
 function makeGetReq(queryStr: string) {
   const url = new URL('http://localhost/auth/consent?' + queryStr)
   const query: Record<string, string> = {}
-  url.searchParams.forEach((v, k) => { query[k] = v })
+  url.searchParams.forEach((v, k) => {
+    query[k] = v
+  })
   return { query, cookies: {}, body: {} }
 }
 
@@ -89,7 +100,9 @@ describe('Consent route logic', () => {
 
   afterEach(() => {
     db.close()
-    try { fs.unlinkSync(dbPath) } catch {}
+    try {
+      fs.unlinkSync(dbPath)
+    } catch {}
   })
 
   describe('auth_flow table operations (used by consent)', () => {
@@ -138,19 +151,27 @@ describe('Consent route logic', () => {
 
   describe('client login tracking (used by consent)', () => {
     it('records and detects client login', () => {
-      expect(db.hasClientLogin('user@example.com', 'https://app.example.com')).toBe(false)
+      expect(
+        db.hasClientLogin('user@example.com', 'https://app.example.com'),
+      ).toBe(false)
       db.recordClientLogin('user@example.com', 'https://app.example.com')
-      expect(db.hasClientLogin('user@example.com', 'https://app.example.com')).toBe(true)
+      expect(
+        db.hasClientLogin('user@example.com', 'https://app.example.com'),
+      ).toBe(true)
     })
 
     it('is case-insensitive for email', () => {
       db.recordClientLogin('User@Example.COM', 'https://app.example.com')
-      expect(db.hasClientLogin('user@example.com', 'https://app.example.com')).toBe(true)
+      expect(
+        db.hasClientLogin('user@example.com', 'https://app.example.com'),
+      ).toBe(true)
     })
 
     it('does not share logins across different clients', () => {
       db.recordClientLogin('user@example.com', 'https://app1.example.com')
-      expect(db.hasClientLogin('user@example.com', 'https://app2.example.com')).toBe(false)
+      expect(
+        db.hasClientLogin('user@example.com', 'https://app2.example.com'),
+      ).toBe(false)
     })
   })
 
@@ -178,7 +199,8 @@ describe('Consent route logic', () => {
     })
 
     it('verifies correctly with verifyCallback', async () => {
-      const { signCallback, verifyCallback } = await import('@certified-app/shared')
+      const { signCallback, verifyCallback } =
+        await import('@certified-app/shared')
       const params = {
         request_uri: 'urn:req:verify-test',
         email: 'user@example.com',
@@ -208,7 +230,9 @@ describe('Consent route logic', () => {
       // Simulate: consent GET reads the flow but doesn't delete it
       const retrieved = db.getAuthFlow('get-flow')
       expect(retrieved).toBeDefined()
-      expect(retrieved!.requestUri).toBe('urn:ietf:params:oauth:request_uri:get-test')
+      expect(retrieved!.requestUri).toBe(
+        'urn:ietf:params:oauth:request_uri:get-test',
+      )
     })
 
     it('auth_flow row is deleted after approve (POST)', () => {

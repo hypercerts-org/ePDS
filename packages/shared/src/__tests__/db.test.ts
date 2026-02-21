@@ -8,15 +8,24 @@ let db: EpdsDb
 let dbPath: string
 
 beforeEach(() => {
-  dbPath = path.join(os.tmpdir(), `epds-test-${Date.now()}-${Math.random().toString(36).slice(2)}.sqlite`)
+  dbPath = path.join(
+    os.tmpdir(),
+    `epds-test-${Date.now()}-${Math.random().toString(36).slice(2)}.sqlite`,
+  )
   db = new EpdsDb(dbPath)
 })
 
 afterEach(() => {
   db.close()
-  try { fs.unlinkSync(dbPath) } catch {}
-  try { fs.unlinkSync(dbPath + '-wal') } catch {}
-  try { fs.unlinkSync(dbPath + '-shm') } catch {}
+  try {
+    fs.unlinkSync(dbPath)
+  } catch {}
+  try {
+    fs.unlinkSync(dbPath + '-wal')
+  } catch {}
+  try {
+    fs.unlinkSync(dbPath + '-shm')
+  } catch {}
 })
 
 describe('Magic Link Token Operations', () => {

@@ -12,11 +12,11 @@
 
 Point the following records at your server:
 
-| Record | Target |
-|--------|--------|
-| `pds.example.com` | your server IP |
-| `auth.pds.example.com` | your server IP |
-| `*.pds.example.com` | your server IP (for handle resolution) |
+| Record                 | Target                                 |
+| ---------------------- | -------------------------------------- |
+| `pds.example.com`      | your server IP                         |
+| `auth.pds.example.com` | your server IP                         |
+| `*.pds.example.com`    | your server IP (for handle resolution) |
 
 ### Configuration
 
@@ -51,11 +51,11 @@ Always use `docker compose up -d` to recreate containers after changing environm
 
 ## Service Ports
 
-| Service | Internal port | Public |
-|---------|--------------|--------|
-| PDS Core | 3000 | via Caddy (443) |
-| Auth Service | 3001 | via Caddy (443) |
-| Caddy | 80, 443 | yes |
+| Service      | Internal port | Public          |
+| ------------ | ------------- | --------------- |
+| PDS Core     | 3000          | via Caddy (443) |
+| Auth Service | 3001          | via Caddy (443) |
+| Caddy        | 80, 443       | yes             |
 
 ## Generating Secrets
 

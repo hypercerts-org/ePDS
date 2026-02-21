@@ -23,7 +23,9 @@ describe('Login page auth_flow creation', () => {
 
   afterEach(() => {
     db.close()
-    try { fs.unlinkSync(dbPath) } catch {}
+    try {
+      fs.unlinkSync(dbPath)
+    } catch {}
   })
 
   it('creates an auth_flow row with correct request_uri and client_id', () => {
@@ -116,11 +118,19 @@ describe('Login page auth_flow creation', () => {
       expiresAt: Date.now() - 1,
     })
 
-    expect(db.getAuthFlowByRequestUri('urn:ietf:params:oauth:request_uri:idem-expired')).toBeUndefined()
+    expect(
+      db.getAuthFlowByRequestUri(
+        'urn:ietf:params:oauth:request_uri:idem-expired',
+      ),
+    ).toBeUndefined()
   })
 
   it('getAuthFlowByRequestUri returns undefined when no flow exists', () => {
-    expect(db.getAuthFlowByRequestUri('urn:ietf:params:oauth:request_uri:nonexistent')).toBeUndefined()
+    expect(
+      db.getAuthFlowByRequestUri(
+        'urn:ietf:params:oauth:request_uri:nonexistent',
+      ),
+    ).toBeUndefined()
   })
 
   it('generates unique flow IDs (no collisions)', () => {
@@ -147,7 +157,8 @@ describe('Social providers detection', () => {
     const providers: Record<string, unknown> = {}
     const googleId = process.env.GOOGLE_CLIENT_ID
     const googleSecret = process.env.GOOGLE_CLIENT_SECRET
-    if (googleId && googleSecret) providers.google = { clientId: googleId, clientSecret: googleSecret }
+    if (googleId && googleSecret)
+      providers.google = { clientId: googleId, clientSecret: googleSecret }
 
     expect('google' in providers).toBe(false)
     expect('github' in providers).toBe(false)
@@ -161,7 +172,8 @@ describe('Social providers detection', () => {
     const providers: Record<string, unknown> = {}
     const googleId = 'test-google-id'
     const googleSecret = 'test-google-secret'
-    if (googleId && googleSecret) providers.google = { clientId: googleId, clientSecret: googleSecret }
+    if (googleId && googleSecret)
+      providers.google = { clientId: googleId, clientSecret: googleSecret }
     expect('google' in providers).toBe(true)
   })
 
@@ -169,7 +181,8 @@ describe('Social providers detection', () => {
     const providers: Record<string, unknown> = {}
     const googleId = 'test-google-id'
     const googleSecret = undefined
-    if (googleId && googleSecret) providers.google = { clientId: googleId, clientSecret: googleSecret }
+    if (googleId && googleSecret)
+      providers.google = { clientId: googleId, clientSecret: googleSecret }
     expect('google' in providers).toBe(false)
   })
 })

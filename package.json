@@ -16,13 +16,16 @@
     "start": "pnpm --recursive --parallel start",
     "typecheck": "tsc --build tsconfig.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "pino": "^10.3.1"
   },
   "devDependencies": {
     "@types/pino": "^7.0.5",
+    "prettier": "^3.8.1",
     "vitest": "^4.0.18"
   },
   "type": "module"

@@ -31,7 +31,9 @@ export async function resolveClientName(clientId: string): Promise<string> {
   return metadata.client_name || extractDomain(clientId) || 'an application'
 }
 
-export async function resolveClientMetadata(clientId: string): Promise<ClientMetadata> {
+export async function resolveClientMetadata(
+  clientId: string,
+): Promise<ClientMetadata> {
   // Only fetch if client_id looks like a URL
   if (!clientId.startsWith('http://') && !clientId.startsWith('https://')) {
     return { client_name: clientId }
@@ -49,7 +51,7 @@ export async function resolveClientMetadata(clientId: string): Promise<ClientMet
 
     const res = await fetch(clientId, {
       signal: controller.signal,
-      headers: { 'Accept': 'application/json' },
+      headers: { Accept: 'application/json' },
     })
 
     clearTimeout(timeout)
@@ -58,7 +60,7 @@ export async function resolveClientMetadata(clientId: string): Promise<ClientMet
       return fallback(clientId)
     }
 
-    const metadata = await res.json() as ClientMetadata
+    const metadata = (await res.json()) as ClientMetadata
 
     // Cache the result
     cache.set(clientId, {
@@ -93,9 +95,12 @@ function extractDomain(urlStr: string): string | null {
 }
 
 // Cleanup expired cache entries periodically
-setInterval(() => {
-  const now = Date.now()
-  for (const [key, entry] of cache) {
-    if (entry.expiresAt <= now) cache.delete(key)
-  }
-}, 5 * 60 * 1000).unref()
+setInterval(
+  () => {
+    const now = Date.now()
+    for (const [key, entry] of cache) {
+      if (entry.expiresAt <= now) cache.delete(key)
+    }
+  },
+  5 * 60 * 1000,
+).unref()

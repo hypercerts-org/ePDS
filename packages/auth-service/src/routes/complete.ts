@@ -26,7 +26,10 @@ const logger = createLogger('auth:complete')
 
 const AUTH_FLOW_COOKIE = 'magic_auth_flow'
 
-export function createCompleteRouter(ctx: AuthServiceContext, auth: any): Router {
+export function createCompleteRouter(
+  ctx: AuthServiceContext,
+  auth: any,
+): Router {
   const router = Router()
 
   router.get('/auth/complete', async (req: Request, res: Response) => {
@@ -34,7 +37,9 @@ export function createCompleteRouter(ctx: AuthServiceContext, auth: any): Router
     const flowId = req.cookies[AUTH_FLOW_COOKIE] as string | undefined
     if (!flowId) {
       logger.warn('No magic_auth_flow cookie found on /auth/complete')
-      res.status(400).send('<p>Authentication session expired. Please try again.</p>')
+      res
+        .status(400)
+        .send('<p>Authentication session expired. Please try again.</p>')
       return
     }
 
@@ -43,7 +48,9 @@ export function createCompleteRouter(ctx: AuthServiceContext, auth: any): Router
     if (!flow) {
       logger.warn({ flowId }, 'auth_flow not found or expired')
       res.clearCookie(AUTH_FLOW_COOKIE)
-      res.status(400).send('<p>Authentication session expired. Please try again.</p>')
+      res
+        .status(400)
+        .send('<p>Authentication session expired. Please try again.</p>')
       return
     }
 
@@ -60,10 +67,14 @@ export function createCompleteRouter(ctx: AuthServiceContext, auth: any): Router
     }
 
     if (!session?.user?.email) {
-      logger.warn({ flowId }, 'No authenticated session found on /auth/complete')
+      logger.warn(
+        { flowId },
+        'No authenticated session found on /auth/complete',
+      )
       // Redirect back to auth flow with error — user needs to authenticate
-      const authUrl = `/oauth/authorize?request_uri=${encodeURIComponent(flow.requestUri)}`
-        + (flow.clientId ? `&client_id=${encodeURIComponent(flow.clientId)}` : '')
+      const authUrl =
+        `/oauth/authorize?request_uri=${encodeURIComponent(flow.requestUri)}` +
+        (flow.clientId ? `&client_id=${encodeURIComponent(flow.clientId)}` : '')
       res.redirect(303, authUrl)
       return
     }
@@ -85,21 +96,28 @@ export function createCompleteRouter(ctx: AuthServiceContext, auth: any): Router
         },
       )
       if (checkRes.ok) {
-        const data = await checkRes.json() as { did: string | null }
+        const data = (await checkRes.json()) as { did: string | null }
         isNewAccount = !data.did
       }
     } catch (err) {
-      logger.warn({ err, email }, 'Failed to check PDS account existence, assuming existing account')
+      logger.warn(
+        { err, email },
+        'Failed to check PDS account existence, assuming existing account',
+      )
     }
 
     const clientId = flow.clientId ?? ''
-    const needsConsent = !isNewAccount && clientId && !ctx.db.hasClientLogin(email, clientId)
+    const needsConsent =
+      !isNewAccount && clientId && !ctx.db.hasClientLogin(email, clientId)
 
     if (needsConsent) {
       // Step 5a: Redirect to consent screen, passing flow_id so consent can
       // look up request_uri and perform cleanup itself.
       // Do NOT delete auth_flow or clear cookie here — consent does it.
-      const consentUrl = new URL('/auth/consent', `https://${ctx.config.hostname}`)
+      const consentUrl = new URL(
+        '/auth/consent',
+        `https://${ctx.config.hostname}`,
+      )
       consentUrl.searchParams.set('flow_id', flowId)
       consentUrl.searchParams.set('email', email)
       consentUrl.searchParams.set('new', '0')
@@ -121,11 +139,17 @@ export function createCompleteRouter(ctx: AuthServiceContext, auth: any): Router
       approved: '1',
       new_account: isNewAccount ? '1' : '0',
     }
-    const { sig, ts } = signCallback(callbackParams, ctx.config.magicCallbackSecret)
+    const { sig, ts } = signCallback(
+      callbackParams,
+      ctx.config.magicCallbackSecret,
+    )
     const params = new URLSearchParams({ ...callbackParams, ts, sig })
     const redirectUrl = `${ctx.config.pdsPublicUrl}/oauth/magic-callback?${params.toString()}`
 
-    logger.info({ email, flowId, isNewAccount }, 'Bridge: redirecting to magic-callback')
+    logger.info(
+      { email, flowId, isNewAccount },
+      'Bridge: redirecting to magic-callback',
+    )
     res.redirect(303, redirectUrl)
   })
 

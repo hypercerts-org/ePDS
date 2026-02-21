@@ -35,9 +35,9 @@ See [configuration.md](configuration.md) for a full reference of environment var
 This starts both services with `NODE_ENV=development`, which disables secure cookies
 (needed for `http://localhost`).
 
-| Service | URL |
-|---------|-----|
-| PDS Core | http://localhost:3000 |
+| Service      | URL                   |
+| ------------ | --------------------- |
+| PDS Core     | http://localhost:3000 |
 | Auth Service | http://localhost:3001 |
 
 ## Running with Docker Locally

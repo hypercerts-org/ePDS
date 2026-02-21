@@ -13,8 +13,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 /** Simulate buildSocialProviders() logic from better-auth.ts */
-function buildSocialProviders(env: Record<string, string | undefined>): Record<string, { clientId: string; clientSecret: string }> {
-  const providers: Record<string, { clientId: string; clientSecret: string }> = {}
+function buildSocialProviders(
+  env: Record<string, string | undefined>,
+): Record<string, { clientId: string; clientSecret: string }> {
+  const providers: Record<string, { clientId: string; clientSecret: string }> =
+    {}
 
   const googleId = env.GOOGLE_CLIENT_ID
   const googleSecret = env.GOOGLE_CLIENT_SECRET
@@ -95,8 +98,10 @@ describe('Social provider detection', () => {
 describe('Social login flow (unit)', () => {
   it('social login URLs follow better-auth convention', () => {
     // Social login should redirect to /api/auth/sign-in/social?provider=...
-    const googleUrl = '/api/auth/sign-in/social?provider=google&callbackURL=/auth/complete'
-    const githubUrl = '/api/auth/sign-in/social?provider=github&callbackURL=/auth/complete'
+    const googleUrl =
+      '/api/auth/sign-in/social?provider=google&callbackURL=/auth/complete'
+    const githubUrl =
+      '/api/auth/sign-in/social?provider=github&callbackURL=/auth/complete'
 
     expect(googleUrl).toContain('provider=google')
     expect(googleUrl).toContain('callbackURL=/auth/complete')
@@ -136,7 +141,8 @@ describe('Social login flow (unit)', () => {
       pdsAccountEmail: 'alice@example.com',
       googleEmail: 'alice@gmail.com',
       expected: 'Two separate PDS accounts would be created',
-      mitigation: 'Document that users should use the same email for all auth methods',
+      mitigation:
+        'Document that users should use the same email for all auth methods',
     }
     expect(scenario.expected).toContain('Two separate')
   })

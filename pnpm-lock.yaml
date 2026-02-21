@@ -15,6 +15,9 @@ importers:
       '@types/pino':
         specifier: ^7.0.5
         version: 7.0.5
+      prettier:
+        specifier: ^3.8.1
+        version: 3.8.1
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@types/node@20.19.33)(tsx@4.21.0)
@@ -1936,6 +1939,11 @@ packages:
     resolution: {integrity: sha512-8Mf2cbV7x1cXPUILADGI3wuhfqWvtiLA1iclTDbFRZkgRQS0NqsPZphna9V+HyTEadheuPmjaJMsbzKQFOzLug==}
     engines: {node: '>=10'}
     deprecated: No longer maintained. Please contact the author of the relevant native addon; alternatives are available.
+    hasBin: true
+
+  prettier@3.8.1:
+    resolution: {integrity: sha512-UOnG6LftzbdaHZcKoPFtOcCKztrQ57WkHDeRD9t/PTQtmT0NHSeWWepj6pS0z/N7+08BHFDQVUrfmfMRcZwbMg==}
+    engines: {node: '>=14'}
     hasBin: true
 
   process-warning@3.0.0:
@@ -4837,6 +4845,8 @@ snapshots:
       simple-get: 4.0.1
       tar-fs: 2.1.4
       tunnel-agent: 0.6.0
+
+  prettier@3.8.1: {}
 
   process-warning@3.0.0: {}
 

@@ -32,24 +32,30 @@ export function createConsentRouter(ctx: AuthServiceContext): Router {
       const flow = ctx.db.getAuthFlow(flowId)
       if (!flow) {
         logger.warn({ flowId }, 'auth_flow not found or expired on consent GET')
-        res.status(400).send('<p>Authentication session expired. Please try again.</p>')
+        res
+          .status(400)
+          .send('<p>Authentication session expired. Please try again.</p>')
         return
       }
 
       const email = req.query.email as string | undefined
       const isNew = req.query.new === '1'
       const clientId = flow.clientId ?? ''
-      const clientName = clientId ? await resolveClientName(clientId) : 'the application'
+      const clientName = clientId
+        ? await resolveClientName(clientId)
+        : 'the application'
 
-      res.type('html').send(renderConsent({
-        flowId,
-        requestUri: flow.requestUri,
-        email: email ?? '',
-        isNew,
-        clientId,
-        clientName,
-        csrfToken: res.locals.csrfToken,
-      }))
+      res.type('html').send(
+        renderConsent({
+          flowId,
+          requestUri: flow.requestUri,
+          email: email ?? '',
+          isNew,
+          clientId,
+          clientName,
+          csrfToken: res.locals.csrfToken,
+        }),
+      )
       return
     }
 
@@ -64,17 +70,21 @@ export function createConsentRouter(ctx: AuthServiceContext): Router {
       return
     }
 
-    const clientName = clientId ? await resolveClientName(clientId) : 'the application'
+    const clientName = clientId
+      ? await resolveClientName(clientId)
+      : 'the application'
 
-    res.type('html').send(renderConsent({
-      flowId: undefined,
-      requestUri,
-      email,
-      isNew,
-      clientId: clientId || '',
-      clientName,
-      csrfToken: res.locals.csrfToken,
-    }))
+    res.type('html').send(
+      renderConsent({
+        flowId: undefined,
+        requestUri,
+        email,
+        isNew,
+        clientId: clientId || '',
+        clientName,
+        csrfToken: res.locals.csrfToken,
+      }),
+    )
   })
 
   router.post('/auth/consent', async (req: Request, res: Response) => {
@@ -90,13 +100,18 @@ export function createConsentRouter(ctx: AuthServiceContext): Router {
       // New mode: look up auth_flow by flow_id
       const flow = ctx.db.getAuthFlow(flowId)
       if (!flow) {
-        logger.warn({ flowId }, 'auth_flow not found or expired on consent POST')
-        res.status(400).send('<p>Authentication session expired. Please try again.</p>')
+        logger.warn(
+          { flowId },
+          'auth_flow not found or expired on consent POST',
+        )
+        res
+          .status(400)
+          .send('<p>Authentication session expired. Please try again.</p>')
         return
       }
 
       requestUri = flow.requestUri
-      email = (req.body.email as string || '').trim().toLowerCase()
+      email = ((req.body.email as string) || '').trim().toLowerCase()
       isNew = req.body.is_new === '1'
       clientId = flow.clientId ?? ''
 
@@ -123,7 +138,10 @@ export function createConsentRouter(ctx: AuthServiceContext): Router {
 
     if (action === 'deny') {
       // Redirect back to client with access_denied error via the PDS oauth provider
-      res.redirect(303, `${ctx.config.pdsPublicUrl}/oauth/authorize?request_uri=${encodeURIComponent(requestUri)}&error=access_denied`)
+      res.redirect(
+        303,
+        `${ctx.config.pdsPublicUrl}/oauth/authorize?request_uri=${encodeURIComponent(requestUri)}&error=access_denied`,
+      )
       return
     }
 
@@ -140,11 +158,20 @@ export function createConsentRouter(ctx: AuthServiceContext): Router {
       approved: '1',
       new_account: isNew ? '1' : '0',
     }
-    const { sig, ts } = signCallback(callbackParams, ctx.config.magicCallbackSecret)
+    const { sig, ts } = signCallback(
+      callbackParams,
+      ctx.config.magicCallbackSecret,
+    )
     const params = new URLSearchParams({ ...callbackParams, ts, sig })
 
-    logger.info({ email, isNew, clientId }, 'Consent approved, redirecting to magic-callback')
-    res.redirect(303, `${ctx.config.pdsPublicUrl}/oauth/magic-callback?${params.toString()}`)
+    logger.info(
+      { email, isNew, clientId },
+      'Consent approved, redirecting to magic-callback',
+    )
+    res.redirect(
+      303,
+      `${ctx.config.pdsPublicUrl}/oauth/magic-callback?${params.toString()}`,
+    )
   })
 
   return router
@@ -159,7 +186,9 @@ function renderConsent(opts: {
   clientName: string
   csrfToken: string
 }): string {
-  const title = opts.isNew ? 'Create Account & Authorize' : 'Authorize Application'
+  const title = opts.isNew
+    ? 'Create Account & Authorize'
+    : 'Authorize Application'
 
   // Hidden fields: use flow_id if available, otherwise fall back to direct params
   const hiddenFields = opts.flowId

@@ -117,7 +117,10 @@ describe('signCallback / verifyCallback', () => {
 
   it('rejects tampered request_uri', () => {
     const { sig, ts } = signCallback(params, secret)
-    const tampered = { ...params, request_uri: 'urn:ietf:params:oauth:request_uri:evil' }
+    const tampered = {
+      ...params,
+      request_uri: 'urn:ietf:params:oauth:request_uri:evil',
+    }
     expect(verifyCallback(tampered, ts, sig, secret)).toBe(false)
   })
 

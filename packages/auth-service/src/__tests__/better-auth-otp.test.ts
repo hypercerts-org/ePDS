@@ -26,7 +26,9 @@ describe('sendVerificationOTP client branding via auth_flow', () => {
 
   afterEach(() => {
     db.close()
-    try { fs.unlinkSync(dbPath) } catch {}
+    try {
+      fs.unlinkSync(dbPath)
+    } catch {}
   })
 
   it('resolves client_id from auth_flow when flow_id cookie is present', () => {
@@ -121,10 +123,12 @@ describe('sendVerificationOTP client branding via auth_flow', () => {
     })
 
     expect(sendOtpCode).toHaveBeenCalledOnce()
-    expect(sendOtpCode).toHaveBeenCalledWith(expect.objectContaining({
-      clientId: 'https://myapp.example.com',
-      isNewUser: true,
-    }))
+    expect(sendOtpCode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: 'https://myapp.example.com',
+        isNewUser: true,
+      }),
+    )
   })
 
   it('EmailSender.sendOtpCode receives no clientId for account settings flow', async () => {
@@ -149,9 +153,11 @@ describe('sendVerificationOTP client branding via auth_flow', () => {
       isNewUser: false,
     })
 
-    expect(sendOtpCode).toHaveBeenCalledWith(expect.objectContaining({
-      clientId: undefined,
-      isNewUser: false,
-    }))
+    expect(sendOtpCode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: undefined,
+        isNewUser: false,
+      }),
+    )
   })
 })

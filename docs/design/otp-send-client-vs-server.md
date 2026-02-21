@@ -107,24 +107,24 @@ is known to be feasible.
 
 ### Summary
 
-| | Old (magic-pds) | Pre-ke8 (flash-prone) | Method-Aware Hybrid (current) |
-|---|---|---|---|
-| OTP send | Server-side in GET handler | Client-side JS on page load | Client-side POST, fired after pre-rendered OTP form is shown |
-| Flash | None — OTP form rendered directly | Yes — email form briefly visible | None — server renders correct initial step |
-| Duplicate GET | Second GET re-sends OTP (same bug) | Second GET re-sends OTP via JS | GET is side-effect-free; `otpAlreadySent` flag skips auto-send |
-| Route chain | authorize.ts → send-code.ts → verify-code.ts | login-page.ts (unified) | login-page.ts (unified, `initialStep` aware) |
-| Session | Custom tokenService / sessionId | better-auth | better-auth |
-| Future auth modes | Email only | Email only | Extensible — add methods when they are implemented |
+|                   | Old (magic-pds)                              | Pre-ke8 (flash-prone)            | Method-Aware Hybrid (current)                                  |
+| ----------------- | -------------------------------------------- | -------------------------------- | -------------------------------------------------------------- |
+| OTP send          | Server-side in GET handler                   | Client-side JS on page load      | Client-side POST, fired after pre-rendered OTP form is shown   |
+| Flash             | None — OTP form rendered directly            | Yes — email form briefly visible | None — server renders correct initial step                     |
+| Duplicate GET     | Second GET re-sends OTP (same bug)           | Second GET re-sends OTP via JS   | GET is side-effect-free; `otpAlreadySent` flag skips auto-send |
+| Route chain       | authorize.ts → send-code.ts → verify-code.ts | login-page.ts (unified)          | login-page.ts (unified, `initialStep` aware)                   |
+| Session           | Custom tokenService / sessionId              | better-auth                      | better-auth                                                    |
+| Future auth modes | Email only                                   | Email only                       | Extensible — add methods when they are implemented             |
 
 ### Client-side send (pre-ke8)
 
-| Pros | Cons |
-|------|------|
-| Simple — no server-side async call needed | Flash of email form before OTP step appears |
-| better-auth CSRF handled automatically | Duplicate GET triggers second OTP send via JS |
-| Resend button uses the same code path | OTP send can fail silently if JS errors |
+| Pros                                         | Cons                                           |
+| -------------------------------------------- | ---------------------------------------------- |
+| Simple — no server-side async call needed    | Flash of email form before OTP step appears    |
+| better-auth CSRF handled automatically       | Duplicate GET triggers second OTP send via JS  |
+| Resend button uses the same code path        | OTP send can fail silently if JS errors        |
 | Social login buttons follow the same pattern | Requires JS — broken if browser blocks scripts |
-| Easy to show loading states in UI | Extra round-trip: page load → JS fetch → OTP |
+| Easy to show loading states in UI            | Extra round-trip: page load → JS fetch → OTP   |
 
 ### Server-side send (old / proposed fix) — **superseded**
 
@@ -134,7 +134,7 @@ Method-Aware Hybrid approach for the following reasons:
 
 1. **Adds a method-assuming side effect at the wrong layer.** The GET handler
    already creates an `auth_flow` row and sets a cookie — it is not side-effect
-   free. However, those mutations are *structurally required* by the OAuth
+   free. However, those mutations are _structurally required_ by the OAuth
    authorization code flow. Sending an OTP email is different: it hard-codes
    email OTP as the authentication method before the handler has consulted the
    user's available credentials. If the user has a social account configured
@@ -151,12 +151,12 @@ Method-Aware Hybrid approach for the following reasons:
    endpoint from the browser regardless, so the client-side send path cannot be
    eliminated entirely.
 
-| Pros | Cons |
-|------|------|
-| No flash — OTP form rendered immediately | **Assumes email OTP before credentials are consulted** |
+| Pros                                        | Cons                                                               |
+| ------------------------------------------- | ------------------------------------------------------------------ |
+| No flash — OTP form rendered immediately    | **Assumes email OTP before credentials are consulted**             |
 | Duplicate GETs blocked by request_uri dedup | HTTP GET semantics (secondary — endpoint already has side effects) |
-| Works without JS | Error handling harder — no UI feedback mid-render |
-| One fewer round-trip | Resend button still needs the JS path anyway |
+| Works without JS                            | Error handling harder — no UI feedback mid-render                  |
+| One fewer round-trip                        | Resend button still needs the JS path anyway                       |
 
 ## Method-Aware Hybrid Approach (implemented)
 
@@ -313,13 +313,13 @@ dispatch two emails.
 
 ### Why this supersedes both prior approaches
 
-| Concern | Server-side GET | Client-side JS (pre-ke8) | Method-Aware Hybrid (current) |
-|---|---|---|---|
-| HTTP semantics | ❌ GET side-effect | ✅ POST side-effect | ✅ POST side-effect |
-| UI flash | ✅ No flash | ❌ Flash | ✅ No flash |
-| Future auth modes (Passkey etc.) | ⚠️ Would need rework when new auth methods are added | ✅ Can be extended | ✅ Extension point is explicit |
-| Duplicate send protection | Partial (request_uri dedup) | ❌ Each GET re-sends | ✅ `otpAlreadySent` flag; optional server-side wrapper |
-| Works without JS | ✅ | ❌ | ❌ — OTP form renders but form submission also uses `fetch()`; same as pre-ke8 |
+| Concern                          | Server-side GET                                      | Client-side JS (pre-ke8) | Method-Aware Hybrid (current)                                                  |
+| -------------------------------- | ---------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------ |
+| HTTP semantics                   | ❌ GET side-effect                                   | ✅ POST side-effect      | ✅ POST side-effect                                                            |
+| UI flash                         | ✅ No flash                                          | ❌ Flash                 | ✅ No flash                                                                    |
+| Future auth modes (Passkey etc.) | ⚠️ Would need rework when new auth methods are added | ✅ Can be extended       | ✅ Extension point is explicit                                                 |
+| Duplicate send protection        | Partial (request_uri dedup)                          | ❌ Each GET re-sends     | ✅ `otpAlreadySent` flag; optional server-side wrapper                         |
+| Works without JS                 | ✅                                                   | ❌                       | ❌ — OTP form renders but form submission also uses `fetch()`; same as pre-ke8 |
 
 ## Open questions
 

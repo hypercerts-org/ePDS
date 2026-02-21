@@ -19,7 +19,11 @@ dotenv.config()
 import * as http from 'node:http'
 import { randomBytes } from 'node:crypto'
 import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
-import { generateRandomHandle, createLogger, verifyCallback } from '@certified-app/shared'
+import {
+  generateRandomHandle,
+  createLogger,
+  verifyCallback,
+} from '@certified-app/shared'
 
 const logger = createLogger('pds-core')
 
@@ -37,7 +41,9 @@ async function main() {
   const provider = ctx.oauthProvider
 
   if (!provider) {
-    logger.warn('OAuth provider not configured, starting without magic link integration')
+    logger.warn(
+      'OAuth provider not configured, starting without magic link integration',
+    )
   } else {
     logger.info('OAuth provider active, setting up magic link integration')
   }
@@ -49,14 +55,15 @@ async function main() {
   // Called by the auth service after magic link verification + user consent.
   // Steps: load device -> resolve account -> issue code -> redirect to client
 
-  const magicCallbackSecret = process.env.MAGIC_CALLBACK_SECRET || 'dev-callback-secret-change-me'
+  const magicCallbackSecret =
+    process.env.MAGIC_CALLBACK_SECRET || 'dev-callback-secret-change-me'
 
   pds.app.get('/oauth/magic-callback', async (req, res) => {
     // We use `as any` casts for branded OAuth types (RequestUri, Code, etc.)
     // since these internal types aren't cleanly exported from @atproto/oauth-provider.
 
     const requestUri = req.query.request_uri as string
-    const email = (req.query.email as string || '').toLowerCase()
+    const email = ((req.query.email as string) || '').toLowerCase()
     const approved = req.query.approved === '1'
     const isNewAccount = req.query.new_account === '1'
     const ts = req.query.ts as string
@@ -78,7 +85,12 @@ async function main() {
     const approvedStr = req.query.approved as string
     const newAccountStr = req.query.new_account as string
     const signatureValid = verifyCallback(
-      { request_uri: requestUri, email, approved: approvedStr, new_account: newAccountStr },
+      {
+        request_uri: requestUri,
+        email,
+        approved: approvedStr,
+        new_account: newAccountStr,
+      },
       ts,
       sig,
       magicCallbackSecret,
@@ -123,7 +135,8 @@ async function main() {
       // Use the PDS accountManager directly — account.sqlite is the single source of truth.
       // Backup email lookup (recovery flow) is handled by the auth-service before issuing
       // the HMAC-signed callback; by the time we reach here, email is the verified primary.
-      const existingAccount = await pds.ctx.accountManager.getAccountByEmail(email)
+      const existingAccount =
+        await pds.ctx.accountManager.getAccountByEmail(email)
       let did: string | undefined = existingAccount?.did
 
       let account: any // Account type from @atproto/oauth-provider-api
@@ -160,7 +173,10 @@ async function main() {
             break
           } catch (createErr: any) {
             if (attempt === 2) throw createErr
-            logger.warn({ err: createErr, attempt }, 'Account creation attempt failed, retrying')
+            logger.warn(
+              { err: createErr, attempt },
+              'Account creation attempt failed, retrying',
+            )
           }
         }
       }
@@ -194,7 +210,9 @@ async function main() {
       // Step 8: Build redirect URL and send user back to client
       const redirectUri = parameters.redirect_uri
       if (!redirectUri) {
-        res.status(400).json({ error: 'No redirect_uri in authorization request' })
+        res
+          .status(400)
+          .json({ error: 'No redirect_uri in authorization request' })
         return
       }
 
@@ -226,12 +244,17 @@ async function main() {
 
       // Try to redirect error back to client
       try {
-        const requestData = await (provider!.requestManager as any).get(requestUri)
+        const requestData = await (provider!.requestManager as any).get(
+          requestUri,
+        )
         const redirectUri = requestData?.parameters?.redirect_uri
         if (redirectUri) {
           const errorUrl = new URL(redirectUri)
           errorUrl.searchParams.set('error', 'server_error')
-          errorUrl.searchParams.set('error_description', 'Authentication failed')
+          errorUrl.searchParams.set(
+            'error_description',
+            'Authentication failed',
+          )
           errorUrl.searchParams.set('iss', pdsUrl)
           if (requestData.parameters.state) {
             errorUrl.searchParams.set('state', requestData.parameters.state)
@@ -261,7 +284,10 @@ async function main() {
   // so it intercepts the request before the stock OAuth middleware.
 
   const asMetadataOverride = (req: any, res: any, next: any) => {
-    if (req.method === 'GET' && req.path === '/.well-known/oauth-authorization-server') {
+    if (
+      req.method === 'GET' &&
+      req.path === '/.well-known/oauth-authorization-server'
+    ) {
       const authUrl = `https://${authHostname}`
       res.setHeader('Access-Control-Allow-Origin', '*')
       res.setHeader('Cache-Control', 'public, max-age=300')
@@ -287,7 +313,10 @@ async function main() {
     // Find expressInit and insert right after it.
     let insertIdx = 0
     for (let i = 0; i < stack.length; i++) {
-      if (stack[i].name === 'expressInit') { insertIdx = i + 1; break }
+      if (stack[i].name === 'expressInit') {
+        insertIdx = i + 1
+        break
+      }
     }
     stack.splice(insertIdx, 0, layer)
     logger.info('AS metadata override installed')
@@ -301,11 +330,13 @@ async function main() {
   // Replaces the old unauthenticated /_magic/check-email to prevent email enumeration.
   // Queries account.sqlite directly via the PDS accountManager — no mirror table needed.
   pds.app.get('/_internal/account-by-email', async (req, res) => {
-    if (req.headers['x-internal-secret'] !== process.env.MAGIC_INTERNAL_SECRET) {
+    if (
+      req.headers['x-internal-secret'] !== process.env.MAGIC_INTERNAL_SECRET
+    ) {
       res.status(401).json({ error: 'Unauthorized' })
       return
     }
-    const email = (req.query.email as string || '').trim().toLowerCase()
+    const email = ((req.query.email as string) || '').trim().toLowerCase()
     if (!email) {
       res.status(400).json({ error: 'Missing email' })
       return

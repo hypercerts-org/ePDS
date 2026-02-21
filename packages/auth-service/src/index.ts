@@ -18,7 +18,10 @@ import { createCompleteRouter } from './routes/complete.js'
 
 const logger = createLogger('auth-service')
 
-export function createAuthService(config: AuthServiceConfig): { app: express.Express; ctx: AuthServiceContext } {
+export function createAuthService(config: AuthServiceConfig): {
+  app: express.Express
+  ctx: AuthServiceContext
+} {
   const ctx = new AuthServiceContext(config)
   const app = express()
 
@@ -51,16 +54,18 @@ export function createAuthService(config: AuthServiceConfig): { app: express.Exp
         if (clientOrigin && clientOrigin !== 'null') {
           imgSrc += ` ${clientOrigin}`
         }
-      } catch { /* not a valid URL, keep default */ }
+      } catch {
+        /* not a valid URL, keep default */
+      }
     }
 
     res.setHeader(
       'Content-Security-Policy',
-      `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src ${imgSrc}; connect-src 'self'`
+      `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src ${imgSrc}; connect-src 'self'`,
     )
     res.setHeader(
       'Strict-Transport-Security',
-      'max-age=63072000; includeSubDomains; preload'
+      'max-age=63072000; includeSubDomains; preload',
     )
     next()
   })
@@ -78,7 +83,11 @@ export function createAuthService(config: AuthServiceConfig): { app: express.Exp
     const adminPassword = process.env.PDS_ADMIN_PASSWORD
     if (adminPassword) {
       const authHeader = req.headers.authorization
-      if (!authHeader || authHeader !== 'Basic ' + Buffer.from('admin:' + adminPassword).toString('base64')) {
+      if (
+        !authHeader ||
+        authHeader !==
+          'Basic ' + Buffer.from('admin:' + adminPassword).toString('base64')
+      ) {
         res.status(401).json({ error: 'Unauthorized' })
         return
       }
@@ -104,9 +113,11 @@ async function main() {
   const config: AuthServiceConfig = {
     hostname: process.env.AUTH_HOSTNAME || 'auth.localhost',
     port: parseInt(process.env.AUTH_PORT || '3001', 10),
-    sessionSecret: process.env.AUTH_SESSION_SECRET || 'dev-session-secret-change-me',
+    sessionSecret:
+      process.env.AUTH_SESSION_SECRET || 'dev-session-secret-change-me',
     csrfSecret: process.env.AUTH_CSRF_SECRET || 'dev-csrf-secret-change-me',
-    magicCallbackSecret: process.env.MAGIC_CALLBACK_SECRET || 'dev-callback-secret-change-me',
+    magicCallbackSecret:
+      process.env.MAGIC_CALLBACK_SECRET || 'dev-callback-secret-change-me',
     pdsHostname: process.env.PDS_HOSTNAME || 'localhost',
     pdsPublicUrl: process.env.PDS_PUBLIC_URL || 'http://localhost:3000',
     email: {
@@ -126,7 +137,10 @@ async function main() {
   const { app, ctx } = createAuthService(config)
 
   const server = app.listen(config.port, () => {
-    logger.info({ port: config.port, hostname: config.hostname }, 'Auth service running')
+    logger.info(
+      { port: config.port, hostname: config.hostname },
+      'Auth service running',
+    )
   })
 
   const shutdown = () => {
