@@ -377,6 +377,16 @@ export class MagicPdsDb {
     ).get(flowId, Date.now()) as AuthFlowRow | undefined
   }
 
+  /** Look up a non-expired auth_flow by request_uri (for idempotency on duplicate GETs). */
+  getAuthFlowByRequestUri(requestUri: string): AuthFlowRow | undefined {
+    return this.db.prepare(
+      `SELECT flow_id as flowId, request_uri as requestUri, client_id as clientId,
+       email, created_at as createdAt, expires_at as expiresAt
+       FROM auth_flow WHERE request_uri = ? AND expires_at > ?
+       ORDER BY created_at DESC LIMIT 1`
+    ).get(requestUri, Date.now()) as AuthFlowRow | undefined
+  }
+
   deleteAuthFlow(flowId: string): void {
     this.db.prepare(`DELETE FROM auth_flow WHERE flow_id = ?`).run(flowId)
   }

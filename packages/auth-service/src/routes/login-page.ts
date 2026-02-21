@@ -53,19 +53,33 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
       ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
     }, 'GET /oauth/authorize')
 
-    // Create an auth_flow row to thread request_uri through better-auth
-    const flowId = randomBytes(16).toString('hex')
-    try {
-      ctx.db.createAuthFlow({
+    // Idempotency: if a flow already exists for this request_uri, reuse it rather
+    // than creating a second row (and triggering a second OTP send). This protects
+    // against duplicate GETs from browser extensions, prefetch, or StayFocusd.
+    let flowId: string
+    const existingFlow = ctx.db.getAuthFlowByRequestUri(requestUri)
+    if (existingFlow) {
+      flowId = existingFlow.flowId
+      logger.warn({
         flowId,
-        requestUri,
-        clientId: clientId ?? null,
-        expiresAt: Date.now() + AUTH_FLOW_TTL_MS,
-      })
-    } catch (err) {
-      logger.error({ err }, 'Failed to create auth_flow')
-      res.status(500).type('html').send(renderError('Internal server error. Please try again.'))
-      return
+        requestUri: requestUri.slice(0, 60),
+        userAgent: req.headers['user-agent'],
+        ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+      }, 'Duplicate GET /oauth/authorize for existing request_uri — reusing flow, dropping duplicate')
+    } else {
+      flowId = randomBytes(16).toString('hex')
+      try {
+        ctx.db.createAuthFlow({
+          flowId,
+          requestUri,
+          clientId: clientId ?? null,
+          expiresAt: Date.now() + AUTH_FLOW_TTL_MS,
+        })
+      } catch (err) {
+        logger.error({ err }, 'Failed to create auth_flow')
+        res.status(500).type('html').send(renderError('Internal server error. Please try again.'))
+        return
+      }
     }
 
     // Set httpOnly cookie so /auth/complete can retrieve the flow_id
@@ -80,7 +94,7 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     const clientMeta: ClientMetadata = clientId ? await resolveClientMetadata(clientId) : {}
     const clientName = clientMeta.client_name ?? (clientId ? await resolveClientName(clientId) : 'an application')
 
-    logger.info({ flowId, clientId, requestUri: requestUri.slice(0, 50) }, 'Created auth_flow for login')
+    logger.info({ flowId, clientId, requestUri: requestUri.slice(0, 50), reused: !!existingFlow }, 'Serving login page for auth_flow')
 
     res.type('html').send(renderLoginPage({
       flowId,

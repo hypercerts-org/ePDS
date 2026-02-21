@@ -93,6 +93,36 @@ describe('Login page auth_flow creation', () => {
     expect(db.getAuthFlow('active-flow')).toBeDefined()
   })
 
+  it('getAuthFlowByRequestUri returns existing non-expired flow', () => {
+    const flowId = 'idem-flow-001'
+    const requestUri = 'urn:ietf:params:oauth:request_uri:idem-test'
+    db.createAuthFlow({
+      flowId,
+      requestUri,
+      clientId: null,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    })
+
+    const found = db.getAuthFlowByRequestUri(requestUri)
+    expect(found).toBeDefined()
+    expect(found!.flowId).toBe(flowId)
+  })
+
+  it('getAuthFlowByRequestUri returns undefined for expired flow', () => {
+    db.createAuthFlow({
+      flowId: 'idem-expired',
+      requestUri: 'urn:ietf:params:oauth:request_uri:idem-expired',
+      clientId: null,
+      expiresAt: Date.now() - 1,
+    })
+
+    expect(db.getAuthFlowByRequestUri('urn:ietf:params:oauth:request_uri:idem-expired')).toBeUndefined()
+  })
+
+  it('getAuthFlowByRequestUri returns undefined when no flow exists', () => {
+    expect(db.getAuthFlowByRequestUri('urn:ietf:params:oauth:request_uri:nonexistent')).toBeUndefined()
+  })
+
   it('generates unique flow IDs (no collisions)', () => {
     const { randomBytes } = require('node:crypto')
     const ids = new Set<string>()
