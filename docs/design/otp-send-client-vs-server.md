@@ -184,6 +184,13 @@ semantically correct: the user's intention to authenticate has already been
 established (by the PAR request and the `login_hint`), and the `POST` expresses
 that intent explicitly.
 
+The target is the first-party auth endpoint on our own server
+(`POST /api/auth/email-otp/send-verification-otp`). The browser never contacts
+the email provider directly — the server receives the request, enforces
+idempotency, and dispatches the email. This is not "client → email provider"
+behaviour; it is "client → auth server → email provider", with the auth server
+remaining in control throughout.
+
 The flash disappears because the correct form is visible on first paint, not
 because the email is sent before the page is served.
 
@@ -234,6 +241,10 @@ Browser pre-fetching, extensions, or rapid reloads can cause the background
   where an attacker supplies another user's `flowId`.
 - If an OTP was sent within the rate-limit window, return `200` without
   re-sending — do not return an error.
+- **Enforcement location:** all of the above checks must live inside the
+  `send-verification-otp` endpoint on the server. The client UI may skip a
+  redundant call as an optimisation, but correctness must never depend on
+  UI-side guards alone.
 
 This also protects the Resend button: a rapid double-click will not dispatch
 two emails.
@@ -246,7 +257,7 @@ two emails.
 | UI flash | ✅ No flash | ❌ Flash | ✅ No flash |
 | Future auth modes (Passkey etc.) | ❌ Assumes email OTP | ✅ Can be extended | ✅ Designed for it |
 | Duplicate send protection | Partial (request_uri dedup) | ❌ Each GET re-sends | ✅ `flowId` idempotency |
-| Works without JS | ✅ | ❌ | ❌ (acceptable trade-off) |
+| Works without JS | ✅ | ❌ | ⚠️ degraded — OTP form renders, user can submit manually; no auto-send |
 
 ## Open questions
 
