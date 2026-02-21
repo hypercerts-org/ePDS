@@ -9,6 +9,7 @@
  * 5. Redirects to /auth/complete to complete AT Protocol flow
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { randomBytes } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
@@ -27,6 +28,7 @@ describe('Recovery flow: backup email lookup', () => {
     db.close()
     try {
       fs.unlinkSync(dbPath)
+      // eslint-disable-next-line no-empty
     } catch {}
   })
 
@@ -78,11 +80,11 @@ describe('Recovery flow: auth_flow creation for request_uri threading', () => {
     db.close()
     try {
       fs.unlinkSync(dbPath)
+      // eslint-disable-next-line no-empty
     } catch {}
   })
 
   it('creates auth_flow with requestUri when backup email is found', () => {
-    const { randomBytes } = require('node:crypto')
     const flowId = randomBytes(16).toString('hex')
     const requestUri = 'urn:ietf:params:oauth:request_uri:recovery-test'
 
@@ -154,6 +156,7 @@ describe('Recovery flow: /auth/complete bridge integration', () => {
     db.close()
     try {
       fs.unlinkSync(dbPath)
+      // eslint-disable-next-line no-empty
     } catch {}
   })
 

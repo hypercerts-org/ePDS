@@ -4,7 +4,7 @@ import * as crypto from 'node:crypto'
 const CSRF_COOKIE = 'magic_csrf'
 const CSRF_HEADER = 'x-csrf-token'
 
-export function csrfProtection(secret: string) {
+export function csrfProtection(_secret: string) {
   return (req: Request, res: Response, next: NextFunction): void => {
     // GET requests: set CSRF cookie if not present
     if (req.method === 'GET') {

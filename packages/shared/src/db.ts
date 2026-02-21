@@ -62,7 +62,7 @@ export class EpdsDb {
     const row = this.db.prepare('SELECT version FROM schema_version').get() as
       | { version: number }
       | undefined
-    let currentVersion = row?.version ?? 0
+    const currentVersion = row?.version ?? 0
 
     if (currentVersion === 0 && !row) {
       this.db.prepare('INSERT INTO schema_version (version) VALUES (0)').run()

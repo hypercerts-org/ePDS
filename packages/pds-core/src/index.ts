@@ -16,7 +16,7 @@
 import * as dotenv from 'dotenv'
 dotenv.config()
 
-import * as http from 'node:http'
+import type * as http from 'node:http'
 import { randomBytes } from 'node:crypto'
 import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
 import {
@@ -65,7 +65,7 @@ async function main() {
     const requestUri = req.query.request_uri as string
     const email = ((req.query.email as string) || '').toLowerCase()
     const approved = req.query.approved === '1'
-    const isNewAccount = req.query.new_account === '1'
+    const _isNewAccount = req.query.new_account === '1'
     const ts = req.query.ts as string
     const sig = req.query.sig as string
 
@@ -122,6 +122,7 @@ async function main() {
       const { deviceId, deviceMetadata } = deviceInfo
 
       // Step 2: Get the pending authorization request
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
       const requestData = await (provider.requestManager as any).get(
         requestUri,
         deviceId,
@@ -139,7 +140,8 @@ async function main() {
         await pds.ctx.accountManager.getAccountByEmail(email)
       let did: string | undefined = existingAccount?.did
 
-      let account: any // Account type from @atproto/oauth-provider-api
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider Account type not exported
+      let account: any
 
       if (did) {
         // Existing account
@@ -171,7 +173,7 @@ async function main() {
             did = account.sub
             logger.info({ did, email, handle }, 'Created account')
             break
-          } catch (createErr: any) {
+          } catch (createErr: unknown) {
             if (attempt === 2) throw createErr
             logger.warn(
               { err: createErr, attempt },
@@ -185,6 +187,7 @@ async function main() {
       await provider.accountManager.upsertDeviceAccount(deviceId, account.sub)
 
       // Step 6: Issue authorization code
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
       const code = await (provider.requestManager as any).setAuthorized(
         requestUri,
         client,
@@ -244,7 +247,8 @@ async function main() {
 
       // Try to redirect error back to client
       try {
-        const requestData = await (provider!.requestManager as any).get(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
+        const requestData = await (provider.requestManager as any).get(
           requestUri,
         )
         const redirectUri = requestData?.parameters?.redirect_uri
@@ -283,6 +287,7 @@ async function main() {
   // Solution: inject our own middleware at the very front of the Express stack
   // so it intercepts the request before the stock OAuth middleware.
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Express middleware injected into raw stack
   const asMetadataOverride = (req: any, res: any, next: any) => {
     if (
       req.method === 'GET' &&
@@ -303,6 +308,7 @@ async function main() {
 
   // Insert at position 0 in the Express middleware stack so it runs before
   // the stock authRoutes middleware that serves the pre-serialized metadata.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- accessing Express internal _router stack
   const stack = (pds.app as any)._router?.stack
   if (stack) {
     // Create a Layer-like entry by temporarily registering and then moving it
@@ -362,7 +368,7 @@ async function main() {
   process.on('SIGINT', shutdown)
 }
 
-main().catch((err) => {
+main().catch((err: unknown) => {
   logger.fatal({ err }, 'Failed to start ePDS')
   process.exit(1)
 })

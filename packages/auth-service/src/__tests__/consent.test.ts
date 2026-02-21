@@ -35,46 +35,47 @@ function makeMockContext(db: EpdsDb): AuthServiceContext {
   return {
     db,
     config,
-    emailSender: null as any,
-    destroy: () => db.close(),
+    emailSender: null as unknown as AuthServiceContext['emailSender'],
+    destroy: () => {
+      db.close()
+    },
   }
 }
 
-/** Build a minimal mock response that captures redirect/send calls. */
-function makeMockRes() {
-  const res: any = {
-    status: 400,
+// Mock helpers for future route-level tests (currently only DB logic is tested)
+
+function _makeMockRes() {
+  const res = {
+    _status: 200,
     body: '',
     redirectTo: '',
     cleared: [] as string[],
     locals: { csrfToken: 'test-csrf-token' },
+    status(code: number) {
+      this._status = code
+      return this
+    },
+    type(_t: string) {
+      return this
+    },
+    send(body: string) {
+      this.body = body
+      return this
+    },
+    redirect(code: number, url: string) {
+      this._status = code
+      this.redirectTo = url
+      return this
+    },
+    clearCookie(name: string) {
+      this.cleared.push(name)
+      return this
+    },
   }
-
-  res.status = (code: number) => {
-    res._status = code
-    return res
-  }
-  res._status = 200
-  res.type = (_t: string) => res
-  res.send = (body: string) => {
-    res.body = body
-    return res
-  }
-  res.redirect = (code: number, url: string) => {
-    res._status = code
-    res.redirectTo = url
-    return res
-  }
-  res.clearCookie = (name: string) => {
-    res.cleared.push(name)
-    return res
-  }
-
   return res
 }
 
-/** Build a minimal mock request. */
-function makeGetReq(queryStr: string) {
+function _makeGetReq(queryStr: string) {
   const url = new URL('http://localhost/auth/consent?' + queryStr)
   const query: Record<string, string> = {}
   url.searchParams.forEach((v, k) => {
@@ -83,13 +84,14 @@ function makeGetReq(queryStr: string) {
   return { query, cookies: {}, body: {} }
 }
 
-function makePostReq(body: Record<string, string>) {
+function _makePostReq(body: Record<string, string>) {
   return { query: {}, cookies: {}, body }
 }
 
 describe('Consent route logic', () => {
   let db: EpdsDb
   let dbPath: string
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   let ctx: AuthServiceContext
 
   beforeEach(() => {
@@ -102,6 +104,7 @@ describe('Consent route logic', () => {
     db.close()
     try {
       fs.unlinkSync(dbPath)
+      // eslint-disable-next-line no-empty
     } catch {}
   })
 

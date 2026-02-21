@@ -7,6 +7,7 @@
  * 3. Renders a login page with email OTP form + optional social buttons
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { randomBytes } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
@@ -25,6 +26,7 @@ describe('Login page auth_flow creation', () => {
     db.close()
     try {
       fs.unlinkSync(dbPath)
+      // eslint-disable-next-line no-empty
     } catch {}
   })
 
@@ -134,7 +136,6 @@ describe('Login page auth_flow creation', () => {
   })
 
   it('generates unique flow IDs (no collisions)', () => {
-    const { randomBytes } = require('node:crypto')
     const ids = new Set<string>()
     for (let i = 0; i < 100; i++) {
       ids.add(randomBytes(16).toString('hex'))
@@ -144,7 +145,7 @@ describe('Login page auth_flow creation', () => {
 })
 
 describe('Social providers detection', () => {
-  it('empty socialProviders when no env vars set', async () => {
+  it('empty socialProviders when no env vars set', () => {
     // Preserve original env
     const origGoogle = process.env.GOOGLE_CLIENT_ID
     const origGithub = process.env.GITHUB_CLIENT_ID
@@ -157,6 +158,7 @@ describe('Social providers detection', () => {
     const providers: Record<string, unknown> = {}
     const googleId = process.env.GOOGLE_CLIENT_ID
     const googleSecret = process.env.GOOGLE_CLIENT_SECRET
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- testing env-var-driven logic
     if (googleId && googleSecret)
       providers.google = { clientId: googleId, clientSecret: googleSecret }
 
@@ -172,6 +174,7 @@ describe('Social providers detection', () => {
     const providers: Record<string, unknown> = {}
     const googleId = 'test-google-id'
     const googleSecret = 'test-google-secret'
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- testing env-var-driven logic
     if (googleId && googleSecret)
       providers.google = { clientId: googleId, clientSecret: googleSecret }
     expect('google' in providers).toBe(true)
@@ -181,6 +184,7 @@ describe('Social providers detection', () => {
     const providers: Record<string, unknown> = {}
     const googleId = 'test-google-id'
     const googleSecret = undefined
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- testing env-var-driven logic
     if (googleId && googleSecret)
       providers.google = { clientId: googleId, clientSecret: googleSecret }
     expect('google' in providers).toBe(false)

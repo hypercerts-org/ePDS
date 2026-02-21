@@ -87,7 +87,7 @@ export function createConsentRouter(ctx: AuthServiceContext): Router {
     )
   })
 
-  router.post('/auth/consent', async (req: Request, res: Response) => {
+  router.post('/auth/consent', (req: Request, res: Response) => {
     const flowId = req.body.flow_id as string | undefined
     const action = req.body.action as string
 

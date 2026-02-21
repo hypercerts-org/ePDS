@@ -19,12 +19,15 @@ afterEach(() => {
   db.close()
   try {
     fs.unlinkSync(dbPath)
+    // eslint-disable-next-line no-empty
   } catch {}
   try {
     fs.unlinkSync(dbPath + '-wal')
+    // eslint-disable-next-line no-empty
   } catch {}
   try {
     fs.unlinkSync(dbPath + '-shm')
+    // eslint-disable-next-line no-empty
   } catch {}
 })
 

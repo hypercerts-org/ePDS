@@ -18,14 +18,20 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix ."
   },
   "dependencies": {
     "pino": "^10.3.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/pino": "^7.0.5",
+    "eslint": "^10.0.1",
+    "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.8.1",
+    "typescript-eslint": "^8.56.0",
     "vitest": "^4.0.18"
   },
   "type": "module"

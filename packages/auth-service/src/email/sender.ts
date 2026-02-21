@@ -1,6 +1,6 @@
 import * as nodemailer from 'nodemailer'
 import { createLogger } from '@certified-app/shared'
-import type { Transporter, SentMessageInfo } from 'nodemailer'
+import type { Transporter } from 'nodemailer'
 import type { EmailConfig } from '@certified-app/shared'
 import { escapeHtml } from '@certified-app/shared'
 import { resolveClientMetadata } from '../lib/client-metadata.js'
@@ -119,13 +119,13 @@ function renderSubjectTemplate(
 }
 
 export class EmailSender {
-  private transporter: Transporter<SentMessageInfo>
+  private transporter: Transporter
 
   constructor(private readonly config: EmailConfig) {
     this.transporter = this.createTransporter()
   }
 
-  private createTransporter(): Transporter<SentMessageInfo> {
+  private createTransporter(): Transporter {
     switch (this.config.provider) {
       case 'smtp':
         return nodemailer.createTransport({

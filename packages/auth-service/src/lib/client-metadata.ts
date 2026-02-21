@@ -47,7 +47,9 @@ export async function resolveClientMetadata(
 
   try {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+    const timeout = setTimeout(() => {
+      controller.abort()
+    }, FETCH_TIMEOUT_MS)
 
     const res = await fetch(clientId, {
       signal: controller.signal,

@@ -25,6 +25,7 @@ const AUTH_FLOW_COOKIE = 'magic_auth_flow'
 
 export function createRecoveryRouter(
   ctx: AuthServiceContext,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth instance has no exported type
   auth: any,
 ): Router {
   const router = Router()
@@ -168,10 +169,11 @@ export function createRecoveryRouter(
         'Recovery OTP verified, redirecting to /auth/complete',
       )
       res.redirect(303, '/auth/complete')
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.warn({ err, email }, 'Recovery OTP verification failed')
       const errMsg =
-        err?.message?.includes('invalid') || err?.message?.includes('expired')
+        err instanceof Error &&
+        (err.message.includes('invalid') || err.message.includes('expired'))
           ? 'Invalid or expired code. Please try again.'
           : 'Verification failed. Please try again.'
       res.send(

@@ -156,6 +156,7 @@ export function createBetterAuth(emailSender: EmailSender, db: EpdsDb): any {
          *
          * Not awaited to avoid timing side-channels (fire and forget).
          */
+        // eslint-disable-next-line @typescript-eslint/require-await -- better-auth requires Promise<void> return but OTP email is fire-and-forget
         async sendVerificationOTP({ email, otp, type }, ctx) {
           const isNewUser = type === 'sign-in'
 

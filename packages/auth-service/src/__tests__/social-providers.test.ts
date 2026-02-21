@@ -10,7 +10,7 @@
  * After OAuth exchange, better-auth redirects to /auth/complete (bridge route)
  * which reads the session and issues an HMAC-signed magic-callback.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 
 /** Simulate buildSocialProviders() logic from better-auth.ts */
 function buildSocialProviders(

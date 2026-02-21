@@ -28,6 +28,7 @@ const AUTH_FLOW_COOKIE = 'magic_auth_flow'
 
 export function createCompleteRouter(
   ctx: AuthServiceContext,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth instance has no exported type
   auth: any,
 ): Router {
   const router = Router()
@@ -55,6 +56,7 @@ export function createCompleteRouter(
     }
 
     // Step 3: Get better-auth session to extract verified email
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth session type not exported
     let session: any
     try {
       session = await auth.api.getSession({

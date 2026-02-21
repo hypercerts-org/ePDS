@@ -36,6 +36,7 @@ async function getDidByEmail(
  * Middleware that validates a better-auth session and injects it into res.locals.
  * If not authenticated, redirects to /account/login.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth instance has no exported type
 function requireBetterAuth(auth: any) {
   return async (
     req: Request,
@@ -60,6 +61,7 @@ function requireBetterAuth(auth: any) {
 
 export function createAccountSettingsRouter(
   ctx: AuthServiceContext,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth instance has no exported type
   auth: any,
 ): Router {
   const router = Router()
@@ -79,6 +81,7 @@ export function createAccountSettingsRouter(
     const backupEmails = did ? ctx.db.getBackupEmails(did) : []
 
     // Get all better-auth sessions for this user
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth session type not exported
     let sessions: any[] = []
     try {
       const sessionsResponse = await auth.api.listSessions({

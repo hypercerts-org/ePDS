@@ -19,6 +19,7 @@ import { fromNodeHeaders } from 'better-auth/node'
 
 const logger = createLogger('auth:account-login')
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth instance has no exported type
 export function createAccountLoginRouter(auth: any): Router {
   const router = Router()
 
@@ -108,11 +109,12 @@ export function createAccountLoginRouter(auth: any): Router {
 
       // If not a Response object, assume success
       res.redirect(303, '/account')
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.warn({ err, email }, 'OTP verification failed')
-      const errMsg = err?.message?.includes('invalid')
-        ? 'Invalid or expired code. Please try again.'
-        : 'Verification failed. Please try again.'
+      const errMsg =
+        err instanceof Error && err.message.includes('invalid')
+          ? 'Invalid or expired code. Please try again.'
+          : 'Verification failed. Please try again.'
       res.type('html').send(
         renderOtpForm({
           email,

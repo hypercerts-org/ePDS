@@ -23,6 +23,8 @@ pnpm dev:auth              # auth-service only (tsx watch)
 pnpm dev:pds               # pds-core only (tsx watch)
 pnpm format                # format all files with Prettier
 pnpm format:check          # check formatting (CI)
+pnpm lint                  # lint all files with ESLint
+pnpm lint:fix              # lint and auto-fix where possible
 ```
 
 ## Test Commands

@@ -28,6 +28,7 @@ describe('sendVerificationOTP client branding via auth_flow', () => {
     db.close()
     try {
       fs.unlinkSync(dbPath)
+      // eslint-disable-next-line no-empty
     } catch {}
   })
 
@@ -52,6 +53,7 @@ describe('sendVerificationOTP client branding via auth_flow', () => {
     const flowId = null // would come from ctx.getCookie() returning null
 
     let clientId: string | undefined
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- testing null flowId path
     if (flowId) {
       const flow = db.getAuthFlow(flowId)
       clientId = flow?.clientId ?? undefined
@@ -103,6 +105,7 @@ describe('sendVerificationOTP client branding via auth_flow', () => {
     const email = 'user@example.com'
     const otp = '12345678'
     const type = 'sign-in'
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- testing type comparison logic
     const isNewUser = type === 'sign-in'
     const pdsName = 'My PDS'
     const pdsDomain = 'pds.example.com'
@@ -137,6 +140,7 @@ describe('sendVerificationOTP client branding via auth_flow', () => {
     // No auth_flow cookie (account settings login)
     const flowId: string | null = null
     let clientId: string | undefined
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- testing null flowId path
     if (flowId) {
       const flow = db.getAuthFlow(flowId)
       clientId = flow?.clientId ?? undefined
