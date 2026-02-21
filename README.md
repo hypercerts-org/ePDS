@@ -48,8 +48,8 @@ An [AT Protocol](https://atproto.com/) Personal Data Server (PDS) with a pluggab
 
 There are two supported login flows for client apps:
 
-- **Flow 1** — App has its own email form: collect email, pass as `login_hint` to PAR, auth server skips email step and goes straight to OTP input
-- **Flow 2** — App has a simple "Login" button: no email collected, auth server shows email input form itself
+- **Flow 1** — App has its own email form: collect email, pass as `login_hint` to PAR, auth server pre-fills the email and auto-sends the OTP (known issue: brief flash of email form while OTP is sending)
+- **Flow 2** — App has a simple "Login" button: no email collected, auth server shows the email input form itself
 
 Users get a random handle (e.g., `a3x9kf.epds-poc1.test.certified.app`) — no email-derived handles for privacy.
 
