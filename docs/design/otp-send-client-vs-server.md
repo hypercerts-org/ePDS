@@ -238,17 +238,45 @@ sequenceDiagram
 
 ### Pillar 3 — Idempotency (duplicate-send prevention)
 
-Browser pre-fetching, extensions, or rapid reloads can cause the background
-`POST` to fire more than once. There are two complementary approaches:
+#### Production evidence
 
-**Option A — JS guard using the `reused` flag (near-term)**
+Investigation of production logs confirmed the exact failure mode. The duplicate
+`GET /oauth/authorize` requests originate from residential ISPs (not CDN nodes),
+carrying a full Chrome user-agent string. **The duplicate page load executes
+JavaScript**, including the auto-send script that calls
+`POST /api/auth/email-otp/send-verification-otp`. The observed sequence for a
+single login attempt:
 
-The GET handler already detects duplicate page loads via `getAuthFlowByRequestUri`
-and sets a `reused` flag in the rendered page. The inline script can check this
-flag and skip the auto-send if the page was a duplicate load. This is a
-lightweight client-side guard and can be implemented today.
+```
+t+0.0s  GET /oauth/authorize → auth_flow created (reused=false), page served
+t+2.0s  POST send-verification-otp → first OTP email sent (user's real browser)
+t+4.5s  GET /oauth/authorize → duplicate detected (reused=true), page re-served to StayFocusd
+t+5.8s  POST send-verification-otp → second OTP email sent (StayFocusd's JS execution)
+```
 
-**Option B — Server-side idempotency on the send endpoint (longer term)**
+The `request_uri` dedup in `getAuthFlowByRequestUri` correctly prevents a
+second `auth_flow` row. It does **not** prevent the duplicate page's JS from
+firing the auto-send, because the auto-send hits better-auth's OTP endpoint
+directly, not the `auth_flow` table.
+
+#### Option A — `otpAlreadySent` flag (recommended near-term fix)
+
+Because the server already knows whether this is a duplicate load (`existingFlow`
+is truthy in `createLoginPageRouter`), it can pass a single extra bit of state
+to the page:
+
+1. When `reused=true`, render the page with `otpAlreadySent: true` embedded in
+   the inline script.
+2. The JS checks this flag on load: if set, skip the auto-send and display the
+   OTP form immediately with a message such as "Code already sent to your email".
+3. The Resend button still works — it is a deliberate user action, not an
+   auto-send, so it is not gated by the flag.
+
+This is the lowest-risk fix: it requires no changes to better-auth, no schema
+migration, and no new endpoints. It is fully compatible with the hybrid approach
+since the server is simply conveying state it already knows.
+
+#### Option B — Server-side wrapper endpoint (longer term)
 
 If we introduce a custom wrapper endpoint around
 `POST /api/auth/email-otp/send-verification-otp`, we can enforce idempotency
@@ -269,8 +297,12 @@ requires wrapping or proxying it rather than modifying it in-place.
   the wrapper endpoint. The client UI may skip a redundant call as an
   optimisation, but correctness must never depend on UI-side guards alone.
 
-This also protects the Resend button: a rapid double-click will not dispatch
-two emails.
+Option B is more robust (protects even if the client is misbehaving), but Option A
+should be implemented first as it resolves the confirmed production issue
+immediately. The two options are complementary and can coexist.
+
+This also protects the Resend button in Option B: a rapid double-click will not
+dispatch two emails.
 
 ### Why this supersedes both prior approaches
 
@@ -279,20 +311,22 @@ two emails.
 | HTTP semantics | ❌ GET side-effect | ✅ POST side-effect | ✅ POST side-effect |
 | UI flash | ✅ No flash | ❌ Flash | ✅ No flash |
 | Future auth modes (Passkey etc.) | ❌ Assumes email OTP before consulting credentials | ✅ Can be extended | ✅ Extension point is explicit |
-| Duplicate send protection | Partial (request_uri dedup) | ❌ Each GET re-sends | ✅ `flowId` idempotency |
+| Duplicate send protection | Partial (request_uri dedup) | ❌ Each GET re-sends | ✅ `otpAlreadySent` flag; optional server-side wrapper |
 | Works without JS | ✅ | ❌ | ⚠️ degraded — OTP form renders, user can submit manually; no auto-send |
 
 ## Open questions
 
-- **Duplicate-send approach selection:** Option A (JS `reused`-flag guard) is
-  simpler and can be done immediately. Option B (server-side wrapper with
-  `otp_sent_at` on the `auth_flows` table) is more robust and prevents
-  duplicate sends even if the client is misbehaving, but requires concrete
-  design of the wrapper endpoint and its integration with better-auth's existing
-  OTP rate-limiting.
 - **`initialStep` rendering implementation:** A stash (`atproto-ke8`) already
   renders `#step-otp` visible when `login_hint` is present. That change needs
   to land before the Pillar 2 auto-send script can work correctly.
+- **`otpAlreadySent` flag implementation:** `createLoginPageRouter` already
+  knows when a flow is reused (`existingFlow` is truthy). The remaining work is
+  to thread a boolean into the rendered page and add a JS guard that skips
+  the auto-send and displays "Code already sent to your email" instead.
+- **Option B wrapper endpoint:** Decide whether to implement the server-side
+  wrapper (`otp_sent_at` on `auth_flows`) after Option A lands. Evaluate whether
+  better-auth's built-in rate-limiting is sufficient or whether the wrapper is
+  needed for Resend double-click protection.
 - **Error rendering for failed OTP send:** If the background `POST` fails (e.g.
   SMTP error), the OTP form is already visible but the code was never sent.
   The client script must surface a dismissible error banner and offer a Resend
