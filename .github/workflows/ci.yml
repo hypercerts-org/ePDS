@@ -11,28 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  setup:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        # Reads packageManager from package.json automatically
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - uses: actions/cache/save@v4
-        with:
-          path: node_modules
-          key: node-modules-${{ github.sha }}
-
   format:
-    needs: setup
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,14 +20,10 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - uses: actions/cache/restore@v4
-        with:
-          path: node_modules
-          key: node-modules-${{ github.sha }}
+      - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
 
   lint:
-    needs: setup
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,14 +32,10 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - uses: actions/cache/restore@v4
-        with:
-          path: node_modules
-          key: node-modules-${{ github.sha }}
+      - run: pnpm install --frozen-lockfile
       - run: pnpm lint
 
   typecheck:
-    needs: setup
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -73,14 +44,10 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - uses: actions/cache/restore@v4
-        with:
-          path: node_modules
-          key: node-modules-${{ github.sha }}
+      - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
 
   test:
-    needs: setup
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -89,8 +56,5 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - uses: actions/cache/restore@v4
-        with:
-          path: node_modules
-          key: node-modules-${{ github.sha }}
+      - run: pnpm install --frozen-lockfile
       - run: pnpm test
