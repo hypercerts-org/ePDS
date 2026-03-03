@@ -140,6 +140,10 @@ async function main() {
     otpCharset: (process.env.OTP_CHARSET || 'numeric') as
       | 'numeric'
       | 'alphanumeric',
+    trustedClients: (process.env.PDS_OAUTH_TRUSTED_CLIENTS || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
   }
 
   if (
