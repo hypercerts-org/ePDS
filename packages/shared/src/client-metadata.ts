@@ -12,6 +12,10 @@
 
 import type { HandleMode } from './handle.js'
 
+export interface ClientBranding {
+  css?: string
+}
+
 export interface ClientMetadata {
   client_name?: string
   client_uri?: string
@@ -36,6 +40,7 @@ export interface ClientMetadata {
    *   2. The client is in PDS_OAUTH_TRUSTED_CLIENTS (isTrusted)
    */
   epds_skip_consent_on_signup?: boolean
+  branding?: ClientBranding
 }
 
 interface CacheEntry {
@@ -116,6 +121,30 @@ function extractDomain(urlStr: string): string | null {
   } catch {
     return null
   }
+}
+
+/**
+ * Escape CSS for safe embedding in an HTML <style> tag.
+ * Replaces `</style>` (case-insensitive) with `\u003c/style>` to prevent
+ * premature tag closure / HTML injection. Matches the upstream pattern in
+ * oauth-provider/src/lib/html/escapers.ts.
+ */
+export function escapeCss(css: string): string {
+  return css.replace(/<\/style>/gi, '\\u003c/style>')
+}
+
+/**
+ * Returns escaped CSS for injection if the client is trusted, or null.
+ */
+export function getClientCss(
+  clientId: string,
+  metadata: ClientMetadata,
+  trustedClients: string[],
+): string | null {
+  if (!trustedClients.includes(clientId)) return null
+  const raw = metadata.branding?.css
+  if (!raw) return null
+  return escapeCss(raw)
 }
 
 // Cleanup expired cache entries periodically
