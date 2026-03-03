@@ -23,6 +23,8 @@ export interface AuthServiceConfig {
   dbLocation: string
   otpLength: number
   otpCharset: 'numeric' | 'alphanumeric'
+  /** OAuth client_id URLs trusted for CSS branding injection. */
+  trustedClients: string[]
 }
 
 const logger = createLogger('auth-service')
