@@ -56,6 +56,13 @@ export async function GET() {
     ...(process.env.EPDS_SKIP_CONSENT_ON_SIGNUP === 'true' && {
       epds_skip_consent_on_signup: true,
     }),
+    branding: {
+      css: [
+        ':root { --demo-accent: #2563eb; --demo-accent-hover: #1d4ed8; }',
+        '.btn-primary { background: linear-gradient(135deg, #2563eb, #7c3aed); }',
+        '.btn-primary:hover { opacity: 0.95; }',
+      ].join(' '),
+    },
   }
 
   return NextResponse.json(metadata, {
