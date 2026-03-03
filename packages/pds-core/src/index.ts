@@ -567,6 +567,7 @@ async function main() {
 
         // Wrap res.end to inject the <style> tag before </head>
         const origEnd = res.end.bind(res)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- wrapping Node http.ServerResponse.end() which has complex overloads
         res.end = (chunk: any, ...args: any[]) => {
           if (typeof chunk === 'string' && chunk.includes('</head>')) {
             chunk = chunk.replace('</head>', `${styleTag}</head>`)
