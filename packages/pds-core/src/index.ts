@@ -33,6 +33,7 @@ import {
   escapeHtml,
   validateLocalPart,
   resolveClientMetadata,
+  getClientCss,
 } from '@certified-app/shared'
 import { shouldRewriteSecFetchSite } from './lib/sec-fetch-site-rewrite.js'
 
@@ -545,6 +546,101 @@ async function main() {
     // Insert in order: secFetchSiteRewrite first, then asMetadataOverride
     stack.splice(insertIdx, 0, secFetchLayer, metadataLayer)
     logger.info('AS metadata override and sec-fetch-site rewrite installed')
+  }
+
+  // =========================================================================
+  // CSS injection for trusted OAuth clients
+  // =========================================================================
+  //
+  // The npm @atproto/oauth-provider pre-computes CSS at factory init time.
+  // We intercept /oauth/authorize responses to inject a <style> tag with
+  // client-provided CSS and add the SHA256 hash to the CSP style-src.
+
+  const trustedClients = (process.env.PDS_OAUTH_TRUSTED_CLIENTS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+  if (trustedClients.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Express middleware injected into raw stack
+    const cssInjectionMiddleware = async (req: any, res: any, next: any) => {
+      if (req.method !== 'GET' || req.path !== '/oauth/authorize') {
+        return next()
+      }
+
+      const clientId = req.query?.client_id as string | undefined
+      if (!clientId || !trustedClients.includes(clientId)) {
+        return next()
+      }
+
+      try {
+        const metadata = await resolveClientMetadata(clientId)
+        const css = getClientCss(clientId, metadata, trustedClients)
+        if (!css) {
+          return next()
+        }
+
+        // Compute SHA256 hash of the CSS for CSP
+        const cssHash = createHash('sha256').update(css).digest('base64')
+        const styleTag = `<style>${css}</style>`
+
+        // Wrap res.setHeader to append the CSS hash to style-src in CSP
+        const origSetHeader = res.setHeader.bind(res)
+        res.setHeader = (name: string, value: string | string[]) => {
+          if (
+            name.toLowerCase() === 'content-security-policy' &&
+            typeof value === 'string'
+          ) {
+            // Append our hash to the style-src directive
+            value = value.replace(
+              /style-src\s+([^;]*)/,
+              `style-src $1 'sha256-${cssHash}'`,
+            )
+          }
+          return origSetHeader(name, value)
+        }
+
+        // Wrap res.end to inject the <style> tag before </head>
+        const origEnd = res.end.bind(res)
+        res.end = (chunk: any, ...args: any[]) => {
+          if (typeof chunk === 'string' && chunk.includes('</head>')) {
+            chunk = chunk.replace('</head>', `${styleTag}</head>`)
+          } else if (Buffer.isBuffer(chunk)) {
+            const str = chunk.toString('utf-8')
+            if (str.includes('</head>')) {
+              chunk = str.replace('</head>', `${styleTag}</head>`)
+            }
+          }
+          return origEnd(chunk, ...args)
+        }
+
+        next()
+      } catch (err) {
+        logger.warn(
+          { err, clientId },
+          'Failed to resolve client CSS, skipping injection',
+        )
+        next()
+      }
+    }
+
+    // Insert into Express stack after expressInit (same approach as AS metadata)
+    pds.app.use(cssInjectionMiddleware)
+    const cssLayer = stack?.pop()
+    if (stack && cssLayer) {
+      let insertIdx = 0
+      for (let i = 0; i < stack.length; i++) {
+        if (stack[i].name === 'expressInit') {
+          insertIdx = i + 1
+          break
+        }
+      }
+      stack.splice(insertIdx, 0, cssLayer)
+      logger.info(
+        { trustedClients },
+        'CSS injection middleware installed for trusted OAuth clients',
+      )
+    }
   }
 
   // =========================================================================
