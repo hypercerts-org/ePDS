@@ -217,7 +217,7 @@ function renderLoginPage(opts: {
   const b = opts.branding
   const appName = b.client_name || opts.clientName || 'Certified'
   const logoHtml = b.logo_uri
-    ? `<img src="${escapeHtml(b.logo_uri)}" alt="${escapeHtml(appName)}" class="client-logo" aria-hidden="true">`
+    ? `<img src="${escapeHtml(b.logo_uri)}" alt="${escapeHtml(appName)}" class="client-logo">`
     : ''
 
   const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
@@ -791,8 +791,13 @@ function renderLoginPage(opts: {
                   </svg>
                 </span>
                 <input type="text" id="code" name="code" class="input-field otp-input" required
-                       maxlength="8" pattern="[0-9]{8}" inputmode="numeric"
-                       autocomplete="one-time-code" placeholder="00000000" ${opts.initialStep === 'otp' ? 'autofocus' : ''}>
+                       maxlength="${opts.otpLength}"
+                       pattern="${inputProps.pattern}"
+                       inputmode="${inputProps.inputmode}"
+                       autocomplete="one-time-code"
+                       autocapitalize="${inputProps.autocapitalize}"
+                       placeholder="${inputProps.placeholder}"
+                       ${opts.initialStep === 'otp' ? 'autofocus' : ''}>
               </div>
             </div>
           </div>

@@ -35,6 +35,7 @@ export function createRecoveryRouter(
 
   router.get('/auth/recover', (req: Request, res: Response) => {
     const requestUri = req.query.request_uri as string | undefined
+    const clientId = req.query.client_id as string | undefined
 
     if (!requestUri) {
       res.status(400).send(renderError('Missing request_uri parameter'))
@@ -44,6 +45,7 @@ export function createRecoveryRouter(
     res.type('html').send(
       renderRecoveryForm({
         requestUri,
+        clientId,
         csrfToken: res.locals.csrfToken,
       }),
     )
@@ -52,11 +54,13 @@ export function createRecoveryRouter(
   router.post('/auth/recover', async (req: Request, res: Response) => {
     const email = ((req.body.email as string) || '').trim().toLowerCase()
     const requestUri = req.body.request_uri as string
+    const clientId = (req.body.client_id as string | undefined) || undefined
 
     if (!email || !requestUri) {
       res.status(400).send(
         renderRecoveryForm({
           requestUri: requestUri || '',
+          clientId,
           csrfToken: res.locals.csrfToken,
           error: 'Email and request URI are required.',
         }),
@@ -68,6 +72,7 @@ export function createRecoveryRouter(
       res.status(400).send(
         renderRecoveryForm({
           requestUri,
+          clientId,
           csrfToken: res.locals.csrfToken,
           error: 'Please enter a valid email address.',
         }),
@@ -111,6 +116,7 @@ export function createRecoveryRouter(
             email,
             csrfToken: res.locals.csrfToken,
             requestUri,
+            clientId,
             otpLength,
             otpCharset,
           }),
@@ -122,6 +128,7 @@ export function createRecoveryRouter(
             email,
             csrfToken: res.locals.csrfToken,
             requestUri,
+            clientId,
             error: 'Failed to send code. Please try again.',
             otpLength,
             otpCharset,
@@ -135,6 +142,7 @@ export function createRecoveryRouter(
           email,
           csrfToken: res.locals.csrfToken,
           requestUri,
+          clientId,
           otpLength,
           otpCharset,
         }),
@@ -201,12 +209,16 @@ export function createRecoveryRouter(
   return router
 }
 
-function renderRecoveryForm(opts: {
+export function renderRecoveryForm(opts: {
   requestUri: string
   csrfToken: string
+  clientId?: string
   error?: string
 }): string {
   const encodedUri = encodeURIComponent(opts.requestUri)
+  const clientIdParam = opts.clientId
+    ? `&client_id=${encodeURIComponent(opts.clientId)}`
+    : ''
   const errorHtml = opts.error
     ? `<div class="admonition error" role="alert">
         <span class="admonition-icon" aria-hidden="true">
@@ -239,6 +251,7 @@ function renderRecoveryForm(opts: {
       <form method="POST" action="/auth/recover">
         <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
         <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
+        ${opts.clientId ? `<input type="hidden" name="client_id" value="${escapeHtml(opts.clientId)}">` : ''}
         <div class="field">
           <label class="field-label" for="email">Backup email address</label>
           <div class="input-container">
@@ -254,7 +267,7 @@ function renderRecoveryForm(opts: {
           </div>
         </div>
         <div class="form-actions">
-          <a href="/oauth/authorize?request_uri=${encodedUri}" class="link-btn">Back to sign in</a>
+          <a href="/oauth/authorize?request_uri=${encodedUri}${clientIdParam}" class="link-btn">Back to sign in</a>
           <button type="submit" class="btn-primary">Send Recovery Code</button>
         </div>
       </form>
@@ -264,16 +277,20 @@ function renderRecoveryForm(opts: {
 </html>`
 }
 
-function renderOtpForm(opts: {
+export function renderOtpForm(opts: {
   email: string
   csrfToken: string
   requestUri: string
   otpLength: number
   otpCharset: 'numeric' | 'alphanumeric'
+  clientId?: string
   error?: string
 }): string {
   const maskedEmail = maskEmail(opts.email)
   const encodedUri = encodeURIComponent(opts.requestUri)
+  const clientIdParam = opts.clientId
+    ? `&client_id=${encodeURIComponent(opts.clientId)}`
+    : ''
   const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
   const errorHtml = opts.error
     ? `<div class="admonition error" role="alert">
@@ -330,13 +347,13 @@ function renderOtpForm(opts: {
         </div>
         <div class="form-actions">
           <div class="otp-links">
-            <a href="/oauth/authorize?request_uri=${encodedUri}" class="link-btn">Back to sign in</a>
+            <a href="/oauth/authorize?request_uri=${encodedUri}${clientIdParam}" class="link-btn">Back to sign in</a>
             <span class="otp-links-dot">·</span>
-            <form method="POST" action="/auth/recover" class="inline-form">
+             <form method="POST" action="/auth/recover" class="inline-form">
               <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
               <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
               <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
-              <button type="submit" class="link-btn">Resend Code</button>
+              <button type="submit" class="link-btn" formnovalidate>Resend Code</button>
             </form>
           </div>
           <button type="submit" class="btn-primary">Verify</button>
