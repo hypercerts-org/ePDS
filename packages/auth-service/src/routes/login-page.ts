@@ -711,6 +711,7 @@ function renderLoginPage(opts: {
     .step-otp { display: none; }
     .step-otp.active { display: block; }
     .step-email.hidden { display: none; }
+    .hidden { display: none !important; }
   </style>
 </head>
 <body>
@@ -727,13 +728,13 @@ function renderLoginPage(opts: {
     <!-- Right panel: form -->
     <main class="form-panel">
       <!-- Error / success message -->
-      <div id="error-msg" class="admonition error" style="display:none;">
+      <div id="error-msg" class="admonition error hidden">
         <span class="admonition-icon admonition-icon-error" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
             <path fill-rule="evenodd" clip-rule="evenodd" d="M11.14 4.494a.995.995 0 0 1 1.72 0l7.001 12.008a.996.996 0 0 1-.86 1.498H4.999a.996.996 0 0 1-.86-1.498L11.14 4.494Zm3.447-1.007c-1.155-1.983-4.019-1.983-5.174 0L2.41 15.494C1.247 17.491 2.686 20 4.998 20h14.004c2.312 0 3.751-2.509 2.587-4.506L14.587 3.487ZM13 9.019a1 1 0 1 0-2 0v2.994a1 1 0 1 0 2 0V9.02Zm-1 4.731a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5Z"/>
           </svg>
         </span>
-        <span class="admonition-icon admonition-icon-success" style="display:none;" aria-hidden="true">
+        <span class="admonition-icon admonition-icon-success hidden" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
             <path d="M21.59 3.193a1 1 0 0 1 .217 1.397l-11.706 16a1 1 0 0 1-1.429.193l-6.294-5a1 1 0 1 1 1.244-1.566l5.48 4.353 11.09-15.16a1 1 0 0 1 1.398-.217Z"/>
           </svg>
@@ -741,7 +742,7 @@ function renderLoginPage(opts: {
         <span id="error-text"></span>
       </div>
 
-      <div id="social-section"${opts.initialStep === 'otp' ? ' style="display:none;"' : ''}>
+      <div id="social-section"${opts.initialStep === 'otp' ? ' class="hidden"' : ''}>
         ${socialButtonsHtml}
       </div>
 
@@ -830,24 +831,24 @@ function renderLoginPage(opts: {
         errorText.textContent = msg;
         errorEl.classList.remove('success');
         errorEl.classList.add('error');
-        iconError.style.display = '';
-        iconSuccess.style.display = 'none';
+        iconError.classList.remove('hidden');
+        iconSuccess.classList.add('hidden');
         errorEl.setAttribute('role', 'alert');
-        errorEl.style.display = 'flex';
+        errorEl.classList.remove('hidden');
       }
 
       function showSuccess(msg) {
         errorText.textContent = msg;
         errorEl.classList.remove('error');
         errorEl.classList.add('success');
-        iconError.style.display = 'none';
-        iconSuccess.style.display = '';
+        iconError.classList.add('hidden');
+        iconSuccess.classList.remove('hidden');
         errorEl.setAttribute('role', 'status');
-        errorEl.style.display = 'flex';
+        errorEl.classList.remove('hidden');
       }
 
       function clearError() {
-        errorEl.style.display = 'none';
+        errorEl.classList.add('hidden');
         errorText.textContent = '';
         errorEl.removeAttribute('role');
       }
@@ -862,7 +863,7 @@ function renderLoginPage(opts: {
         stepEmail.classList.add('hidden');
         stepOtp.classList.add('active');
         var socialSection = document.getElementById('social-section');
-        if (socialSection) socialSection.style.display = 'none';
+        if (socialSection) socialSection.classList.add('hidden');
         document.getElementById('code').focus();
         clearError();
       }
@@ -871,7 +872,7 @@ function renderLoginPage(opts: {
         stepOtp.classList.remove('active');
         stepEmail.classList.remove('hidden');
         var socialSection = document.getElementById('social-section');
-        if (socialSection) socialSection.style.display = '';
+        if (socialSection) socialSection.classList.remove('hidden');
         clearError();
       }
 
