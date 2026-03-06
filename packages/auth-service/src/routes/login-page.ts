@@ -120,35 +120,52 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
       clientMeta.client_name ??
       (clientId ? await resolveClientName(clientId) : 'an application')
 
-    // Pillar 1 — State Determination: decide which step to render based on
-    // login_hint presence. No method-assuming side effects in the GET handler.
-    // The login_hint may be:
-    //   a) On the query string as an email (from our demo app)
-    //   b) On the query string as a handle/DID (unlikely but possible)
-    //   c) Only in the stored PAR request (third-party apps like sdsls.dev put
-    //      the handle in the PAR body but don't duplicate it on the redirect URL)
+    // Pillar 1 — State Determination: decide which step to render.
+    // login_hint on the query string means our app explicitly passed an email
+    // → show the OTP flow. If absent (standard ATProto clients pass handle/DID
+    // in the PAR body, not on the redirect URL), show the email form with a
+    // "Sign in with password" link pointing to the PDS built-in OAuth page.
     const pdsInternalUrl =
       process.env.PDS_INTERNAL_URL || ctx.config.pdsPublicUrl
     const internalSecret = process.env.EPDS_INTERNAL_SECRET ?? ''
 
-    // If no login_hint on the query string, try to retrieve it from the PAR request
-    let effectiveLoginHint = loginHint ?? null
-    if (!effectiveLoginHint && requestUri) {
-      effectiveLoginHint = await fetchParLoginHint(
+    // Three cases:
+    //   1. login_hint on query string → our app passed an email → OTP flow
+    //   2. No query hint, PAR has a hint (handle/DID) → standard ATProto client
+    //      → redirect immediately to the PDS built-in OAuth page
+    //   3. No hint anywhere → show email form with "Sign in with password" link
+
+    // Case 1: email OTP path
+    const resolvedEmail = loginHint
+      ? await resolveLoginHint(loginHint, pdsInternalUrl, internalSecret)
+      : null
+
+    // Build the PDS authorize URL (used for case 2 redirect and case 3 link).
+    const pdsAuthorizeUrl = (() => {
+      const u = new URL('/oauth/authorize', ctx.config.pdsPublicUrl)
+      u.searchParams.set('request_uri', requestUri)
+      if (clientId) u.searchParams.set('client_id', clientId)
+      return u.toString()
+    })()
+
+    // Case 2: no query hint — check PAR for a handle/DID hint
+    if (!loginHint && requestUri) {
+      const parLoginHint = await fetchParLoginHint(
         pdsInternalUrl,
         requestUri,
         internalSecret,
       )
+      if (parLoginHint) {
+        logger.info(
+          { loginHint: parLoginHint, redirectTo: pdsAuthorizeUrl },
+          'PAR login_hint detected — redirecting to PDS built-in OAuth page',
+        )
+        res.redirect(302, pdsAuthorizeUrl)
+        return
+      }
     }
 
-    // Resolve the hint (email, handle, or DID) to an email address
-    const resolvedEmail = effectiveLoginHint
-      ? await resolveLoginHint(
-          effectiveLoginHint,
-          pdsInternalUrl,
-          internalSecret,
-        )
-      : null
+    // Case 3: no hint anywhere — show email form (falls through to render)
     const hasLoginHint = !!resolvedEmail
     const initialStep = hasLoginHint ? 'otp' : 'email'
 
@@ -186,6 +203,7 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
         authBasePath: '/api/auth',
         pdsPublicUrl: ctx.config.pdsPublicUrl,
         requestUri,
+        pdsAuthorizeUrl,
         defaultBrandColor: ctx.config.brandColor,
         defaultBgColor: ctx.config.backgroundColor,
         defaultPanelColor: ctx.config.panelColor,
@@ -212,6 +230,7 @@ function renderLoginPage(opts: {
   defaultBrandColor?: string
   defaultBgColor?: string
   defaultPanelColor?: string
+  pdsAuthorizeUrl: string
 }): string {
   const b = opts.branding
   const appName = b.client_name || opts.clientName || 'Certified'
@@ -840,7 +859,10 @@ function renderLoginPage(opts: {
             <button type="submit" class="btn-primary">Continue with Email</button>
           </div>
         </form>
+        <div style="margin-top: 16px; text-align: center; font-size: 14px;">
+        <a href="${escapeHtml(opts.pdsAuthorizeUrl)}" class="link-btn">Sign in with password instead</a>
       </div>
+    </div>
 
       <!-- Step 2: OTP entry (calls better-auth verifyOtp) -->
       <div id="step-otp" class="step-otp${opts.initialStep === 'otp' ? ' active' : ''}">
