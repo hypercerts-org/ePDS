@@ -152,7 +152,16 @@ export function createChooseHandleRouter(
     const error = req.query.error as string | undefined
     res
       .type('html')
-      .send(renderChooseHandlePage(handleDomain, error, res.locals.csrfToken))
+      .send(
+        renderChooseHandlePage(
+          handleDomain,
+          error,
+          res.locals.csrfToken,
+          ctx.config.brandColor,
+          ctx.config.backgroundColor,
+          ctx.config.panelColor,
+        ),
+      )
   })
 
   // ---------------------------------------------------------------------------
@@ -177,6 +186,9 @@ export function createChooseHandleRouter(
             handleDomain,
             'Invalid handle format. Use 3-20 lowercase letters, numbers, or hyphens.',
             res.locals.csrfToken,
+            ctx.config.brandColor,
+            ctx.config.backgroundColor,
+            ctx.config.panelColor,
           ),
         )
       return
@@ -195,6 +207,9 @@ export function createChooseHandleRouter(
             handleDomain,
             'That handle is reserved.',
             res.locals.csrfToken,
+            ctx.config.brandColor,
+            ctx.config.backgroundColor,
+            ctx.config.panelColor,
           ),
         )
       return
@@ -226,6 +241,9 @@ export function createChooseHandleRouter(
               handleDomain,
               'Could not verify handle availability. Please try again.',
               res.locals.csrfToken,
+              ctx.config.brandColor,
+              ctx.config.backgroundColor,
+              ctx.config.panelColor,
             ),
           )
         return
@@ -239,6 +257,9 @@ export function createChooseHandleRouter(
             handleDomain,
             'Could not verify handle availability. Please try again.',
             res.locals.csrfToken,
+            ctx.config.brandColor,
+            ctx.config.backgroundColor,
+            ctx.config.panelColor,
           ),
         )
       return
@@ -252,6 +273,9 @@ export function createChooseHandleRouter(
             handleDomain,
             'That handle is already taken.',
             res.locals.csrfToken,
+            ctx.config.brandColor,
+            ctx.config.backgroundColor,
+            ctx.config.panelColor,
           ),
         )
       return
@@ -362,7 +386,21 @@ function renderChooseHandlePage(
   handleDomain: string,
   error?: string,
   csrfToken?: string,
+  brandColor?: string,
+  backgroundColor?: string,
+  panelColor?: string,
 ): string {
+  let rootStyleProps = ''
+  if (brandColor && brandColor !== '#8338ec') {
+    rootStyleProps += `--color-primary:${escapeHtml(brandColor)};--color-primary-contrast:#fff;`
+  }
+  if (panelColor) {
+    rootStyleProps += `--color-panel:${escapeHtml(panelColor)};--color-panel-text:#fff;--color-panel-subtitle:rgba(255,255,255,0.8);`
+  }
+  const rootStyle = rootStyleProps ? ` style="${rootStyleProps}"` : ''
+  const bgColorStyle = backgroundColor
+    ? `\n  <style>body { background: ${escapeHtml(backgroundColor)} !important; }</style>`
+    : ''
   const errorAdmonition = error
     ? `<div id="error-msg" class="admonition error">
         <span class="admonition-icon" aria-hidden="true">
@@ -382,7 +420,7 @@ function renderChooseHandlePage(
       </div>`
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en"${rootStyle}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -810,7 +848,7 @@ function renderChooseHandlePage(
     }
 
     .admonition-icon { flex-shrink: 0; margin-top: 1px; }
-  </style>
+  </style>${bgColorStyle}
 </head>
 <body>
   <div class="layout">
