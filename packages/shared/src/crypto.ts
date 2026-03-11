@@ -34,7 +34,14 @@ export function timingSafeEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b))
 }
 
-/** Generate an 8-digit OTP code. Returns the code and its SHA-256 hash. */
+/**
+ * Generate an 8-digit OTP code. Returns the code and its SHA-256 hash.
+ *
+ * @deprecated This function is superseded by better-auth's emailOTP plugin
+ * which handles OTP generation, hashing, and storage internally. The plugin
+ * is configured in packages/auth-service/src/better-auth.ts. Do not use this
+ * function for new code.
+ */
 export function generateOtpCode(): { code: string; codeHash: string } {
   const num = crypto.randomInt(0, 100_000_000)
   const code = num.toString().padStart(8, '0')
