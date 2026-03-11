@@ -211,8 +211,8 @@ describe('Consent route logic', () => {
         new_account: '0',
       }
       const { sig, ts } = signCallback(params, 'shared-secret')
-      const valid = verifyCallback(params, ts, sig, 'shared-secret')
-      expect(valid).toBe(true)
+      const result = verifyCallback(params, ts, sig, 'shared-secret')
+      expect(result.valid).toBe(true)
     })
   })
 

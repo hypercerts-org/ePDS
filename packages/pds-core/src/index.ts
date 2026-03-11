@@ -84,7 +84,7 @@ async function main() {
 
     const approvedStr = req.query.approved as string
     const newAccountStr = req.query.new_account as string
-    const signatureValid = verifyCallback(
+    const callbackVerification = verifyCallback(
       {
         request_uri: requestUri,
         email,
@@ -96,7 +96,7 @@ async function main() {
       epdsCallbackSecret,
     )
 
-    if (!signatureValid) {
+    if (!callbackVerification.valid) {
       // Distinguish expired from invalid to help with clock-skew debugging
       const tsNum = parseInt(ts, 10)
       const age = Math.floor(Date.now() / 1000) - tsNum

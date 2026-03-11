@@ -15,7 +15,7 @@ export {
   signCallback,
   verifyCallback,
 } from './crypto.js'
-export type { CallbackParams } from './crypto.js'
+export type { CallbackParams, VerifyCallbackResult } from './crypto.js'
 export type {
   EpdsLinkConfig,
   EmailConfig,

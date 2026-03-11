@@ -8,6 +8,7 @@ import {
   signCallback,
   verifyCallback,
   type CallbackParams,
+  type VerifyCallbackResult,
 } from '../crypto.js'
 
 describe('generateVerificationToken', () => {
@@ -99,20 +100,20 @@ describe('signCallback / verifyCallback', () => {
     expect(ts).toMatch(/^\d+$/)
   })
 
-  it('round-trips: sign then verify returns true', () => {
+  it('round-trips: sign then verify returns valid=true', () => {
     const { sig, ts } = signCallback(params, secret)
-    expect(verifyCallback(params, ts, sig, secret)).toBe(true)
+    expect(verifyCallback(params, ts, sig, secret).valid).toBe(true)
   })
 
   it('rejects wrong secret', () => {
     const { sig, ts } = signCallback(params, secret)
-    expect(verifyCallback(params, ts, sig, 'wrong-secret')).toBe(false)
+    expect(verifyCallback(params, ts, sig, 'wrong-secret').valid).toBe(false)
   })
 
   it('rejects tampered email', () => {
     const { sig, ts } = signCallback(params, secret)
     const tampered = { ...params, email: 'attacker@evil.com' }
-    expect(verifyCallback(tampered, ts, sig, secret)).toBe(false)
+    expect(verifyCallback(tampered, ts, sig, secret).valid).toBe(false)
   })
 
   it('rejects tampered request_uri', () => {
@@ -121,7 +122,7 @@ describe('signCallback / verifyCallback', () => {
       ...params,
       request_uri: 'urn:ietf:params:oauth:request_uri:evil',
     }
-    expect(verifyCallback(tampered, ts, sig, secret)).toBe(false)
+    expect(verifyCallback(tampered, ts, sig, secret).valid).toBe(false)
   })
 
   it('rejects expired timestamp (>5 min old)', async () => {
@@ -133,11 +134,12 @@ describe('signCallback / verifyCallback', () => {
       params.email,
       params.approved,
       params.new_account,
+      '', // handle sentinel (absent)
       staleTs,
     ].join('\n')
     const { createHmac } = await import('node:crypto')
     const staleSig = createHmac('sha256', secret).update(payload).digest('hex')
-    expect(verifyCallback(params, staleTs, staleSig, secret)).toBe(false)
+    expect(verifyCallback(params, staleTs, staleSig, secret).valid).toBe(false)
   })
 
   it('rejects future timestamp', async () => {
@@ -147,20 +149,25 @@ describe('signCallback / verifyCallback', () => {
       params.email,
       params.approved,
       params.new_account,
+      '', // handle sentinel (absent)
       futureTs,
     ].join('\n')
     const { createHmac } = await import('node:crypto')
     const futureSig = createHmac('sha256', secret).update(payload).digest('hex')
-    expect(verifyCallback(params, futureTs, futureSig, secret)).toBe(false)
+    expect(verifyCallback(params, futureTs, futureSig, secret).valid).toBe(
+      false,
+    )
   })
 
   it('rejects non-numeric timestamp', () => {
     const { sig } = signCallback(params, secret)
-    expect(verifyCallback(params, 'not-a-number', sig, secret)).toBe(false)
+    expect(verifyCallback(params, 'not-a-number', sig, secret).valid).toBe(
+      false,
+    )
   })
 
   it('rejects wrong-length sig', () => {
     const { ts } = signCallback(params, secret)
-    expect(verifyCallback(params, ts, 'tooshort', secret)).toBe(false)
+    expect(verifyCallback(params, ts, 'tooshort', secret).valid).toBe(false)
   })
 })

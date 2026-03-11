@@ -52,14 +52,16 @@ export interface CallbackParams {
   email: string
   approved: string
   new_account: string
+  handle?: string // only set for new account creation with chosen handle
 }
 
 /**
  * Sign the epds-callback redirect parameters with HMAC-SHA256.
  * Returns the hex signature and the Unix timestamp (seconds) used.
  *
- * Payload: request_uri, email, approved, new_account, and ts joined by newlines.
+ * Payload: request_uri, email, approved, new_account, handle (empty string when absent), and ts joined by newlines.
  * A timestamp is included so signatures expire (see verifyCallback).
+ * handle uses empty string as sentinel when absent so existing flows still produce valid signatures.
  */
 export function signCallback(
   params: CallbackParams,
@@ -71,6 +73,7 @@ export function signCallback(
     params.email,
     params.approved,
     params.new_account,
+    params.handle ?? '', // empty string when absent
     ts,
   ].join('\n')
   const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex')
@@ -79,9 +82,16 @@ export function signCallback(
 
 const CALLBACK_MAX_AGE_SECONDS = 5 * 60 // 5 minutes
 
+export interface VerifyCallbackResult {
+  valid: boolean
+  handle?: string // present only when the callback was signed with a handle
+}
+
 /**
  * Verify a signed epds-callback redirect URL.
- * Returns true only when the signature is valid and the timestamp is fresh.
+ * Returns { valid, handle? } where valid is true only when the signature is
+ * valid and the timestamp is fresh. handle is included when the callback was
+ * signed with a chosen handle (new account creation flow).
  * Uses timingSafeEqual to avoid timing side-channels.
  */
 export function verifyCallback(
@@ -89,19 +99,20 @@ export function verifyCallback(
   ts: string,
   sig: string,
   secret: string,
-): boolean {
+): VerifyCallbackResult {
   const tsNum = parseInt(ts, 10)
-  if (isNaN(tsNum)) return false
+  if (isNaN(tsNum)) return { valid: false }
 
   const now = Math.floor(Date.now() / 1000)
   const age = now - tsNum
-  if (age < 0 || age > CALLBACK_MAX_AGE_SECONDS) return false
+  if (age < 0 || age > CALLBACK_MAX_AGE_SECONDS) return { valid: false }
 
   const payload = [
     params.request_uri,
     params.email,
     params.approved,
     params.new_account,
+    params.handle ?? '', // empty string when absent — matches signCallback sentinel
     ts,
   ].join('\n')
   const expected = crypto
@@ -111,11 +122,13 @@ export function verifyCallback(
 
   // Both are hex-encoded HMAC-SHA256 (always 64 chars / 32 bytes).
   // Guard against wrong-length input to keep timingSafeEqual happy.
-  if (sig.length !== expected.length) return false
-  return crypto.timingSafeEqual(
+  if (sig.length !== expected.length) return { valid: false }
+  const isValid = crypto.timingSafeEqual(
     Buffer.from(expected, 'hex'),
     Buffer.from(sig, 'hex'),
   )
+  if (!isValid) return { valid: false }
+  return { valid: true, ...(params.handle ? { handle: params.handle } : {}) }
 }
 
 /**
