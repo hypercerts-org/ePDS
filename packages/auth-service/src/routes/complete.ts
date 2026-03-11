@@ -12,10 +12,11 @@
  *   1. Read epds_auth_flow cookie → get flow_id
  *   2. Look up auth_flow row → get request_uri, client_id
  *   3. Get better-auth session → extract verified email
- *   4. Check if consent needed (first-time client login for existing accounts)
- *   5a. Needs consent → redirect to /auth/consent?flow_id=...
- *   5b. No consent needed → build HMAC-signed redirect to pds-core /oauth/epds-callback
- *   6. Delete auth_flow row + clear cookie
+ *   4. Check if this is a new user (no PDS account for email)
+ *   5a. New user → redirect to /auth/choose-handle (auth_flow + cookie kept intact)
+ *   5b. Existing user, needs consent → redirect to /auth/consent?flow_id=...
+ *   5c. Existing user, no consent needed → build HMAC-signed redirect to pds-core /oauth/epds-callback
+ *   6. Delete auth_flow row + clear cookie (only for 5c path)
  */
 import { Router, type Request, type Response } from 'express'
 import type { AuthServiceContext } from '../context.js'
@@ -84,9 +85,9 @@ export function createCompleteRouter(
 
     const email = session.user.email.toLowerCase()
 
-    // Step 4: Check whether this is a new account and whether consent is needed.
-    // Consent is required for existing accounts logging into a new client for the first time.
-    // New accounts (no PDS account yet) skip consent since account creation implies consent.
+    // Step 4: Check whether this is a new account.
+    // New accounts (no PDS account yet) are redirected to the handle picker.
+    // Existing accounts may need consent for first-time client logins.
     const pdsUrl = process.env.PDS_INTERNAL_URL || ctx.config.pdsPublicUrl
     const internalSecret = process.env.EPDS_INTERNAL_SECRET ?? ''
     const did = await getDidByEmail(email, pdsUrl, internalSecret)
@@ -96,8 +97,18 @@ export function createCompleteRouter(
     const needsConsent =
       !isNewAccount && clientId && !ctx.db.hasClientLogin(email, clientId)
 
+    if (isNewAccount) {
+      // Step 5a (new user): Redirect to handle picker.
+      // Do NOT delete auth_flow or clear cookie here — the POST /auth/choose-handle
+      // handler will do cleanup after the user picks a handle (deferred-cleanup
+      // pattern, same as consent.ts).
+      logger.info({ email, flowId }, 'New user: redirecting to choose-handle')
+      res.redirect(303, '/auth/choose-handle')
+      return
+    }
+
     if (needsConsent) {
-      // Step 5a: Redirect to consent screen, passing flow_id so consent can
+      // Step 5b: Redirect to consent screen, passing flow_id so consent can
       // look up request_uri and perform cleanup itself.
       // Do NOT delete auth_flow or clear cookie here — consent does it.
       const consentUrl = new URL(
@@ -111,14 +122,14 @@ export function createCompleteRouter(
       return
     }
 
-    // Step 5: Record client login before redirecting (no consent needed)
+    // Step 5c: Record client login before redirecting (no consent needed, existing user)
     ctx.db.recordClientLogin(email, clientId || 'better-auth')
 
     // Cleanup: remove auth_flow row and cookie
     ctx.db.deleteAuthFlow(flowId)
     res.clearCookie(AUTH_FLOW_COOKIE)
 
-    // Step 5b: Build HMAC-signed redirect to pds-core /oauth/epds-callback
+    // Step 5c (cont): Build HMAC-signed redirect to pds-core /oauth/epds-callback
     const callbackParams = {
       request_uri: flow.requestUri,
       email,
