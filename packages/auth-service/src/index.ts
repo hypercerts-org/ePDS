@@ -15,6 +15,7 @@ import { createRecoveryRouter } from './routes/recovery.js'
 import { createAccountLoginRouter } from './routes/account-login.js'
 import { createAccountSettingsRouter } from './routes/account-settings.js'
 import { createCompleteRouter } from './routes/complete.js'
+import { createChooseHandleRouter } from './routes/choose-handle.js'
 
 const logger = createLogger('auth-service')
 
@@ -77,6 +78,7 @@ export function createAuthService(config: AuthServiceConfig): {
   app.use(createAccountLoginRouter(betterAuthInstance))
   app.use(createAccountSettingsRouter(ctx, betterAuthInstance))
   app.use(createCompleteRouter(ctx, betterAuthInstance))
+  app.use(createChooseHandleRouter(ctx, betterAuthInstance))
 
   // Metrics endpoint (protect with admin auth in production)
   app.get('/metrics', (req, res) => {

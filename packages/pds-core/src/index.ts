@@ -84,12 +84,14 @@ async function main() {
 
     const approvedStr = req.query.approved as string
     const newAccountStr = req.query.new_account as string
+    const handleParam = req.query.handle as string | undefined
     const callbackVerification = verifyCallback(
       {
         request_uri: requestUri,
         email,
         approved: approvedStr,
         new_account: newAccountStr,
+        handle: handleParam,
       },
       ts,
       sig,
@@ -106,6 +108,23 @@ async function main() {
         res.status(403).json({ error: 'Invalid callback signature' })
       }
       return
+    }
+
+    // Extract handle from verified callback params (tamper-proof — covered by HMAC)
+    const chosenHandle = callbackVerification.handle
+
+    // Defense in depth: validate handle format before use
+    // (auth-service already validated, but we re-check at the trust boundary)
+    if (chosenHandle) {
+      const localPart = chosenHandle.split('.')[0]
+      if (!localPart || !/^[a-z0-9][a-z0-9-]{1,18}[a-z0-9]$/.test(localPart)) {
+        logger.error(
+          { handle: chosenHandle },
+          'invalid handle format in epds-callback',
+        )
+        res.status(400).send('Invalid handle format')
+        return
+      }
     }
 
     if (!provider) {
@@ -147,18 +166,55 @@ async function main() {
         // Existing account
         const accountData = await provider.accountManager.getAccount(did)
         account = accountData.account
+      } else if (chosenHandle) {
+        // User chose a handle — use it directly, no retry loop
+        try {
+          account = await provider.accountManager.createAccount(
+            deviceId,
+            deviceMetadata,
+            {
+              locale: 'en',
+              handle: chosenHandle,
+              email,
+              // Use a random unguessable password so the PDS creates a proper account
+              // row (registerAccount requires a password). The password is never
+              // returned or stored anywhere accessible, so the account is effectively
+              // passwordless — login is only possible via the magic OTP flow.
+              password: randomBytes(32).toString('hex'),
+              // Invite code is required when PDS_INVITE_REQUIRED is true (the default).
+              // EPDS_INVITE_CODE should be a high-useCount code generated via the admin API.
+              inviteCode: process.env.EPDS_INVITE_CODE,
+            },
+          )
+          did = account.sub
+          logger.info(
+            { did, email, handle: chosenHandle },
+            'Created account with chosen handle',
+          )
+        } catch (createErr: unknown) {
+          // Handle collision — redirect back to choose-handle page
+          logger.warn(
+            { err: createErr, handle: chosenHandle },
+            'chosen handle collision at createAccount',
+          )
+          const authServiceUrl =
+            process.env.AUTH_SERVICE_URL || 'http://auth:3001'
+          res.redirect(
+            `${authServiceUrl}/auth/choose-handle?error=handle_taken`,
+          )
+          return
+        }
       } else {
-        // New account - create via the OAuthProvider's sign-up mechanism
-        // Retry up to 3 times in case of handle collision
+        // No handle provided — fall back to random handle generation (backward compat)
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
-            const handle = generateRandomHandle(handleDomain)
+            const randomHandle = generateRandomHandle(handleDomain)
             account = await provider.accountManager.createAccount(
               deviceId,
               deviceMetadata,
               {
                 locale: 'en',
-                handle,
+                handle: randomHandle,
                 email,
                 // Use a random unguessable password so the PDS creates a proper account
                 // row (registerAccount requires a password). The password is never
@@ -171,7 +227,7 @@ async function main() {
               },
             )
             did = account.sub
-            logger.info({ did, email, handle }, 'Created account')
+            logger.info({ did, email, handle: randomHandle }, 'Created account')
             break
           } catch (createErr: unknown) {
             if (attempt === 2) throw createErr
@@ -388,6 +444,27 @@ async function main() {
     } catch (err) {
       logger.error({ err }, 'Failed to look up account by handle')
       res.status(500).json({ error: 'Internal server error' })
+    }
+  })
+
+  // Protected internal endpoint for auth service to check if a handle is already
+  // taken on this PDS. Used by the handle availability checker during signup.
+  // Returns only { exists: boolean } — never returns email, DID, or other account data.
+  pds.app.get('/_internal/check-handle', async (req, res) => {
+    if (!verifyInternalSecret(req.headers['x-internal-secret'])) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+    const handle = ((req.query.handle as string) || '').trim()
+    if (!handle) {
+      res.status(400).json({ error: 'missing handle param' })
+      return
+    }
+    try {
+      const account = await pds.ctx.accountManager.getAccount(handle)
+      res.json({ exists: !!account })
+    } catch {
+      res.json({ exists: false })
     }
   })
 
