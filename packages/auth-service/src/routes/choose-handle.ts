@@ -150,7 +150,9 @@ export function createChooseHandleRouter(
     }
 
     const error = req.query.error as string | undefined
-    res.type('html').send(renderChooseHandlePage(handleDomain, error))
+    res
+      .type('html')
+      .send(renderChooseHandlePage(handleDomain, error, res.locals.csrfToken))
   })
 
   // ---------------------------------------------------------------------------
@@ -174,6 +176,7 @@ export function createChooseHandleRouter(
           renderChooseHandlePage(
             handleDomain,
             'Invalid handle format. Use 3-20 lowercase letters, numbers, or hyphens.',
+            res.locals.csrfToken,
           ),
         )
       return
@@ -187,7 +190,13 @@ export function createChooseHandleRouter(
       )
       res
         .type('html')
-        .send(renderChooseHandlePage(handleDomain, 'That handle is reserved.'))
+        .send(
+          renderChooseHandlePage(
+            handleDomain,
+            'That handle is reserved.',
+            res.locals.csrfToken,
+          ),
+        )
       return
     }
 
@@ -210,6 +219,16 @@ export function createChooseHandleRouter(
           { status: checkRes.status, fullHandle },
           'PDS check-handle returned non-OK status',
         )
+        res
+          .type('html')
+          .send(
+            renderChooseHandlePage(
+              handleDomain,
+              'Could not verify handle availability. Please try again.',
+              res.locals.csrfToken,
+            ),
+          )
+        return
       }
     } catch (err) {
       logger.error({ err, fullHandle }, 'Failed to check handle availability')
@@ -219,6 +238,7 @@ export function createChooseHandleRouter(
           renderChooseHandlePage(
             handleDomain,
             'Could not verify handle availability. Please try again.',
+            res.locals.csrfToken,
           ),
         )
       return
@@ -228,18 +248,24 @@ export function createChooseHandleRouter(
       res
         .type('html')
         .send(
-          renderChooseHandlePage(handleDomain, 'That handle is already taken.'),
+          renderChooseHandlePage(
+            handleDomain,
+            'That handle is already taken.',
+            res.locals.csrfToken,
+          ),
         )
       return
     }
 
-    // Step 5: Sign callback with handle included in HMAC payload
+    // Step 5: Sign callback with handle local part included in HMAC payload.
+    // Only the local part (e.g. 'alice') is sent — pds-core appends its own
+    // trusted handleDomain, eliminating any possibility of domain mismatch.
     const callbackParams = {
       request_uri: flow.requestUri,
       email,
       approved: '1',
       new_account: '1',
-      handle: fullHandle,
+      handle: rawHandle,
     }
     const { sig, ts } = signCallback(
       callbackParams,
@@ -310,7 +336,7 @@ export function createChooseHandleRouter(
           { status: checkRes.status, fullHandle },
           'PDS check-handle returned non-OK on /api/check-handle',
         )
-        res.json({ error: 'check_failed' })
+        res.json({ error: 'service_unavailable' })
         return
       }
       const data = (await checkRes.json()) as { exists: boolean }
@@ -321,7 +347,7 @@ export function createChooseHandleRouter(
         { err, fullHandle },
         'Failed to check handle availability via PDS',
       )
-      res.json({ error: 'check_failed' })
+      res.json({ error: 'service_unavailable' })
     }
   })
 
@@ -332,7 +358,11 @@ export function createChooseHandleRouter(
 // Template
 // ---------------------------------------------------------------------------
 
-function renderChooseHandlePage(handleDomain: string, error?: string): string {
+function renderChooseHandlePage(
+  handleDomain: string,
+  error?: string,
+  csrfToken?: string,
+): string {
   const errorHtml = error
     ? `<div class="error" id="error-msg">${escapeHtml(error)}</div>`
     : `<div class="error" id="error-msg" style="display:none;"></div>`
@@ -374,6 +404,7 @@ function renderChooseHandlePage(handleDomain: string, error?: string): string {
     ${errorHtml}
 
     <form method="POST" action="/auth/choose-handle" id="handle-form">
+      <input type="hidden" name="csrf" value="${escapeHtml(csrfToken || '')}">
       <div class="field">
         <label for="handle-input">Handle</label>
         <div class="handle-row">

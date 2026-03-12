@@ -110,17 +110,21 @@ async function main() {
       return
     }
 
-    // Extract handle from verified callback params (tamper-proof — covered by HMAC)
-    const chosenHandle = callbackVerification.handle
+    // Extract handle local part from verified callback params (tamper-proof — covered by HMAC).
+    // The callback now carries only the local part (e.g. 'alice'); we append our own
+    // trusted handleDomain here so there is no possibility of domain mismatch.
+    const chosenHandleLocal = callbackVerification.handle
+    const chosenHandle = chosenHandleLocal
+      ? `${chosenHandleLocal}.${handleDomain}`
+      : undefined
 
-    // Defense in depth: validate handle format before use
+    // Defense in depth: validate the local part format before use.
     // (auth-service already validated, but we re-check at the trust boundary)
-    if (chosenHandle) {
-      const localPart = chosenHandle.split('.')[0]
-      if (!localPart || !/^[a-z0-9][a-z0-9-]{1,18}[a-z0-9]$/.test(localPart)) {
+    if (chosenHandleLocal) {
+      if (!/^[a-z0-9][a-z0-9-]{1,18}[a-z0-9]$/.test(chosenHandleLocal)) {
         logger.error(
-          { handle: chosenHandle },
-          'invalid handle format in epds-callback',
+          { handle: chosenHandleLocal },
+          'invalid handle local part format in epds-callback',
         )
         res.status(400).send('Invalid handle format')
         return
@@ -197,10 +201,9 @@ async function main() {
             { err: createErr, handle: chosenHandle },
             'chosen handle collision at createAccount',
           )
-          const authServiceUrl =
-            process.env.AUTH_SERVICE_URL || 'http://auth:3001'
           res.redirect(
-            `${authServiceUrl}/auth/choose-handle?error=handle_taken`,
+            303,
+            `https://${authHostname}/auth/choose-handle?error=handle_taken`,
           )
           return
         }
