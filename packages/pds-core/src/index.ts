@@ -85,7 +85,7 @@ async function main() {
     const approvedStr = req.query.approved as string
     const newAccountStr = req.query.new_account as string
     const handleParam = req.query.handle as string | undefined
-    const callbackVerification = verifyCallback(
+    const signatureValid = verifyCallback(
       {
         request_uri: requestUri,
         email,
@@ -98,7 +98,7 @@ async function main() {
       epdsCallbackSecret,
     )
 
-    if (!callbackVerification.valid) {
+    if (!signatureValid) {
       // Distinguish expired from invalid to help with clock-skew debugging
       const tsNum = parseInt(ts, 10)
       const age = Math.floor(Date.now() / 1000) - tsNum
@@ -113,7 +113,7 @@ async function main() {
     // Extract handle local part from verified callback params (tamper-proof — covered by HMAC).
     // The callback now carries only the local part (e.g. 'alice'); we append our own
     // trusted handleDomain here so there is no possibility of domain mismatch.
-    const chosenHandleLocal = callbackVerification.handle
+    const chosenHandleLocal = handleParam
     const chosenHandle = chosenHandleLocal
       ? `${chosenHandleLocal}.${handleDomain}`
       : undefined
@@ -468,6 +468,40 @@ async function main() {
       res.json({ exists: !!account })
     } catch {
       res.json({ exists: false })
+    }
+  })
+
+  // Protected internal endpoint for auth service to reset the inactivity timer
+  // on a pending PAR request_uri. Called when the user loads the handle selection
+  // page so the request doesn't expire while they are choosing a handle.
+  // atproto's AUTHORIZATION_INACTIVITY_TIMEOUT is 5 minutes — without this ping,
+  // users who take >5 min on the handle page would get "This request has expired"
+  // inside epds-callback after account creation, leaving the auth flow broken.
+  pds.app.get('/_internal/ping-request', async (req, res) => {
+    if (!verifyInternalSecret(req.headers['x-internal-secret'])) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+    const requestUri = ((req.query.request_uri as string) || '').trim()
+    if (!requestUri) {
+      res.status(400).json({ error: 'Missing request_uri' })
+      return
+    }
+    if (!provider) {
+      res.status(503).json({ error: 'OAuth provider not available' })
+      return
+    }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
+      await (provider.requestManager as any).get(requestUri)
+      res.json({ ok: true })
+    } catch (err) {
+      // Request expired or not found — not a server error, just report it
+      logger.debug(
+        { err, requestUri },
+        'ping-request: request_uri expired or not found',
+      )
+      res.status(404).json({ error: 'request_expired' })
     }
   })
 

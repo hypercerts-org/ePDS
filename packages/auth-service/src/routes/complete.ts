@@ -134,7 +134,7 @@ export function createCompleteRouter(
       request_uri: flow.requestUri,
       email,
       approved: '1',
-      new_account: isNewAccount ? '1' : '0',
+      new_account: '0',
     }
     const { sig, ts } = signCallback(
       callbackParams,
