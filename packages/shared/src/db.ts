@@ -36,6 +36,7 @@ export interface AuthFlowRow {
   requestUri: string
   clientId: string | null
   email: string | null
+  handleMode: string | null
   createdAt: number
   expiresAt: number
 }
@@ -174,6 +175,12 @@ export class EpdsDb {
       // v7: Drop account_session table — session management is now handled by better-auth.
       () => {
         this.db.exec(`DROP TABLE IF EXISTS account_session;`)
+      },
+
+      // v8: Add handle_mode to auth_flow — stores the resolved handle assignment mode
+      // (random | picker | picker-with-random) per OAuth flow. null = default (picker).
+      () => {
+        this.db.exec(`ALTER TABLE auth_flow ADD COLUMN handle_mode TEXT;`)
       },
     ]
 
@@ -402,17 +409,19 @@ export class EpdsDb {
     flowId: string
     requestUri: string
     clientId: string | null
+    handleMode?: string | null
     expiresAt: number
   }): void {
     this.db
       .prepare(
-        `INSERT INTO auth_flow (flow_id, request_uri, client_id, created_at, expires_at)
-       VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO auth_flow (flow_id, request_uri, client_id, handle_mode, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
       )
       .run(
         data.flowId,
         data.requestUri,
         data.clientId,
+        data.handleMode ?? null,
         Date.now(),
         data.expiresAt,
       )
@@ -422,7 +431,7 @@ export class EpdsDb {
     return this.db
       .prepare(
         `SELECT flow_id as flowId, request_uri as requestUri, client_id as clientId,
-       email, created_at as createdAt, expires_at as expiresAt
+       email, handle_mode as handleMode, created_at as createdAt, expires_at as expiresAt
        FROM auth_flow WHERE flow_id = ? AND expires_at > ?`,
       )
       .get(flowId, Date.now()) as AuthFlowRow | undefined
@@ -433,7 +442,7 @@ export class EpdsDb {
     return this.db
       .prepare(
         `SELECT flow_id as flowId, request_uri as requestUri, client_id as clientId,
-       email, created_at as createdAt, expires_at as expiresAt
+       email, handle_mode as handleMode, created_at as createdAt, expires_at as expiresAt
        FROM auth_flow WHERE request_uri = ? AND expires_at > ?
        ORDER BY created_at DESC LIMIT 1`,
       )

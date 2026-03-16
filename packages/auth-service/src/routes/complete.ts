@@ -13,10 +13,11 @@
  *   2. Look up auth_flow row → get request_uri, client_id
  *   3. Get better-auth session → extract verified email
  *   4. Check if this is a new user (no PDS account for email)
- *   5a. New user → redirect to /auth/choose-handle (auth_flow + cookie kept intact)
- *   5b. Existing user, needs consent → redirect to /auth/consent?flow_id=...
+ *   5a. New user, handle_mode='random' → HMAC-signed redirect to pds-core (random handle generated server-side)
+ *   5b. New user, handle_mode=null|'picker'|'picker-with-random' → redirect to /auth/choose-handle
+ *   5c. Existing user, needs consent → redirect to /auth/consent?flow_id=...
  *   5c. Existing user, no consent needed → build HMAC-signed redirect to pds-core /oauth/epds-callback
- *   6. Delete auth_flow row + clear cookie (only for 5c path)
+ *   6. Delete auth_flow row + clear cookie (only for 5a random and 5d paths)
  */
 import { Router, type Request, type Response } from 'express'
 import type { AuthServiceContext } from '../context.js'
@@ -102,10 +103,53 @@ export function createCompleteRouter(
       !isNewAccount && clientId && !ctx.db.hasClientLogin(email, clientId)
 
     if (isNewAccount) {
-      // Step 5a (new user): Redirect to handle picker.
+      if (flow.handleMode === 'random') {
+        // Step 5a (new user, random mode): Skip handle picker — let pds-core generate
+        // a random handle via generateRandomHandle(). Clean up auth_flow now since
+        // there is no retry path (no handle_taken redirect back to the picker).
+        ctx.db.deleteAuthFlow(flowId)
+        res.clearCookie(AUTH_FLOW_COOKIE)
+
+        /**  CONTRACT: `handle` is intentionally omitted from callbackParams here.
+         *  Absent `handle` in the signed payload (serialised as '' by signCallback's
+         *  `?? ''` sentinel) is the agreed signal to pds-core that it should call
+         *  generateRandomHandle() instead of using a caller-supplied value.
+         *
+         *  Both signCallback and verifyCallback use the same `params.handle ?? ''`
+         * 
+         *  If you ever change this contract, update pds-core/src/index.ts
+         *  and the sentinel tests in packages/shared/src/__tests__/crypto.test.ts.
+         */
+        const callbackParams = {
+          request_uri: flow.requestUri,
+          email,
+          approved: '1',
+          new_account: '1',
+        }
+        const { sig, ts } = signCallback(
+          callbackParams,
+          ctx.config.epdsCallbackSecret,
+        )
+        const params = new URLSearchParams({ ...callbackParams, ts, sig })
+        logger.info(
+          { email, flowId },
+          'New user (random mode): skipping handle picker, redirecting to epds-callback',
+        )
+        res.redirect(
+          303,
+          `${ctx.config.pdsPublicUrl}/oauth/epds-callback?${params.toString()}`,
+        )
+        return
+      }
+
+      // Step 5b (new user, picker/picker-with-random/null mode): Redirect to handle picker.
+      // Default (null) preserves existing behavior — picker is always shown.
       // Do NOT delete auth_flow or clear cookie here — TTL cleanup handles expiry.
       // If pds-core redirects back with ?error=handle_taken, the user can retry.
-      logger.info({ email, flowId }, 'New user: redirecting to choose-handle')
+      logger.info(
+        { email, flowId, handleMode: flow.handleMode },
+        'New user: redirecting to choose-handle',
+      )
       res.redirect(303, '/auth/choose-handle')
       return
     }
@@ -125,7 +169,7 @@ export function createCompleteRouter(
       return
     }
 
-    // Step 5c: Record client login before redirecting (no consent needed, existing user)
+    // Step 5d: Record client login before redirecting (no consent needed, existing user)
     if (clientId) {
       ctx.db.recordClientLogin(email, clientId)
     }
@@ -134,7 +178,7 @@ export function createCompleteRouter(
     ctx.db.deleteAuthFlow(flowId)
     res.clearCookie(AUTH_FLOW_COOKIE)
 
-    // Step 5c (cont): Build HMAC-signed redirect to pds-core /oauth/epds-callback
+    // Step 5d (cont): Build HMAC-signed redirect to pds-core /oauth/epds-callback
     const callbackParams = {
       request_uri: flow.requestUri,
       email,

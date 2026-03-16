@@ -144,6 +144,96 @@ describe('Login page auth_flow creation', () => {
   })
 })
 
+describe('Login page handle_mode storage', () => {
+  let db: EpdsDb
+  let dbPath: string
+
+  beforeEach(() => {
+    dbPath = path.join(os.tmpdir(), `test-handle-mode-${Date.now()}.db`)
+    db = new EpdsDb(dbPath)
+  })
+
+  afterEach(() => {
+    db.close()
+    try {
+      fs.unlinkSync(dbPath)
+      // eslint-disable-next-line no-empty
+    } catch {}
+  })
+
+  it('stores "random" handle mode', () => {
+    db.createAuthFlow({
+      flowId: 'hm-random',
+      requestUri: 'urn:req:hm-random',
+      clientId: null,
+      handleMode: 'random',
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    })
+    expect(db.getAuthFlow('hm-random')!.handleMode).toBe('random')
+  })
+
+  it('stores "picker" handle mode', () => {
+    db.createAuthFlow({
+      flowId: 'hm-picker',
+      requestUri: 'urn:req:hm-picker',
+      clientId: null,
+      handleMode: 'picker',
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    })
+    expect(db.getAuthFlow('hm-picker')!.handleMode).toBe('picker')
+  })
+
+  it('stores "picker-with-random" handle mode', () => {
+    db.createAuthFlow({
+      flowId: 'hm-pwr',
+      requestUri: 'urn:req:hm-pwr',
+      clientId: null,
+      handleMode: 'picker-with-random',
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    })
+    expect(db.getAuthFlow('hm-pwr')!.handleMode).toBe('picker-with-random')
+  })
+
+  it('stores null when handle mode is absent (default → picker behavior)', () => {
+    db.createAuthFlow({
+      flowId: 'hm-null',
+      requestUri: 'urn:req:hm-null',
+      clientId: null,
+      handleMode: null,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    })
+    expect(db.getAuthFlow('hm-null')!.handleMode).toBeNull()
+  })
+
+  it('validates: only known modes accepted, unknown values → null', () => {
+    const VALID = ['random', 'picker', 'picker-with-random'] as const
+    const validate = (raw: string | undefined): string | null =>
+      raw !== undefined && (VALID as readonly string[]).includes(raw)
+        ? raw
+        : null
+
+    expect(validate('random')).toBe('random')
+    expect(validate('picker')).toBe('picker')
+    expect(validate('picker-with-random')).toBe('picker-with-random')
+    expect(validate('unknown')).toBeNull()
+    expect(validate('')).toBeNull()
+    expect(validate(undefined)).toBeNull()
+  })
+
+  it('getAuthFlowByRequestUri also returns handleMode', () => {
+    db.createAuthFlow({
+      flowId: 'hm-by-uri',
+      requestUri: 'urn:req:hm-by-uri',
+      clientId: null,
+      handleMode: 'picker',
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    })
+    expect(db.getAuthFlowByRequestUri('urn:req:hm-by-uri')!.handleMode).toBe(
+      'picker',
+    )
+  })
+})
+
 describe('Social providers detection', () => {
   it('empty socialProviders when no env vars set', () => {
     // Preserve original env
