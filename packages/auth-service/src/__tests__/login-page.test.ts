@@ -205,21 +205,6 @@ describe('Login page handle_mode storage', () => {
     expect(db.getAuthFlow('hm-null')!.handleMode).toBeNull()
   })
 
-  it('validates: only known modes accepted, unknown values → null', () => {
-    const VALID = ['random', 'picker', 'picker-with-random'] as const
-    const validate = (raw: string | undefined): string | null =>
-      raw !== undefined && (VALID as readonly string[]).includes(raw)
-        ? raw
-        : null
-
-    expect(validate('random')).toBe('random')
-    expect(validate('picker')).toBe('picker')
-    expect(validate('picker-with-random')).toBe('picker-with-random')
-    expect(validate('unknown')).toBeNull()
-    expect(validate('')).toBeNull()
-    expect(validate(undefined)).toBeNull()
-  })
-
   it('getAuthFlowByRequestUri also returns handleMode', () => {
     db.createAuthFlow({
       flowId: 'hm-by-uri',

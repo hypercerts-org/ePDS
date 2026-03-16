@@ -52,13 +52,6 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     const requestUri = req.query.request_uri as string | undefined
     const clientId = req.query.client_id as string | undefined
     const loginHint = req.query.login_hint as string | undefined
-    const rawHandleMode = req.query.epds_handle_mode as string | undefined
-    const handleMode: HandleMode | null =
-      rawHandleMode !== undefined &&
-      (VALID_HANDLE_MODES as readonly string[]).includes(rawHandleMode)
-        ? (rawHandleMode as HandleMode)
-        : null
-
     if (!requestUri) {
       res
         .status(400)
@@ -66,6 +59,26 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
         .send(renderError('Missing request_uri parameter'))
       return
     }
+
+    let clientMeta: ClientMetadata = {}
+    if (clientId) {
+      try {
+        clientMeta = await resolveClientMetadata(clientId)
+      } catch (err) {
+        // Degrade gracefully: no branding, handleMode falls back to null. user can still continue
+        logger.error({ err, clientId }, 'Failed to resolve client metadata')
+      }
+    }
+
+    // precedence: query param > client metadata > env variable
+    const rawHandleMode =
+      (req.query.epds_handle_mode as string | undefined) ||
+      clientMeta.epds_handle_mode
+    const handleMode: HandleMode | null =
+      rawHandleMode !== undefined &&
+      (VALID_HANDLE_MODES as readonly string[]).includes(rawHandleMode)
+        ? (rawHandleMode as HandleMode)
+        : null
 
     logger.debug(
       {
@@ -124,10 +137,6 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
       maxAge: AUTH_FLOW_TTL_MS,
     })
 
-    // Resolve client branding
-    const clientMeta: ClientMetadata = clientId
-      ? await resolveClientMetadata(clientId)
-      : {}
     const clientName =
       clientMeta.client_name ??
       (clientId ? await resolveClientName(clientId) : 'an application')

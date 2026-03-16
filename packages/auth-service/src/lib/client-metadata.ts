@@ -4,6 +4,8 @@
  * Caches results for 10 minutes to avoid repeated fetches.
  */
 
+import { HandleMode } from "@certified-app/shared"
+
 export interface ClientMetadata {
   client_name?: string
   client_uri?: string
@@ -14,6 +16,13 @@ export interface ClientMetadata {
   email_subject_template?: string
   brand_color?: string
   background_color?: string
+  /**
+   * ePDS extension — declares the default handle assignment mode for new users.
+   * Accepted values: 'random' | 'picker' | 'picker-with-random'.
+   * Validated against VALID_HANDLE_MODES by the login-page handler before being
+   * stored on the auth_flow row. Invalid values are silently treated as null.
+   */
+  epds_handle_mode?: HandleMode
 }
 
 interface CacheEntry {
