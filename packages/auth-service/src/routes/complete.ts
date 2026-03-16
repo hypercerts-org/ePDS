@@ -16,8 +16,8 @@
  *   5a. New user, handle_mode='random' → HMAC-signed redirect to pds-core (random handle generated server-side)
  *   5b. New user, handle_mode=null|'picker'|'picker-with-random' → redirect to /auth/choose-handle
  *   5c. Existing user, needs consent → redirect to /auth/consent?flow_id=...
- *   5c. Existing user, no consent needed → build HMAC-signed redirect to pds-core /oauth/epds-callback
- *   6. Delete auth_flow row + clear cookie (only for 5a random and 5d paths)
+ *   5d. Existing user, no consent needed → build HMAC-signed redirect to pds-core /oauth/epds-callback
+ *   6. Delete auth_flow row + clear cookie (only for 5d path)
  */
 import { Router, type Request, type Response } from 'express'
 import type { AuthServiceContext } from '../context.js'
@@ -105,10 +105,7 @@ export function createCompleteRouter(
     if (isNewAccount) {
       if (flow.handleMode === 'random') {
         // Step 5a (new user, random mode): Skip handle picker — let pds-core generate
-        // a random handle via generateRandomHandle(). Clean up auth_flow now since
-        // there is no retry path (no handle_taken redirect back to the picker).
-        ctx.db.deleteAuthFlow(flowId)
-        res.clearCookie(AUTH_FLOW_COOKIE)
+        // a random handle via generateRandomHandle().
 
         /**  CONTRACT: `handle` is intentionally omitted from callbackParams here.
          *  Absent `handle` in the signed payload (serialised as '' by signCallback's
@@ -116,7 +113,7 @@ export function createCompleteRouter(
          *  generateRandomHandle() instead of using a caller-supplied value.
          *
          *  Both signCallback and verifyCallback use the same `params.handle ?? ''`
-         * 
+         *
          *  If you ever change this contract, update pds-core/src/index.ts
          *  and the sentinel tests in packages/shared/src/__tests__/crypto.test.ts.
          */
@@ -155,7 +152,7 @@ export function createCompleteRouter(
     }
 
     if (needsConsent) {
-      // Step 5b: Redirect to consent screen, passing flow_id so consent can
+      // Step 5c: Redirect to consent screen, passing flow_id so consent can
       // look up request_uri and perform cleanup itself.
       // Do NOT delete auth_flow or clear cookie here — consent does it.
       const consentUrl = new URL(

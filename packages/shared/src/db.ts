@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import * as path from 'node:path'
 import * as fs from 'node:fs'
+import type { HandleMode } from './handle.js'
 
 export interface VerificationTokenRow {
   tokenHash: string
@@ -36,7 +37,7 @@ export interface AuthFlowRow {
   requestUri: string
   clientId: string | null
   email: string | null
-  handleMode: string | null
+  handleMode: HandleMode | null
   createdAt: number
   expiresAt: number
 }
@@ -177,8 +178,6 @@ export class EpdsDb {
         this.db.exec(`DROP TABLE IF EXISTS account_session;`)
       },
 
-      // v8: Add handle_mode to auth_flow — stores the resolved handle assignment mode
-      // (random | picker | picker-with-random) per OAuth flow. null = default (picker).
       () => {
         this.db.exec(`ALTER TABLE auth_flow ADD COLUMN handle_mode TEXT;`)
       },
@@ -409,7 +408,7 @@ export class EpdsDb {
     flowId: string
     requestUri: string
     clientId: string | null
-    handleMode?: string | null
+    handleMode?: HandleMode | null
     expiresAt: number
   }): void {
     this.db
