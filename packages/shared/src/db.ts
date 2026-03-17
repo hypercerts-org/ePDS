@@ -178,6 +178,7 @@ export class EpdsDb {
         this.db.exec(`DROP TABLE IF EXISTS account_session;`)
       },
 
+      // v8: Add handle_mode column to auth_flow for per-flow handle assignment strategy
       () => {
         this.db.exec(`ALTER TABLE auth_flow ADD COLUMN handle_mode TEXT;`)
       },

@@ -62,14 +62,16 @@ function resolveHandleMode(
   queryParam: string | undefined,
   clientMeta: ClientMetadata,
 ): HandleMode | null {
-  const raw =
-    queryParam ||
-    clientMeta.epds_handle_mode ||
-    process.env.EPDS_DEFAULT_HANDLE_MODE
-
-  if (raw === undefined) return null
-  if (!(VALID_HANDLE_MODES as readonly string[]).includes(raw)) return null
-  return raw as HandleMode
+  for (const raw of [
+    queryParam,
+    clientMeta.epds_handle_mode,
+    process.env.EPDS_DEFAULT_HANDLE_MODE,
+  ]) {
+    if (raw && (VALID_HANDLE_MODES as readonly string[]).includes(raw)) {
+      return raw as HandleMode
+    }
+  }
+  return null
 }
 
 export function createLoginPageRouter(ctx: AuthServiceContext): Router {
