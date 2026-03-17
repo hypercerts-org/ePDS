@@ -45,6 +45,33 @@ const logger = createLogger('auth:login-page')
 const AUTH_FLOW_COOKIE = 'epds_auth_flow'
 const AUTH_FLOW_TTL_MS = 10 * 60 * 1000 // 10 minutes
 
+async function safeResolveClientMetadata(
+  clientId: string | undefined,
+): Promise<ClientMetadata> {
+  if (!clientId) return {}
+  try {
+    return await resolveClientMetadata(clientId)
+  } catch (err) {
+    // Degrade gracefully: no branding, handleMode falls back to null. user can still continue
+    logger.error({ err, clientId }, 'Failed to resolve client metadata')
+    return {}
+  }
+}
+
+function resolveHandleMode(
+  queryParam: string | undefined,
+  clientMeta: ClientMetadata,
+): HandleMode | null {
+  const raw =
+    queryParam ||
+    clientMeta.epds_handle_mode ||
+    process.env.EPDS_DEFAULT_HANDLE_MODE
+
+  if (raw === undefined) return null
+  if (!(VALID_HANDLE_MODES as readonly string[]).includes(raw)) return null
+  return raw as HandleMode
+}
+
 export function createLoginPageRouter(ctx: AuthServiceContext): Router {
   const router = Router()
 
@@ -60,25 +87,11 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
       return
     }
 
-    let clientMeta: ClientMetadata = {}
-    if (clientId) {
-      try {
-        clientMeta = await resolveClientMetadata(clientId)
-      } catch (err) {
-        // Degrade gracefully: no branding, handleMode falls back to null. user can still continue
-        logger.error({ err, clientId }, 'Failed to resolve client metadata')
-      }
-    }
-
-    // precedence: query param > client metadata > env variable
-    const rawHandleMode =
-      (req.query.epds_handle_mode as string | undefined) ||
-      clientMeta.epds_handle_mode
-    const handleMode: HandleMode | null =
-      rawHandleMode !== undefined &&
-      (VALID_HANDLE_MODES as readonly string[]).includes(rawHandleMode)
-        ? (rawHandleMode as HandleMode)
-        : null
+    const clientMeta = await safeResolveClientMetadata(clientId)
+    const handleMode = resolveHandleMode(
+      req.query.epds_handle_mode as string | undefined,
+      clientMeta,
+    )
 
     logger.debug(
       {
