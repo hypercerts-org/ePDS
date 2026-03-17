@@ -247,7 +247,7 @@ async function main() {
          * the user chose random-mode (handleMode='random' in the auth_flow row).
          *
          * @see {@link ../../../auth-service/src/routes/complete.ts}
-         * @see {@link ../../../packages/shared/src/__tests__/crypto.test.ts}
+         * @see {@link ../../shared/src/__tests__/crypto.test.ts}
          */
         for (let attempt = 0; attempt < 3; attempt++) {
           try {

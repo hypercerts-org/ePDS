@@ -6,12 +6,17 @@
  * 2. Sets the epds_auth_flow cookie
  * 3. Renders a login page with email OTP form + optional social buttons
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { randomBytes } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { EpdsDb } from '@certified-app/shared'
+import {
+  resolveHandleMode,
+  safeResolveClientMetadata,
+} from '../routes/login-page.js'
+import type { ClientMetadata } from '../lib/client-metadata.js'
 
 describe('Login page auth_flow creation', () => {
   let db: EpdsDb
@@ -281,5 +286,138 @@ describe('Login page redirect requirements', () => {
 
     // Should be approximately 10 min from now
     expect(expiresAt - nowish).toBe(600_000)
+  })
+})
+
+describe('resolveHandleMode', () => {
+  it('returns query param when it is a valid mode', () => {
+    const result = resolveHandleMode('random', {})
+    expect(result).toBe('random')
+  })
+
+  it('falls back to client metadata when query param is absent', () => {
+    const clientMeta: ClientMetadata = { epds_handle_mode: 'picker' }
+    const result = resolveHandleMode(undefined, clientMeta)
+    expect(result).toBe('picker')
+  })
+
+  it('falls back to env var when query param and client metadata are absent', () => {
+    const origEnv = process.env.EPDS_DEFAULT_HANDLE_MODE
+    process.env.EPDS_DEFAULT_HANDLE_MODE = 'picker-with-random'
+    const result = resolveHandleMode(undefined, {})
+    expect(result).toBe('picker-with-random')
+    // Restore
+    if (origEnv) {
+      process.env.EPDS_DEFAULT_HANDLE_MODE = origEnv
+    } else {
+      delete process.env.EPDS_DEFAULT_HANDLE_MODE
+    }
+  })
+
+  it('returns null when no valid mode is provided at any level', () => {
+    const origEnv = process.env.EPDS_DEFAULT_HANDLE_MODE
+    delete process.env.EPDS_DEFAULT_HANDLE_MODE
+    const result = resolveHandleMode(undefined, {})
+    expect(result).toBeNull()
+    // Restore
+    if (origEnv) process.env.EPDS_DEFAULT_HANDLE_MODE = origEnv
+  })
+
+  it('ignores invalid values and falls back to next level', () => {
+    const origEnv = process.env.EPDS_DEFAULT_HANDLE_MODE
+    process.env.EPDS_DEFAULT_HANDLE_MODE = 'random'
+    // Cast via unknown to simulate malformed client metadata from a real fetch
+    const clientMeta = {
+      epds_handle_mode: 'invalid-mode',
+    } as unknown as ClientMetadata
+    // Query param is invalid, client metadata is invalid, env var is valid
+    const result = resolveHandleMode('garbage', clientMeta)
+    expect(result).toBe('random')
+    // Restore
+    if (origEnv) {
+      process.env.EPDS_DEFAULT_HANDLE_MODE = origEnv
+    } else {
+      delete process.env.EPDS_DEFAULT_HANDLE_MODE
+    }
+  })
+
+  it('returns null when all levels have invalid values', () => {
+    const origEnv = process.env.EPDS_DEFAULT_HANDLE_MODE
+    delete process.env.EPDS_DEFAULT_HANDLE_MODE
+    // Cast via unknown to simulate malformed client metadata
+    const clientMeta = {
+      epds_handle_mode: 'invalid-mode',
+    } as unknown as ClientMetadata
+    const result = resolveHandleMode('garbage', clientMeta)
+    expect(result).toBeNull()
+    // Restore
+    if (origEnv) process.env.EPDS_DEFAULT_HANDLE_MODE = origEnv
+  })
+
+  it('prioritizes query param over client metadata', () => {
+    const clientMeta: ClientMetadata = { epds_handle_mode: 'picker' }
+    const result = resolveHandleMode('random', clientMeta)
+    expect(result).toBe('random')
+  })
+
+  it('prioritizes client metadata over env var', () => {
+    const origEnv = process.env.EPDS_DEFAULT_HANDLE_MODE
+    process.env.EPDS_DEFAULT_HANDLE_MODE = 'random'
+    const clientMeta: ClientMetadata = { epds_handle_mode: 'picker' }
+    const result = resolveHandleMode(undefined, clientMeta)
+    expect(result).toBe('picker')
+    // Restore
+    if (origEnv) {
+      process.env.EPDS_DEFAULT_HANDLE_MODE = origEnv
+    } else {
+      delete process.env.EPDS_DEFAULT_HANDLE_MODE
+    }
+  })
+})
+
+describe('safeResolveClientMetadata', () => {
+  const originalFetch = globalThis.fetch
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  it('returns empty object when clientId is undefined', async () => {
+    const result = await safeResolveClientMetadata(undefined)
+    expect(result).toEqual({})
+  })
+
+  it('returns fallback metadata when fetch fails', async () => {
+    // resolveClientMetadata has internal error handling, so it returns fallback
+    // (domain extraction) rather than throwing. safeResolveClientMetadata's
+    // catch is defense-in-depth but unreachable in current implementation.
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('Network error'))
+    const result = await safeResolveClientMetadata('https://app.example.com')
+    expect(result).toEqual({ client_name: 'app.example.com' })
+  })
+
+  it('returns fallback metadata when fetch returns non-OK status', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+    } as Response)
+    const result = await safeResolveClientMetadata('https://app.example.com')
+    expect(result).toEqual({ client_name: 'app.example.com' })
+  })
+
+  it('returns metadata when fetch succeeds', async () => {
+    const mockMetadata: ClientMetadata = {
+      client_name: 'Test App',
+      brand_color: '#123456',
+    }
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockMetadata),
+    }) as unknown as typeof fetch
+    // Use a unique URL to avoid hitting the cache from previous tests
+    const result = await safeResolveClientMetadata(
+      'https://unique-test-app.example.com',
+    )
+    expect(result).toEqual(mockMetadata)
   })
 })

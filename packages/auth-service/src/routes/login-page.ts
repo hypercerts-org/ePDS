@@ -45,7 +45,7 @@ const logger = createLogger('auth:login-page')
 const AUTH_FLOW_COOKIE = 'epds_auth_flow'
 const AUTH_FLOW_TTL_MS = 10 * 60 * 1000 // 10 minutes
 
-async function safeResolveClientMetadata(
+export async function safeResolveClientMetadata(
   clientId: string | undefined,
 ): Promise<ClientMetadata> {
   if (!clientId) return {}
@@ -58,7 +58,7 @@ async function safeResolveClientMetadata(
   }
 }
 
-function resolveHandleMode(
+export function resolveHandleMode(
   queryParam: string | undefined,
   clientMeta: ClientMetadata,
 ): HandleMode | null {
