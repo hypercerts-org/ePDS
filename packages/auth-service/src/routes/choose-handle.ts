@@ -22,6 +22,7 @@ import {
   escapeHtml,
   signCallback,
   validateLocalPart,
+  type HandleMode,
 } from '@certified-app/shared'
 import { fromNodeHeaders } from 'better-auth/node'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
@@ -53,7 +54,10 @@ export function createChooseHandleRouter(
     res: Response,
   ): Promise<{
     flowId: string
-    flow: { requestUri: string }
+    flow: {
+      requestUri: string
+      handleMode: HandleMode | null
+    }
     email: string
   } | null> {
     // Guard 1: auth_flow cookie
@@ -169,9 +173,17 @@ export function createChooseHandleRouter(
     const error = rawError
       ? (KNOWN_ERROR_MESSAGES[rawError] ?? rawError)
       : undefined
+    const showRandomButton = result.flow.handleMode === 'picker-with-random'
     res
       .type('html')
-      .send(renderChooseHandlePage(handleDomain, error, res.locals.csrfToken))
+      .send(
+        renderChooseHandlePage(
+          handleDomain,
+          error,
+          res.locals.csrfToken,
+          showRandomButton,
+        ),
+      )
   })
 
   // ---------------------------------------------------------------------------
@@ -182,6 +194,7 @@ export function createChooseHandleRouter(
     if (!result) return
 
     const { flowId, flow, email } = result
+    const showRandomButton = flow.handleMode === 'picker-with-random'
 
     // Guard: if PDS account already exists, bounce back to /auth/complete
     // (mirrors the same check in the GET handler — prevents signing a
@@ -241,6 +254,7 @@ export function createChooseHandleRouter(
             handleDomain,
             'Invalid handle format. Use 5-20 lowercase letters, numbers, or hyphens.',
             res.locals.csrfToken,
+            showRandomButton,
           ),
         )
       return
@@ -272,6 +286,7 @@ export function createChooseHandleRouter(
               handleDomain,
               'Could not verify handle availability. Please try again.',
               res.locals.csrfToken,
+              showRandomButton,
             ),
           )
         return
@@ -285,6 +300,7 @@ export function createChooseHandleRouter(
             handleDomain,
             'Could not verify handle availability. Please try again.',
             res.locals.csrfToken,
+            showRandomButton,
           ),
         )
       return
@@ -298,6 +314,7 @@ export function createChooseHandleRouter(
             handleDomain,
             'That handle is already taken.',
             res.locals.csrfToken,
+            showRandomButton,
           ),
         )
       return
@@ -399,6 +416,7 @@ function renderChooseHandlePage(
   handleDomain: string,
   error?: string,
   csrfToken?: string,
+  showRandomButton?: boolean,
 ): string {
   const errorHtml = error
     ? `<div class="error" id="error-msg">${escapeHtml(error)}</div>`
@@ -431,6 +449,9 @@ function renderChooseHandlePage(
     .btn-primary { width: 100%; padding: 12px; background: #0f1828; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; margin-top: 8px; }
     .btn-primary:hover:not(:disabled) { background: #1a2a40; }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary { width: 100%; padding: 10px; background: white; color: #0f1828; border: 1px solid #0f1828; border-radius: 8px; font-size: 15px; font-weight: 500; cursor: pointer; margin-top: 8px; }
+    .btn-secondary:hover:not(:disabled) { background: #f0f2f5; }
+    .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -460,6 +481,7 @@ function renderChooseHandlePage(
         </div>
         <div class="status" id="handle-status"></div>
       </div>
+      ${showRandomButton ? `<button type="button" id="random-btn" class="btn-secondary">Generate random handle</button>` : ''}
       <button type="submit" id="submit-btn" class="btn-primary">Create</button>
     </form>
   </div>
@@ -553,6 +575,64 @@ function renderChooseHandlePage(
           checkAvailability(raw);
         }, 500);
       });
+
+      // Random handle button: generate a base36 local part client-side (mirrors
+      // generateRandomHandle() in shared/src/crypto.ts) and confirm availability
+      // via /api/check-handle, retrying up to 3 times on collision.
+      var randomBtn = document.getElementById('random-btn');
+      if (randomBtn) {
+        function randomLocalPart() {
+          var arr = new Uint8Array(4);
+          crypto.getRandomValues(arr);
+          // Reconstruct as unsigned 32-bit big-endian int (matches readUInt32BE)
+          var num = ((arr[0] << 24) | (arr[1] << 16) | (arr[2] << 8) | arr[3]) >>> 0;
+          return num.toString(36).padStart(6, '0').slice(0, 6);
+        }
+
+        function tryRandomHandle(attemptsLeft) {
+          if (attemptsLeft <= 0) {
+            setStatus('Could not find a free handle. Try again.', 'format-error');
+            randomBtn.disabled = false;
+            return;
+          }
+          var local = randomLocalPart();
+          input.value = local;
+          isAvailable = null;
+          updateSubmit();
+          setStatus('Checking\u2026', 'checking');
+
+          fetch('/api/check-handle?handle=' + encodeURIComponent(local), {
+            signal: AbortSignal.timeout(5000),
+          })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+              if (data.available) {
+                isAvailable = true;
+                setStatus('\u2713 Available!', 'available');
+                updateSubmit();
+                randomBtn.disabled = false;
+              } else if (data.error) {
+                // Service error — don't retry, surface the problem
+                setStatus('Could not check availability.', 'format-error');
+                randomBtn.disabled = false;
+              } else {
+                // Genuinely taken — retry with a new random value
+                tryRandomHandle(attemptsLeft - 1);
+              }
+            })
+            .catch(function() {
+              setStatus('Could not check availability.', 'format-error');
+              randomBtn.disabled = false;
+            });
+        }
+
+        randomBtn.addEventListener('click', function() {
+          clearTimeout(debounceTimer);
+          if (currentAbort) { currentAbort.abort(); currentAbort = null; }
+          randomBtn.disabled = true;
+          tryRandomHandle(3);
+        });
+      }
 
       // Disable button for the duration of the POST to prevent double-submit
       form.addEventListener('submit', function() {
