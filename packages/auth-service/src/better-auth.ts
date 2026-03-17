@@ -22,6 +22,8 @@ import { ensurePdsUrl } from './lib/pds-url.js'
 
 export type BetterAuthInstance = ReturnType<typeof createBetterAuth>
 
+export type BetterAuthInstance = ReturnType<typeof createBetterAuth>
+
 const logger = createLogger('auth:better-auth')
 
 const AUTH_FLOW_COOKIE = 'epds_auth_flow'
