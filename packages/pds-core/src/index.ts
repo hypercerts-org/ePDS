@@ -245,7 +245,7 @@ async function main() {
         /**
          * CONTRACT: absent `handle` param is the agreed signal from auth-service that
          * the user chose random-mode (handleMode='random' in the auth_flow row).
-         * 
+         *
          * @see {@link ../../../auth-service/src/routes/complete.ts}
          * @see {@link ../../../packages/shared/src/__tests__/crypto.test.ts}
          */

@@ -4,7 +4,7 @@
  * Caches results for 10 minutes to avoid repeated fetches.
  */
 
-import { HandleMode } from "@certified-app/shared"
+import { HandleMode } from '@certified-app/shared'
 
 export interface ClientMetadata {
   client_name?: string
