@@ -1,2 +1,4 @@
-# Use bd merge for beads JSONL files
-.beads/issues.jsonl merge=beads
+# Use bd merge driver for beads backup files (normalised JSONL per table).
+# If the merge=beads driver is not registered, the merge will fail — fix the
+# driver registration rather than working around it with merge=ours.
+.beads/backup/*.jsonl merge=beads

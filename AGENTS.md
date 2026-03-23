@@ -205,8 +205,13 @@ import { AuthServiceContext } from './context.js'
 
 - Use `bd` (beads) for all task tracking — **not** TodoWrite or markdown files.
 - `bd ready` — show available work; `bd create` — new issue; `bd close` — done.
-- `bd export -o .beads/issues.jsonl` to export issues (commit this file).
 - Do **not** use `bd sync` (obsolete).
+- The beads database uses **dolt** as its backend. `.beads/backup/` (normalised
+  JSONL per table) is tracked in git — **not** `.beads/issues.jsonl` (legacy
+  denormalised export, no longer the source of truth).
+- During rebases/merges, **never** resolve `.beads/` conflicts manually or with
+  `merge=ours`. The `merge=beads` driver must be registered; if it isn't,
+  the merge will fail — fix the driver registration rather than working around it.
 
 ## Key Gotchas
 
