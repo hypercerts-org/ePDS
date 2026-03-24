@@ -11,7 +11,8 @@
  */
 import type { EpdsDb } from '@certified-app/shared'
 import { createLogger } from '@certified-app/shared'
-import { betterAuth } from 'better-auth'
+import { betterAuth, APIError } from 'better-auth'
+import { createAuthMiddleware } from 'better-auth/api'
 import { generateRandomString } from 'better-auth/crypto'
 import { getMigrations } from 'better-auth/db'
 import { emailOTP } from 'better-auth/plugins'
@@ -21,6 +22,52 @@ import { getDidByEmail } from './lib/get-did-by-email.js'
 import { ensurePdsUrl } from './lib/pds-url.js'
 
 export type BetterAuthInstance = ReturnType<typeof createBetterAuth>
+
+/**
+ * Enforce ToS acceptance for new users on the OTP sign-in endpoint.
+ *
+ * Exported separately from createBetterAuth so it can be unit-tested directly
+ * without instantiating a full better-auth instance.
+ *
+ * Called from hooks.before — fires on every better-auth request, so the path
+ * guard is load-bearing (better-auth's matcher is hardcoded to `() => true`).
+ *
+ * Execution order: runBeforeHooks → endpoint (Zod validation + handler).
+ * ctx.body therefore still contains raw pre-validation JSON, including any
+ * tosAccepted field, before Zod strips unknown keys.
+ *
+ * PDS-unreachable behaviour: getDidByEmail never throws — it catches all
+ * errors internally and returns null. A null DID is treated as a new user,
+ * so ToS acceptance is still required. This is the safe default: we cannot
+ * confirm the account exists, so we enforce consent.
+ */
+export async function enforceTosAcceptance(
+  ctx: { path: string; body: unknown },
+  pdsUrl: string,
+  internalSecret: string,
+): Promise<void> {
+  // Path guard — this function is called on every better-auth request
+  if (ctx.path !== '/sign-in/email-otp') return
+
+  const rawEmail = (ctx.body as { email?: unknown } | undefined)?.email
+  if (typeof rawEmail !== 'string') return // let better-auth's own schema validation reject it
+  const email = rawEmail.trim().toLowerCase()
+  if (!email) return // let better-auth's own schema validation reject it
+
+  const did = await getDidByEmail(email, pdsUrl, internalSecret)
+  const isNewUser = !did
+  if (!isNewUser) return // returning users already accepted ToS at sign-up
+
+  // New user (or PDS unreachable — null DID): require explicit ToS acceptance.
+  // tosAccepted is sent as a JSON boolean by the client's verifyOtp().
+  const tosAccepted = (ctx.body as { tosAccepted?: boolean } | undefined)
+    ?.tosAccepted
+  if (!tosAccepted) {
+    throw new APIError('BAD_REQUEST', {
+      message: 'You must accept the Terms of Service to create an account.',
+    })
+  }
+}
 
 const logger = createLogger('auth:better-auth')
 
@@ -164,6 +211,17 @@ export function createBetterAuth(
     },
 
     socialProviders,
+
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        const pdsUrl = ensurePdsUrl(
+          process.env.PDS_INTERNAL_URL,
+          `https://${process.env.PDS_HOSTNAME ?? 'localhost'}`,
+        )
+        const internalSecret = process.env.EPDS_INTERNAL_SECRET ?? ''
+        await enforceTosAcceptance(ctx, pdsUrl, internalSecret)
+      }),
+    },
 
     plugins: [
       emailOTP({

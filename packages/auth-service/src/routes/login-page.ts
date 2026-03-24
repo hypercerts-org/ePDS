@@ -321,10 +321,9 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
   router.post(
     '/api/auth/new-user-check',
     async (req: Request, res: Response) => {
+      const rawEmail = (req.body as { email?: unknown } | undefined)?.email
       const email =
-        typeof req.body.email === 'string'
-          ? req.body.email.trim().toLowerCase()
-          : ''
+        typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : ''
       if (!email) {
         res.status(400).json({ error: 'email required' })
         return
@@ -484,7 +483,7 @@ export function renderLoginPage(opts: {
         </div>
         <div id="tos-field" class="field tos-field" style="display:none;">
           <label class="tos-label">
-            <input type="checkbox" id="tos-accept">
+            <input type="checkbox" id="tos-accept" name="tosAccepted">
             <span>I agree to the
               <a href="https://certified.app/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a>
               and
@@ -595,13 +594,15 @@ export function renderLoginPage(opts: {
         return { otpResult: results[0], isNewUser: results[1] };
       }
 
-      // Verify OTP via better-auth and redirect
-      async function verifyOtp(email, otp) {
+      // Verify OTP via better-auth and redirect.
+      // tosAccepted is a boolean from the #tos-accept checkbox — sent for new
+      // users so the server-side hook can enforce ToS acceptance before sign-in.
+      async function verifyOtp(email, otp, tosAccepted) {
         try {
           var res = await fetch(authBasePath + '/sign-in/email-otp', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: email, otp: otp }),
+            body: JSON.stringify({ email: email, otp: otp, tosAccepted: tosAccepted }),
           });
           if (!res.ok) {
             var data = await res.json().catch(function() { return {}; });
@@ -646,12 +647,25 @@ export function renderLoginPage(opts: {
         e.preventDefault();
         clearError();
         var otp = document.getElementById('code').value.trim();
+        // Read checkbox as a boolean — sent to the server for new-user ToS enforcement.
+        // For returning users tosChecked will be false (checkbox hidden) which is fine:
+        // the server hook skips the check entirely when the user already has a PDS account.
+        var tosChecked = document.getElementById('tos-accept').checked;
         var btn = this.querySelector('button[type=submit]');
+
+        // Client-side guard: belt-and-suspenders on top of the HTML required
+        // attribute and the authoritative server-side hook.
+        // isNewUser === true (strict) so null (Path B before check resolves) is
+        // intentionally not blocked here — the server hook is the real gate.
+        if (isNewUser === true && !tosChecked) {
+          showError('You must accept the Terms of Service to create an account.');
+          return;
+        }
 
         btn.disabled = true;
         btn.textContent = 'Verifying...';
 
-        var result = await verifyOtp(currentEmail, otp);
+        var result = await verifyOtp(currentEmail, otp, tosChecked);
         btn.disabled = false;
         btn.textContent = 'Verify';
 

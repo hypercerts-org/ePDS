@@ -6,10 +6,14 @@
  * 2. Looks up the auth_flow row to find the client_id for branding
  * 3. Falls back to default PDS template if no client context
  *
- * Since we can't easily instantiate a full better-auth instance in tests,
- * we test the DB lookup logic and EmailSender integration directly.
+ * Also tests enforceTosAcceptance (the exported hooks.before logic):
+ * 1. Returning users (has PDS DID) — skip ToS check entirely
+ * 2. New user + tosAccepted: true — allow through
+ * 3. New user + tosAccepted: false/absent — reject with BAD_REQUEST
+ * 4. getDidByEmail throws (null DID) — fail closed; tosAccepted === true required to proceed
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { enforceTosAcceptance } from '../better-auth.js'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
@@ -184,5 +188,154 @@ describe('sendVerificationOTP client branding via auth_flow', () => {
     )
 
     fetchSpy.mockRestore()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// enforceTosAcceptance — the exported hooks.before logic
+//
+// Tests call the real function from better-auth.ts directly.
+// globalThis.fetch is mocked to control what getDidByEmail sees, following
+// the same pattern used in the sendVerificationOTP tests above.
+// ---------------------------------------------------------------------------
+
+describe('enforceTosAcceptance (hooks.before for sign-in/email-otp)', () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, 'fetch')
+  })
+
+  afterEach(() => {
+    fetchSpy.mockRestore()
+  })
+
+  const PDS_URL = 'https://core:3000'
+  const SECRET = 'test-secret'
+
+  it('returns without error when path is not /sign-in/email-otp (path guard)', async () => {
+    // fetch should never be called — path guard short-circuits
+    await expect(
+      enforceTosAcceptance(
+        {
+          path: '/email-otp/send-verification-otp',
+          body: { email: 'user@example.com', tosAccepted: false },
+        },
+        PDS_URL,
+        SECRET,
+      ),
+    ).resolves.toBeUndefined()
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('returns without error when email is absent (let schema validation handle it)', async () => {
+    await expect(
+      enforceTosAcceptance(
+        { path: '/sign-in/email-otp', body: {} },
+        PDS_URL,
+        SECRET,
+      ),
+    ).resolves.toBeUndefined()
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('returns without error for returning user regardless of tosAccepted', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ did: 'did:plc:returning123' }), {
+        status: 200,
+      }),
+    )
+    await expect(
+      enforceTosAcceptance(
+        {
+          path: '/sign-in/email-otp',
+          body: { email: 'returning@example.com', tosAccepted: false },
+        },
+        PDS_URL,
+        SECRET,
+      ),
+    ).resolves.toBeUndefined()
+  })
+
+  it('returns without error for new user when tosAccepted is true', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ did: null }), { status: 200 }),
+    )
+    await expect(
+      enforceTosAcceptance(
+        {
+          path: '/sign-in/email-otp',
+          body: { email: 'newuser@example.com', tosAccepted: true },
+        },
+        PDS_URL,
+        SECRET,
+      ),
+    ).resolves.toBeUndefined()
+  })
+
+  it('throws BAD_REQUEST for new user when tosAccepted is false', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ did: null }), { status: 200 }),
+    )
+    await expect(
+      enforceTosAcceptance(
+        {
+          path: '/sign-in/email-otp',
+          body: { email: 'newuser@example.com', tosAccepted: false },
+        },
+        PDS_URL,
+        SECRET,
+      ),
+    ).rejects.toThrow(
+      'You must accept the Terms of Service to create an account.',
+    )
+  })
+
+  it('throws BAD_REQUEST for new user when tosAccepted is absent', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ did: null }), { status: 200 }),
+    )
+    await expect(
+      enforceTosAcceptance(
+        { path: '/sign-in/email-otp', body: { email: 'newuser@example.com' } },
+        PDS_URL,
+        SECRET,
+      ),
+    ).rejects.toThrow(
+      'You must accept the Terms of Service to create an account.',
+    )
+  })
+
+  it('enforces ToS when PDS is unreachable (getDidByEmail returns null on error)', async () => {
+    // getDidByEmail catches all fetch errors internally and returns null.
+    // A null DID → treated as new user → ToS is still required.
+    // This is the safe default: we cannot confirm the account exists.
+    fetchSpy.mockRejectedValueOnce(new Error('Network error: PDS unreachable'))
+    await expect(
+      enforceTosAcceptance(
+        {
+          path: '/sign-in/email-otp',
+          body: { email: 'newuser@example.com', tosAccepted: false },
+        },
+        PDS_URL,
+        SECRET,
+      ),
+    ).rejects.toThrow(
+      'You must accept the Terms of Service to create an account.',
+    )
+  })
+
+  it('allows sign-in when PDS is unreachable but tosAccepted is true', async () => {
+    fetchSpy.mockRejectedValueOnce(new Error('Network error: PDS unreachable'))
+    await expect(
+      enforceTosAcceptance(
+        {
+          path: '/sign-in/email-otp',
+          body: { email: 'newuser@example.com', tosAccepted: true },
+        },
+        PDS_URL,
+        SECRET,
+      ),
+    ).resolves.toBeUndefined()
   })
 })
