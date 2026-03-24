@@ -629,6 +629,15 @@ async function checkHandleRoute(
         message: 'handles are not provided on this domain',
       })
     }
+    // Only allow exactly one subdomain label (e.g. xyz.climateai.org).
+    // Reject bare apex domains (empty localPart) and nested subdomains (abc.xyz.climateai.org).
+    const localPart = domain.slice(0, domain.length - isHostedHandle.length)
+    if (!localPart || localPart.includes('.')) {
+      return res.status(400).json({
+        error: 'InvalidRequest',
+        message: 'domain must have exactly one subdomain label',
+      })
+    }
     const account = await pds.ctx.accountManager.getAccount(domain)
     if (!account) {
       return res.status(404).json({
