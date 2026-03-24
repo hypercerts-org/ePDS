@@ -586,12 +586,14 @@ export function renderLoginPage(opts: {
         }
       }
 
-      // Orchestrates sending the OTP and checking new-user status in parallel.
-      // If the OTP send fails, the error is surfaced; the new-user check result
-      // is independent and never blocks the flow.
+      // Sends the OTP and kicks off the new-user check concurrently.
+      // The OTP result is returned as soon as sendOtp() resolves; isNewUser
+      // is a Promise that resolves independently so a slow DID lookup never
+      // delays the OTP screen or surfaces OTP send errors.
       async function sendOtpAndCheckNewUser(email) {
-        var results = await Promise.all([sendOtp(email), checkIsNewUser(email)]);
-        return { otpResult: results[0], isNewUser: results[1] };
+        var isNewUserPromise = checkIsNewUser(email);
+        var otpResult = await sendOtp(email);
+        return { otpResult: otpResult, isNewUser: isNewUserPromise };
       }
 
       // Verify OTP via better-auth and redirect.
@@ -633,12 +635,15 @@ export function renderLoginPage(opts: {
         if (result.otpResult.error) {
           showError(result.otpResult.error);
         } else {
-          if (result.isNewUser === true) {
-            isNewUser = true;
-            document.getElementById('tos-field').style.display = 'block';
-            document.getElementById('tos-accept').required = true;
-          }
           showOtpStep(email);
+          // Resolve new-user check asynchronously — OTP screen is already visible.
+          result.isNewUser.then(function(newUser) {
+            if (newUser === true) {
+              isNewUser = true;
+              document.getElementById('tos-field').style.display = 'block';
+              document.getElementById('tos-accept').required = true;
+            }
+          });
         }
       });
 
