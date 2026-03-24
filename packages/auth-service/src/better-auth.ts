@@ -62,7 +62,7 @@ export async function enforceTosAcceptance(
   // tosAccepted is sent as a JSON boolean by the client's verifyOtp().
   const tosAccepted = (ctx.body as { tosAccepted?: boolean } | undefined)
     ?.tosAccepted
-  if (!tosAccepted) {
+  if (tosAccepted !== true) {
     throw new APIError('BAD_REQUEST', {
       message: 'You must accept the Terms of Service to create an account.',
     })
