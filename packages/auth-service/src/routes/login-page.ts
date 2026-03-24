@@ -87,6 +87,12 @@ export function resolveHandleMode(
 export function createLoginPageRouter(ctx: AuthServiceContext): Router {
   const router = Router()
 
+  const pdsInternalUrl = ensurePdsUrl(
+    process.env.PDS_INTERNAL_URL,
+    ctx.config.pdsPublicUrl,
+  )
+  const internalSecret = process.env.EPDS_INTERNAL_SECRET ?? ''
+
   router.get('/oauth/authorize', async (req: Request, res: Response) => {
     const requestUri = req.query.request_uri as string | undefined
     const clientId = req.query.client_id as string | undefined
@@ -231,12 +237,6 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     //   b) On the query string as a handle/DID (unlikely but possible)
     //   c) Only in the stored PAR request (third-party apps like sdsls.dev put
     //      the handle in the PAR body but don't duplicate it on the redirect URL)
-    const pdsInternalUrl = ensurePdsUrl(
-      process.env.PDS_INTERNAL_URL,
-      ctx.config.pdsPublicUrl,
-    )
-    const internalSecret = process.env.EPDS_INTERNAL_SECRET ?? ''
-
     // If no login_hint on the query string, try to retrieve it from the PAR request
     let effectiveLoginHint = loginHint ?? null
     if (!effectiveLoginHint && requestUri) {
@@ -304,6 +304,27 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
       }),
     )
   })
+
+  // GET /api/auth/new-user-check?email=
+  // Used by the login page (Path B) when no login_hint is present — after the
+  // user types their email and the OTP is sent, this is called in parallel to
+  // determine whether to show the ToS checkbox. Defaults to isNewUser: true on
+  // the client side if this route fails, so the checkbox is never silently skipped.
+  router.get(
+    '/api/auth/new-user-check',
+    async (req: Request, res: Response) => {
+      const email =
+        typeof req.query.email === 'string'
+          ? req.query.email.trim().toLowerCase()
+          : ''
+      if (!email) {
+        res.status(400).json({ error: 'email required' })
+        return
+      }
+      const did = await getDidByEmail(email, pdsInternalUrl, internalSecret)
+      res.json({ isNewUser: !did })
+    },
+  )
 
   return router
 }
@@ -407,8 +428,8 @@ export function renderLoginPage(opts: {
     .recovery-link { display: block; margin-top: 16px; color: #888; font-size: 13px; text-decoration: none; }
     .recovery-link:hover { color: #555; }
     .tos-field { text-align: left; margin-bottom: 16px; }
-    .tos-label { display: flex; align-items: flex-start; gap: 8px; font-size: 14px; cursor: pointer; color: #333; line-height: 1.4; }
-    .tos-label input[type=checkbox] { margin-top: 2px; flex-shrink: 0; accent-color: ${escapeHtml(brandColor)}; width: 15px; height: 15px; cursor: pointer; }
+    .field .tos-label { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: normal; cursor: pointer; color: #333; line-height: 1.4; margin-bottom: 0; }
+    .tos-label input[type=checkbox] { flex-shrink: 0; accent-color: ${escapeHtml(brandColor)}; width: 15px; height: 15px; cursor: pointer; }
     .tos-label a { color: ${escapeHtml(brandColor)}; text-decoration: underline; }
   </style>${renderOptionalStyleTag(opts.customCss)}
 </head>
@@ -515,6 +536,10 @@ export function renderLoginPage(opts: {
         stepOtp.classList.remove('active');
         stepEmail.classList.remove('hidden');
         recoveryLink.style.display = 'none';
+        isNewUser = null;
+        document.getElementById('tos-field').style.display = 'none';
+        document.getElementById('tos-accept').required = false;
+        document.getElementById('tos-accept').checked = false;
         clearError();
       }
 
@@ -534,6 +559,27 @@ export function renderLoginPage(opts: {
         } catch (err) {
           return { error: 'Network error. Please try again.' };
         }
+      }
+
+      // Check whether the email belongs to a new user.
+      // Defaults to true on any failure — safer to show the ToS checkbox
+      // than to silently skip it for a genuinely new user.
+      async function checkIsNewUser(email) {
+        try {
+          var res = await fetch('/api/auth/new-user-check?email=' + encodeURIComponent(email));
+          var data = await res.json().catch(function() { return {}; });
+          return data.isNewUser !== false;
+        } catch (err) {
+          return true;
+        }
+      }
+
+      // Orchestrates sending the OTP and checking new-user status in parallel.
+      // If the OTP send fails, the error is surfaced; the new-user check result
+      // is independent and never blocks the flow.
+      async function sendOtpAndCheckNewUser(email) {
+        var results = await Promise.all([sendOtp(email), checkIsNewUser(email)]);
+        return { otpResult: results[0], isNewUser: results[1] };
       }
 
       // Verify OTP via better-auth and redirect
@@ -566,13 +612,18 @@ export function renderLoginPage(opts: {
         btn.disabled = true;
         btn.textContent = 'Sending...';
 
-        var result = await sendOtp(email);
+        var result = await sendOtpAndCheckNewUser(email);
         btn.disabled = false;
         btn.textContent = 'Continue with email';
 
-        if (result.error) {
-          showError(result.error);
+        if (result.otpResult.error) {
+          showError(result.otpResult.error);
         } else {
+          if (result.isNewUser === true) {
+            isNewUser = true;
+            document.getElementById('tos-field').style.display = 'block';
+            document.getElementById('tos-accept').required = true;
+          }
           showOtpStep(email);
         }
       });
