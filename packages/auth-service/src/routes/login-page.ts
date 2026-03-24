@@ -19,6 +19,11 @@
  *   - Social: user clicks button → /api/auth/sign-in/{provider} → OAuth exchange
  *   - On success, better-auth redirects to /auth/complete (the bridge route)
  *   - Bridge reads epds_auth_flow cookie → auth_flow → HMAC-signed redirect
+ *
+ * Path B (no login_hint) new-user check:
+ *   POST /api/auth/new-user-check — email in JSON body, x-csrf-token header required.
+ *   Called in parallel with sendOtp to determine whether to show the ToS checkbox.
+ *   Email is kept out of the URL to avoid PII appearing in access logs.
  */
 import { Router, type Request, type Response } from 'express'
 import { randomBytes } from 'node:crypto'
@@ -305,17 +310,20 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     )
   })
 
-  // GET /api/auth/new-user-check?email=
+  // POST /api/auth/new-user-check
   // Used by the login page (Path B) when no login_hint is present — after the
   // user types their email and the OTP is sent, this is called in parallel to
   // determine whether to show the ToS checkbox. Defaults to isNewUser: true on
   // the client side if this route fails, so the checkbox is never silently skipped.
-  router.get(
+  // Email is in the JSON request body (not the URL) to avoid PII in access logs.
+  // CSRF validation (x-csrf-token header) is enforced by the global csrfProtection
+  // middleware to prevent cross-origin probing.
+  router.post(
     '/api/auth/new-user-check',
     async (req: Request, res: Response) => {
       const email =
-        typeof req.query.email === 'string'
-          ? req.query.email.trim().toLowerCase()
+        typeof req.body.email === 'string'
+          ? req.body.email.trim().toLowerCase()
           : ''
       if (!email) {
         res.status(400).json({ error: 'email required' })
@@ -564,9 +572,14 @@ export function renderLoginPage(opts: {
       // Check whether the email belongs to a new user.
       // Defaults to true on any failure — safer to show the ToS checkbox
       // than to silently skip it for a genuinely new user.
+      // Email is sent in the POST body (not the URL) to avoid PII in logs.
       async function checkIsNewUser(email) {
         try {
-          var res = await fetch('/api/auth/new-user-check?email=' + encodeURIComponent(email));
+          var res = await fetch('/api/auth/new-user-check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken },
+            body: JSON.stringify({ email: email }),
+          });
           var data = await res.json().catch(function() { return {}; });
           return data.isNewUser !== false;
         } catch (err) {
@@ -678,6 +691,7 @@ export function renderLoginPage(opts: {
       var initialStep = ${JSON.stringify(opts.initialStep)};
       var otpAlreadySent = ${JSON.stringify(opts.otpAlreadySent)};
       var isNewUser = ${JSON.stringify(opts.isNewUser)};
+      var csrfToken = ${JSON.stringify(opts.csrfToken)};
 
       if (isNewUser === true) {
         document.getElementById('tos-field').style.display = 'block';
