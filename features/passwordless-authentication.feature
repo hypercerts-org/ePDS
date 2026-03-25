@@ -53,6 +53,21 @@ Feature: Passwordless authentication via email OTP
     Then further attempts are rejected
     And the user must request a new OTP
 
+  # --- Terms of Service acceptance ---
+
+  Scenario: New user must accept Terms of Service before completing OTP verification
+    Given no PDS account exists for the user
+    When the user authenticates via OTP through the demo client
+    Then the OTP step shows a Terms of Service and Privacy Policy acceptance checkbox
+    And the checkbox must be checked before OTP verification can be submitted
+    When the user checks the checkbox and enters the OTP code
+    Then the browser is redirected back to the demo client with a valid session
+
+  Scenario: Returning user is not shown the Terms of Service checkbox
+    Given a user already has a PDS account
+    When the user authenticates via OTP through the demo client
+    Then the OTP step does not show a Terms of Service checkbox
+
   # --- Idempotent login page ---
 
   Scenario: Refreshing the login page does not break the flow
