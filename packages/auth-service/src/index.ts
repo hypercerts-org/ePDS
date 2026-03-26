@@ -1,4 +1,4 @@
-import { createLogger, getEpdsVersion } from '@certified-app/shared'
+import { createLogger, getEpdsVersion, requireEnv } from '@certified-app/shared'
 import express from 'express'
 import cookieParser from 'cookie-parser'
 import * as path from 'node:path'
@@ -94,7 +94,7 @@ export function createAuthService(config: AuthServiceConfig): {
     app.use(createTestHooksRouter(config.dbLocation))
   }
 
-  app.use(csrfProtection(config.csrfSecret))
+  app.use(csrfProtection())
   app.use(requestRateLimit({ windowMs: 60_000, maxRequests: 60 }))
 
   // Security headers (X-Frame-Options, CSP, HSTS, etc.). The CSP's
@@ -163,11 +163,8 @@ async function main() {
   const config: AuthServiceConfig = {
     hostname: process.env.AUTH_HOSTNAME || 'auth.localhost',
     port: resolveAuthPort(),
-    sessionSecret:
-      process.env.AUTH_SESSION_SECRET || 'dev-session-secret-change-me',
-    csrfSecret: process.env.AUTH_CSRF_SECRET || 'dev-csrf-secret-change-me',
-    epdsCallbackSecret:
-      process.env.EPDS_CALLBACK_SECRET || 'dev-callback-secret-change-me',
+    sessionSecret: requireEnv('AUTH_SESSION_SECRET'),
+    epdsCallbackSecret: requireEnv('EPDS_CALLBACK_SECRET'),
     pdsHostname: process.env.PDS_HOSTNAME || 'localhost',
     pdsPublicUrl: process.env.PDS_PUBLIC_URL || 'http://localhost:3000',
     email: {

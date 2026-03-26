@@ -58,7 +58,6 @@ function makeConfig(dbPath: string): AuthServiceConfig {
     hostname: 'auth.test.local',
     port: 0,
     sessionSecret: 'test-session-secret',
-    csrfSecret: 'test-csrf-secret',
     epdsCallbackSecret: 'test-callback-secret',
     pdsHostname: 'test.local',
     pdsPublicUrl: 'https://test.local',
@@ -88,7 +87,7 @@ async function startApp(ctx: AuthServiceContext): Promise<{
   // signal clean.
   app.disable('x-powered-by')
   app.use(cookieParser())
-  app.use(csrfProtection(ctx.config.csrfSecret))
+  app.use(csrfProtection())
   app.use(createLoginPageRouter(ctx))
   const server = app.listen(0)
   await new Promise<void>((resolve, reject) => {

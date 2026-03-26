@@ -50,7 +50,6 @@ describe('Type interfaces (compile-time checks)', () => {
       hostname: 'auth.example.com',
       port: 3001,
       sessionSecret: 'secret',
-      csrfSecret: 'csrf-secret',
       pdsHostname: 'pds.example.com',
       pdsPublicUrl: 'https://pds.example.com',
       verificationLink: { expiryMinutes: 10, maxAttemptsPerToken: 5 },

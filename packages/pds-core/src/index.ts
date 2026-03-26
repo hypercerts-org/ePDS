@@ -44,6 +44,7 @@ import {
   getEpdsVersion,
   renderError,
   validateClientMetadataForPreview,
+  requireEnv,
 } from '@certified-app/shared'
 import { shouldRewriteSecFetchSite } from './lib/sec-fetch-site-rewrite.js'
 import {
@@ -168,8 +169,7 @@ async function main() {
   // Called by the auth service after OTP verification + user consent.
   // Steps: load device -> resolve account -> issue code -> redirect to client
 
-  const epdsCallbackSecret =
-    process.env.EPDS_CALLBACK_SECRET || 'dev-callback-secret-change-me'
+  const epdsCallbackSecret = requireEnv('EPDS_CALLBACK_SECRET')
 
   // When true, consent may be skipped on initial sign-up for trusted clients
   // that request it via epds_skip_consent_on_signup in their metadata.
