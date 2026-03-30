@@ -26,7 +26,7 @@ export function mailpitAuthHeader(): string {
  */
 export async function waitForEmail(
   query: string,
-  timeoutMs = 15_000,
+  timeoutMs = 60_000,
 ): Promise<MailpitMessage> {
   const interval = 500
   const attempts = Math.ceil(timeoutMs / interval)

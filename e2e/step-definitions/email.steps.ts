@@ -38,25 +38,9 @@ Then('an OTP email arrives in the mail trap', async function (this: EpdsWorld) {
   this.otpCode = await extractOtp(message.ID)
 })
 
+// "Welcome" for new users, "Sign-in" for returning users
 Then(
-  'the email subject contains {string} \\(new user\\)',
-  function (this: EpdsWorld, expected: string) {
-    if (!testEnv.mailpitPass) return 'pending'
-    if (!this.lastEmailSubject) {
-      throw new Error(
-        'No email subject available — email arrival step must run first',
-      )
-    }
-    if (!this.lastEmailSubject.toLowerCase().includes(expected.toLowerCase())) {
-      throw new Error(
-        `Expected subject to contain "${expected}" but got: "${this.lastEmailSubject}"`,
-      )
-    }
-  },
-)
-
-Then(
-  'the email subject contains {string} \\(returning user\\)',
+  'the email subject contains {string}',
   function (this: EpdsWorld, expected: string) {
     if (!testEnv.mailpitPass) return 'pending'
     if (!this.lastEmailSubject) {

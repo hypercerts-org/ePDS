@@ -19,6 +19,12 @@ export class EpdsWorld extends World {
   /** DID captured from the demo welcome page after successful OAuth sign-up. */
   userDid?: string
 
+  /** Handle captured from the demo welcome page after successful OAuth sign-up. */
+  userHandle?: string
+
+  /** HTTP status code from the most recent direct API call — set by API steps. */
+  lastHttpStatus?: number
+
   get env() {
     return testEnv
   }

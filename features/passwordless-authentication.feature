@@ -16,9 +16,10 @@ Feature: Passwordless authentication via email OTP
     And the login page displays an email input form
     When the user enters a unique test email and submits
     Then an OTP email arrives in the mail trap for the test email
-    And the email subject contains "Welcome" (new user)
+    # "Welcome" for new users, "Sign-in" for returning users
+    And the email subject contains "Welcome"
     And the login page shows an OTP verification form
-    When the user enters the OTP code from the email
+    When the user enters the OTP code
     Then the browser is redirected back to the demo client
     And the demo client has a valid OAuth access token
 
@@ -27,7 +28,7 @@ Feature: Passwordless authentication via email OTP
     When the demo client initiates an OAuth login
     And the user enters the test email on the login page
     Then an OTP email arrives in the mail trap
-    And the email subject contains "Sign-in" (returning user)
+    And the email subject contains "Sign-in"
     When the user enters the OTP code
     And the user approves the consent screen
     Then the browser is redirected back to the demo client with a valid session
@@ -37,7 +38,7 @@ Feature: Passwordless authentication via email OTP
     When the demo client initiates an OAuth login
     And the user enters the test email on the login page
     Then an OTP email arrives in the mail trap
-    And the email subject contains "Sign-in" (returning user)
+    And the email subject contains "Sign-in"
     When the user enters the OTP code
     Then the browser is redirected back to the demo client with a valid session
 

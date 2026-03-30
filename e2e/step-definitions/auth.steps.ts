@@ -1,13 +1,106 @@
-import { Then, When } from '@cucumber/cucumber'
+import { Given, Then, When } from '@cucumber/cucumber'
 import { expect } from '@playwright/test'
 import { testEnv } from '../support/env.js'
 import type { EpdsWorld } from '../support/world.js'
+import { getPage } from '../support/utils.js'
+import { createAccountViaOAuth } from '../support/flows.js'
+import { sharedBrowser } from '../support/hooks.js'
+import { waitForEmail, extractOtp, clearMailpit } from '../support/mailpit.js'
 
-function getPage(world: EpdsWorld) {
-  const page = world.page
-  if (!page) throw new Error('page is not initialised')
-  return page
-}
+// ---------------------------------------------------------------------------
+// Scenario setup — compound Givens that create accounts as test preconditions
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a fresh PDS account for returning-user scenarios.
+ *
+ * Drives the browser through the full new-user sign-up flow, then resets
+ * the browser context so the returning-user login starts with a clean
+ * session (no cookies from the sign-up). The generated email is stored on
+ * world.testEmail for use by subsequent steps.
+ *
+ * Note: the first login to the demo client always shows the consent screen
+ * for a returning user (account exists but no client_logins record yet).
+ * The scenario is expected to handle that with "the user approves the consent screen".
+ */
+Given('a returning user has a PDS account', async function (this: EpdsWorld) {
+  if (!testEnv.mailpitPass) return 'pending'
+
+  const email = `returning-${Date.now()}@example.com`
+  await createAccountViaOAuth(this, email)
+
+  // Reset browser context to eliminate session cookies from the sign-up
+  // flow — the returning-user login must start as a fresh OAuth session
+  await this.context?.close()
+  if (!sharedBrowser) throw new Error('sharedBrowser is not initialised')
+  this.context = await sharedBrowser.newContext()
+  this.page = await this.context.newPage()
+  this.page.setDefaultNavigationTimeout(30_000)
+  this.page.setDefaultTimeout(15_000)
+})
+
+/**
+ * Creates a PDS account AND completes a first login (including approving the
+ * consent screen), so that the demo client is already recorded in client_logins.
+ * Resets the browser context afterwards so the actual test login starts fresh.
+ *
+ * After this step, the next login for world.testEmail will skip consent entirely
+ * and land directly on /welcome.
+ */
+Given(
+  'a returning user has already approved the demo client',
+  async function (this: EpdsWorld) {
+    if (!testEnv.mailpitPass) return 'pending'
+
+    const email = `approved-${Date.now()}@example.com`
+
+    // Step 1: Create the account via the new-user sign-up flow
+    await createAccountViaOAuth(this, email)
+
+    // Reset context between sign-up and first returning login
+    await this.context?.close()
+    if (!sharedBrowser) throw new Error('sharedBrowser is not initialised')
+    this.context = await sharedBrowser.newContext()
+    this.page = await this.context.newPage()
+    this.page.setDefaultNavigationTimeout(30_000)
+    this.page.setDefaultTimeout(15_000)
+
+    // Step 2: First returning-user login — consent screen will appear, approve it
+    const page = this.page
+    await page.goto(testEnv.demoUrl)
+    await page.fill('#email', email)
+    await page.click('button[type=submit]')
+    // Sync guard — wait for OTP form before fetching email
+    await expect(page.locator('#step-otp.active')).toBeVisible({
+      timeout: 30_000,
+    })
+
+    const message = await waitForEmail(`to:${email}`)
+    const otp = await extractOtp(message.ID)
+    await page.fill('#code', otp)
+    await page.click('#form-verify-otp .btn-primary')
+
+    // Approve consent — this records the client_logins entry
+    await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible({
+      timeout: 30_000,
+    })
+    await page.getByRole('button', { name: 'Approve' }).click()
+    await page.waitForURL('**/welcome', { timeout: 30_000 })
+
+    await clearMailpit(email)
+
+    // Reset context again so the actual test scenario starts with a clean session
+    await this.context.close()
+    this.context = await sharedBrowser.newContext()
+    this.page = await this.context.newPage()
+    this.page.setDefaultNavigationTimeout(30_000)
+    this.page.setDefaultTimeout(15_000)
+  },
+)
+
+// ---------------------------------------------------------------------------
+// Navigation and login page assertions
+// ---------------------------------------------------------------------------
 
 When(
   'the demo client initiates an OAuth login',
@@ -51,14 +144,6 @@ When(
   },
 )
 
-When('the user approves the consent screen', async function (this: EpdsWorld) {
-  const page = getPage(this)
-  await expect(page.locator('.btn-approve')).toBeVisible({
-    timeout: 30_000,
-  })
-  await page.click('.btn-approve')
-})
-
 When(
   'the user enters the test email on the login page',
   async function (this: EpdsWorld) {
@@ -73,6 +158,18 @@ When(
   },
 )
 
+When('the user approves the consent screen', async function (this: EpdsWorld) {
+  const page = getPage(this)
+  await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible({
+    timeout: 30_000,
+  })
+  await page.getByRole('button', { name: 'Approve' }).click()
+})
+
+// ---------------------------------------------------------------------------
+// OTP form
+// ---------------------------------------------------------------------------
+
 Then(
   'the login page shows an OTP verification form',
   async function (this: EpdsWorld) {
@@ -83,17 +180,6 @@ Then(
   },
 )
 
-When(
-  'the user enters the OTP code from the email',
-  async function (this: EpdsWorld) {
-    if (!testEnv.mailpitPass) return 'pending'
-    if (!this.otpCode)
-      throw new Error('No OTP code available — email step must run first')
-    await this.page?.fill('#code', this.otpCode)
-    await this.page?.click('#form-verify-otp .btn-primary')
-  },
-)
-
 When('the user enters the OTP code', async function (this: EpdsWorld) {
   if (!testEnv.mailpitPass) return 'pending'
   if (!this.otpCode)
@@ -101,6 +187,10 @@ When('the user enters the OTP code', async function (this: EpdsWorld) {
   await this.page?.fill('#code', this.otpCode)
   await this.page?.click('#form-verify-otp .btn-primary')
 })
+
+// ---------------------------------------------------------------------------
+// Post-login assertions
+// ---------------------------------------------------------------------------
 
 Then(
   'the browser is redirected back to the demo client',
@@ -124,7 +214,9 @@ Then(
   },
 )
 
-// --- OTP verification scenarios ---
+// ---------------------------------------------------------------------------
+// OTP brute-force / error scenarios
+// ---------------------------------------------------------------------------
 
 When(
   'the user requests an OTP for {string}',
@@ -165,10 +257,13 @@ When('enters an incorrect OTP code', async function (this: EpdsWorld) {
 When(
   'enters an incorrect OTP code {int} times',
   async function (this: EpdsWorld, times: number) {
+    const page = getPage(this)
     for (let i = 0; i < times; i++) {
-      await this.page?.fill('#code', '00000000')
-      await this.page?.click('#form-verify-otp .btn-primary')
-      await this.page?.waitForTimeout(500)
+      await page.fill('#code', '00000000')
+      await page.click('#form-verify-otp .btn-primary')
+      // Wait for the error message to appear before the next attempt so we
+      // don't submit a new code before the server has processed the previous one
+      await expect(page.locator('#error-msg')).toBeVisible({ timeout: 10_000 })
     }
   },
 )
@@ -196,7 +291,9 @@ Then('the user must request a new OTP', async function (this: EpdsWorld) {
   await expect(page.locator('#btn-resend')).toBeVisible()
 })
 
-// --- Refresh scenario ---
+// ---------------------------------------------------------------------------
+// Refresh / idempotency scenario
+// ---------------------------------------------------------------------------
 
 When(
   'the demo client redirects to the auth service login page',
