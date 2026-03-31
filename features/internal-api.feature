@@ -6,31 +6,49 @@ Feature: Internal service-to-service API
 
   Background:
     Given the ePDS test environment is running
-    And the internal API is accessible (e.g. via Docker network)
+    And the internal API secret is configured
 
-  Scenario: Account lookup by email returns DID
-    Given "alice@example.com" has a PDS account with DID "did:plc:alice"
-    When GET /_internal/account-by-email?email=alice@example.com is called with valid x-internal-secret
-    Then the response is 200 with { "did": "did:plc:alice" }
+  Scenario: Account lookup by email returns the account's DID
+    Given a new user has registered via the demo client
+    When the internal API is queried for the account by email
+    Then the response contains the account's DID
 
-  Scenario: Account lookup by email returns null for unknown email
-    When GET /_internal/account-by-email?email=unknown@example.com is called with valid x-internal-secret
-    Then the response is 200 with { "did": null }
+  Scenario: Account lookup by email returns null for an unknown email
+    When the internal API is queried for account-by-email with an unknown address
+    Then the response status is 200
+    And the response body has a null DID
 
-  Scenario: Handle resolution returns email
-    Given a PDS account with handle "alice.pds.test" and email "alice@example.com"
-    When GET /_internal/account-by-handle?handle=alice.pds.test is called with valid x-internal-secret
-    Then the response is 200 with { "email": "alice@example.com" }
+  Scenario: Handle resolution returns the account's email
+    Given a new user has registered via the demo client
+    When the internal API is queried for the account by handle
+    Then the response contains the account's email
 
+  Scenario: Check-handle returns true for an existing handle
+    Given a new user has registered via the demo client
+    When the internal API is queried to check if the handle exists
+    Then the response indicates the handle exists
+
+  # @manual: requires a real PKCE PAR request — implement when PAR submission
+  # steps exist (also needed for login-hint-resolution.feature)
+  @manual
   Scenario: PAR login hint retrieval
-    Given an OAuth client submitted a PAR request with login_hint "alice.pds.test"
-    When GET /_internal/par-login-hint?request_uri=<the-request-uri> is called with valid x-internal-secret
-    Then the response is 200 with { "login_hint": "alice.pds.test" }
+    Given a new user has registered via the demo client
+    When the demo client submits a PAR request with the user's handle as login_hint
+    And the internal API is queried for the PAR login hint
+    Then the response contains the user's handle as the login hint
 
   Scenario: Missing internal secret returns 401
-    When any /_internal/* endpoint is called without the x-internal-secret header
+    When an internal endpoint is called without the secret header
     Then the response status is 401
+    And the response body contains an auth error
 
   Scenario: Wrong internal secret returns 401
-    When any /_internal/* endpoint is called with an incorrect x-internal-secret
+    When an internal endpoint is called with an incorrect secret
     Then the response status is 401
+    And the response body contains an auth error
+
+  # check-handle returns 403 (not 401) on bad secret — server-side inconsistency
+  Scenario: Wrong internal secret on check-handle returns 403
+    When the check-handle endpoint is called with an incorrect secret
+    Then the response status is 403
+    And the response body contains an auth error

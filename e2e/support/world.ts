@@ -25,6 +25,12 @@ export class EpdsWorld extends World {
   /** HTTP status code from the most recent direct API call — set by API steps. */
   lastHttpStatus?: number
 
+  /** Response body from the most recent internal API call — set by internal-api steps. */
+  lastApiResponse?: Record<string, unknown>
+
+  /** Most recent PAR request_uri — set by PAR submission steps. */
+  lastRequestUri?: string
+
   get env() {
     return testEnv
   }
@@ -36,6 +42,18 @@ export class EpdsWorld extends World {
    */
   skipIfNoMailpit(): 'pending' | undefined {
     if (!testEnv.mailpitPass) {
+      return 'pending'
+    }
+  }
+
+  /**
+   * Call in any step that requires the internal API secret. If
+   * E2E_EPDS_INTERNAL_SECRET is not set, marks the step as pending and
+   * cucumber-js skips remaining steps in the scenario.
+   * When the secret is available, this is a no-op and the step executes normally.
+   */
+  skipIfNoInternalSecret(): 'pending' | undefined {
+    if (!testEnv.internalSecret) {
       return 'pending'
     }
   }

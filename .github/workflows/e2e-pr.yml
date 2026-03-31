@@ -71,6 +71,7 @@ jobs:
           E2E_MAILPIT_URL: ${{ steps.urls.outputs.mailpit_url }}
           E2E_MAILPIT_USER: ${{ secrets.E2E_MAILPIT_USER }}
           E2E_MAILPIT_PASS: ${{ secrets.E2E_MAILPIT_PASS }}
+          E2E_EPDS_INTERNAL_SECRET: ${{ secrets.E2E_EPDS_INTERNAL_SECRET }}
           E2E_HEADLESS: 'true'
         run: pnpm test:e2e:headless
 

@@ -9,6 +9,7 @@
 import { Then } from '@cucumber/cucumber'
 import { expect } from '@playwright/test'
 import type { EpdsWorld } from '../support/world.js'
+import { testEnv } from '../support/env.js'
 import { getPage } from '../support/utils.js'
 
 // Note: When('the user clicks {string}') lives in common.steps.ts — it is a
@@ -22,15 +23,22 @@ Then('a consent screen is displayed', async function (this: EpdsWorld) {
 })
 
 Then("it shows the demo client's name", async function (this: EpdsWorld) {
-  // The consent page renders "<client_name> wants to access your account"
-  // in the .subtitle element. Assert it contains non-trivial text (not blank).
-  const page = getPage(this)
-  const subtitle = page.locator('.subtitle')
-  await expect(subtitle).toBeVisible()
-  const text = await subtitle.innerText()
-  if (!text.trim()) {
-    throw new Error('Consent screen subtitle is empty — expected client name')
+  const res = await fetch(`${testEnv.demoUrl}/client-metadata.json`)
+  if (!res.ok) {
+    throw new Error(
+      `Demo client metadata not found: ${res.status} at ${testEnv.demoUrl}/client-metadata.json`,
+    )
   }
+
+  const body = (await res.json()) as Record<string, unknown>
+  const clientName =
+    typeof body.client_name === 'string' ? body.client_name.trim() : ''
+  if (!clientName) {
+    throw new Error('client-metadata.json is missing client_name')
+  }
+
+  const page = getPage(this)
+  await expect(page.getByText(clientName, { exact: true })).toBeVisible()
 })
 
 Then(

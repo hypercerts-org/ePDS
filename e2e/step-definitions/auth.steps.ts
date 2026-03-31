@@ -7,6 +7,74 @@ import { createAccountViaOAuth } from '../support/flows.js'
 import { sharedBrowser } from '../support/hooks.js'
 import { waitForEmail, extractOtp, clearMailpit } from '../support/mailpit.js'
 
+function getOtpAlphabet(otpCharset: 'numeric' | 'alphanumeric'): string {
+  return otpCharset === 'alphanumeric'
+    ? 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+    : '0123456789'
+}
+
+function mutateOtpCode(
+  otpCode: string,
+  otpCharset: 'numeric' | 'alphanumeric',
+): string {
+  const alphabet = getOtpAlphabet(otpCharset)
+
+  for (let i = 0; i < otpCode.length; i++) {
+    const currentChar = otpCode[i]?.toUpperCase()
+    const replacement = alphabet.split('').find((char) => char !== currentChar)
+    if (!replacement) continue
+
+    return `${otpCode.slice(0, i)}${replacement}${otpCode.slice(i + 1)}`
+  }
+
+  throw new Error('Could not derive an incorrect OTP from the current code')
+}
+
+async function buildIncorrectOtpCode(world: EpdsWorld): Promise<string> {
+  if (world.otpCode) {
+    const otpCharset = /^[0-9]+$/.test(world.otpCode)
+      ? 'numeric'
+      : 'alphanumeric'
+    return mutateOtpCode(world.otpCode, otpCharset)
+  }
+
+  const page = getPage(world)
+  const codeInput = page.locator('#code')
+  const [maxLengthAttr, inputModeAttr, patternAttr] = await Promise.all([
+    codeInput.getAttribute('maxlength'),
+    codeInput.getAttribute('inputmode'),
+    codeInput.getAttribute('pattern'),
+  ])
+
+  const otpLength = Number(maxLengthAttr ?? '') || testEnv.otpLength
+  const otpCharset =
+    inputModeAttr === 'numeric' || patternAttr === `[0-9]{${otpLength}}`
+      ? 'numeric'
+      : patternAttr === `[A-Z0-9]{${otpLength}}`
+        ? 'alphanumeric'
+        : testEnv.otpCharset
+
+  return mutateOtpCode('0'.repeat(otpLength), otpCharset)
+}
+
+async function assertDemoClientSession(world: EpdsWorld): Promise<void> {
+  const page = getPage(world)
+
+  await page.waitForURL('**/welcome', { timeout: 30_000 })
+
+  const cookies = await page.context().cookies()
+  const sessionCookie = cookies.find((cookie) => cookie.name === 'session_id')
+  if (!sessionCookie?.value) {
+    throw new Error('Demo client session cookie was not set after redirect')
+  }
+
+  const body = page.locator('body')
+  await expect(body).toContainText('You are signed in.')
+  await expect(body).toContainText('Sign out')
+  await expect(body).toContainText(/@[\w.-]+/)
+  await expect(body).toContainText(/did:[a-z0-9:]+/i)
+}
+
 // ---------------------------------------------------------------------------
 // Scenario setup — compound Givens that create accounts as test preconditions
 // ---------------------------------------------------------------------------
@@ -202,7 +270,7 @@ Then(
 Then(
   'the browser is redirected back to the demo client with a valid session',
   async function (this: EpdsWorld) {
-    await this.page?.waitForURL('**/welcome', { timeout: 30_000 })
+    await assertDemoClientSession(this)
   },
 )
 
@@ -250,16 +318,21 @@ When(
 )
 
 When('enters an incorrect OTP code', async function (this: EpdsWorld) {
-  await this.page?.fill('#code', '00000000')
-  await this.page?.click('#form-verify-otp .btn-primary')
+  const page = getPage(this)
+  const wrongOtp = await buildIncorrectOtpCode(this)
+
+  await page.fill('#code', wrongOtp)
+  await page.click('#form-verify-otp .btn-primary')
 })
 
 When(
   'enters an incorrect OTP code {int} times',
   async function (this: EpdsWorld, times: number) {
     const page = getPage(this)
+    const wrongOtp = await buildIncorrectOtpCode(this)
+
     for (let i = 0; i < times; i++) {
-      await page.fill('#code', '00000000')
+      await page.fill('#code', wrongOtp)
       await page.click('#form-verify-otp .btn-primary')
       // Wait for the error message to appear before the next attempt so we
       // don't submit a new code before the server has processed the previous one
