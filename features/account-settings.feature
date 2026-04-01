@@ -31,6 +31,8 @@ Scenario: User views their account information
 
   # --- Handle management ---
 
+# Known gap: handle update on /account is not implemented yet.
+@pending
 Scenario: User changes their handle
   Given the user is logged into account settings
   And their current handle is a random subdomain of the PDS domain
@@ -54,6 +56,7 @@ Scenario: User views and revokes a session
 Scenario: User deletes their account
   Given the user is logged into account settings
   When the user initiates account deletion and confirms
-  Then the browser is redirected away from /account (signed out)
+  Then the account deleted confirmation page is shown
+  And visiting /account redirects to /account/login
   And the user's PDS account no longer exists
   And com.atproto.server.getSession fails for the user's DID

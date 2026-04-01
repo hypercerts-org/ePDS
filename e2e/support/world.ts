@@ -22,6 +22,21 @@ export class EpdsWorld extends World {
   /** Handle captured from the demo welcome page after successful OAuth sign-up. */
   userHandle?: string
 
+  /** Secondary browser context for multi-session account settings scenarios. */
+  secondaryContext?: BrowserContext
+
+  /** Secondary page for multi-session account settings scenarios. */
+  secondaryPage?: Page
+
+  /** User agent used to identify the secondary session in the UI. */
+  secondarySessionAgent?: string
+
+  /** New handle local part submitted via account settings. */
+  updatedHandleLocalPart?: string
+
+  /** Full handle after account settings update (local + domain). */
+  updatedHandle?: string
+
   /** HTTP status code from the most recent direct API call — set by API steps. */
   lastHttpStatus?: number
 

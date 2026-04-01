@@ -4,6 +4,7 @@ export default {
     'features/automatic-account-creation.feature',
     'features/consent-screen.feature',
     'features/internal-api.feature',
+    'features/account-settings.feature',
   ],
   import: ['e2e/step-definitions/**/*.ts', 'e2e/support/**/*.ts'],
   format: ['pretty', 'html:reports/e2e.html'],

@@ -52,6 +52,7 @@ After(async function (this: EpdsWorld, scenario) {
       fullPage: true,
     })
   }
+  if (this.secondaryContext) await this.secondaryContext.close()
   if (this.context) await this.context.close()
 
   // Clear emails sent to this scenario's test email so they don't bleed into the next scenario
