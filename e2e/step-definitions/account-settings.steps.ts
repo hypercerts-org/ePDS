@@ -8,7 +8,7 @@ import { Given, Then, When } from '@cucumber/cucumber'
 import { expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { testEnv } from '../support/env.js'
-import { extractOtp, waitForEmail } from '../support/mailpit.js'
+import { clearMailpit, extractOtp, waitForEmail } from '../support/mailpit.js'
 import type { EpdsWorld } from '../support/world.js'
 import { getPage } from '../support/utils.js'
 import { createAccountViaOAuth } from '../support/flows.js'
@@ -92,12 +92,18 @@ async function completeAccountSettingsOtpLogin(
   }
 
   const page = getPage(world)
+  const query = `to:${world.testEmail}`
+
+  // This login helper can run more than once for the same recipient in a
+  // single scenario (e.g. primary + secondary session setup). Clear existing
+  // messages before submit so we always consume the OTP generated now.
+  await clearMailpit(world.testEmail)
 
   await page.fill('#email', world.testEmail)
   await page.getByRole('button', { name: 'Continue with email' }).click()
   await expect(page.locator('#otp')).toBeVisible({ timeout: 30_000 })
 
-  const message = await waitForEmail(`to:${world.testEmail}`)
+  const message = await waitForEmail(query)
   const otp = await extractOtp(message.ID)
   await page.fill('#otp', otp)
   await page.getByRole('button', { name: 'Verify' }).click()

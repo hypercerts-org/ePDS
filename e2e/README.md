@@ -91,11 +91,18 @@ the verification code without a real mail server.
 
 ### How the suite uses Mailpit
 
-- **Before each scenario** — the `Before` hook calls
-  `DELETE /api/v1/messages` to wipe the inbox, ensuring a clean slate.
-- **Email steps** — poll `GET /api/v1/search?query=to:<email>` every 500 ms
-  until the OTP email arrives (up to 15 seconds), then fetch the plain-text
-  view at `/view/<id>.txt` and extract the code with a regex.
+- **Scenario hygiene** — the global setup clears any leftover inbox state at
+  suite start, and per-scenario cleanup deletes messages for the scenario's
+  test recipient to avoid cross-scenario bleed.
+- **OTP retrieval** — before triggering OTP send for a recipient, tests clear
+  `to:<email>` via Mailpit search delete. After submit, they poll
+  `GET /api/v1/search?query=to:<email>` every 500 ms until an OTP email
+  arrives.
+- **Why clear before send** — this prevents stale OTP reuse when multiple OTP
+  emails are sent to the same recipient in one scenario (for example composed
+  setup + login, secondary-session login, retries, and resend flows).
+- **Code extraction** — once an email is found, tests fetch
+  `/view/<id>.txt` and extract the OTP with a regex.
 - **Auth** — requests use HTTP Basic auth (`E2E_MAILPIT_USER` /
   `E2E_MAILPIT_PASS`) encoded as an `Authorization: Basic ...` header.
 

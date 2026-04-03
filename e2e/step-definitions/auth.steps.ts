@@ -137,6 +137,7 @@ Given(
     const page = this.page
     await page.goto(testEnv.demoUrl)
     await page.fill('#email', email)
+    await clearMailpit(email)
     await page.click('button[type=submit]')
     // Sync guard — wait for OTP form before fetching email
     await expect(page.locator('#step-otp.active')).toBeVisible({
@@ -196,6 +197,9 @@ Then(
 When(
   'the user enters {string} and submits',
   async function (this: EpdsWorld, email: string) {
+    if (testEnv.mailpitPass) {
+      await clearMailpit(email)
+    }
     await this.page?.fill('#email', email)
     await this.page?.click('button[type=submit]')
     await this.page?.waitForLoadState('networkidle')
@@ -206,6 +210,9 @@ When(
   'the user enters a unique test email and submits',
   async function (this: EpdsWorld) {
     this.testEmail = `test-${Date.now()}@example.com`
+    if (testEnv.mailpitPass) {
+      await clearMailpit(this.testEmail)
+    }
     await this.page?.fill('#email', this.testEmail)
     await this.page?.click('button[type=submit]')
     await this.page?.waitForLoadState('networkidle')
@@ -219,6 +226,9 @@ When(
       throw new Error(
         'No test email set — "a returning user has a PDS account" step must run first',
       )
+    }
+    if (testEnv.mailpitPass) {
+      await clearMailpit(this.testEmail)
     }
     await this.page?.fill('#email', this.testEmail)
     await this.page?.click('button[type=submit]')
@@ -293,6 +303,7 @@ When(
     const page = getPage(this)
     await page.goto(testEnv.demoUrl)
     await page.fill('#email', email)
+    await clearMailpit(email)
     await page.click('button[type=submit]')
     await page.waitForLoadState('networkidle')
     await expect(page.locator('#step-otp.active')).toBeVisible({
@@ -309,6 +320,7 @@ When(
     this.testEmail = `test-${Date.now()}@example.com`
     await page.goto(testEnv.demoUrl)
     await page.fill('#email', this.testEmail)
+    await clearMailpit(this.testEmail)
     await page.click('button[type=submit]')
     await page.waitForLoadState('networkidle')
     await expect(page.locator('#step-otp.active')).toBeVisible({

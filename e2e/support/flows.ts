@@ -32,6 +32,9 @@ export async function createAccountViaOAuth(
   const page = world.page
   if (!page) throw new Error('page is not initialised')
 
+  // Clear stale OTP emails so waitForEmail reads the code sent by this submit.
+  await clearMailpit(email)
+
   await page.goto(testEnv.demoUrl)
   await page.fill('#email', email)
   await page.click('button[type=submit]')

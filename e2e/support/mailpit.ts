@@ -16,6 +16,26 @@ interface MailpitSearchResponse {
   messages?: MailpitMessage[]
 }
 
+async function searchMessages(
+  query: string,
+  limit: number,
+): Promise<MailpitMessage[]> {
+  const res = await fetch(
+    `${testEnv.mailpitUrl}/api/v1/search?query=${encodeURIComponent(query)}&limit=${limit}`,
+    { headers: { Authorization: mailpitAuthHeader() } },
+  )
+
+  if (!res.ok) {
+    if (res.status >= 400 && res.status < 500) {
+      throw new Error(`Mailpit search failed with client error: ${res.status}`)
+    }
+    throw new Error(`Mailpit search failed with server error: ${res.status}`)
+  }
+
+  const data = (await res.json()) as MailpitSearchResponse
+  return data.messages ?? []
+}
+
 export function mailpitAuthHeader(): string {
   return `Basic ${Buffer.from(`${testEnv.mailpitUser}:${testEnv.mailpitPass}`).toString('base64')}`
 }
@@ -30,30 +50,17 @@ export async function waitForEmail(
 ): Promise<MailpitMessage> {
   const interval = 500
   const attempts = Math.ceil(timeoutMs / interval)
-  const headers = { Authorization: mailpitAuthHeader() }
 
   for (let i = 0; i < attempts; i++) {
     try {
-      const res = await fetch(
-        `${testEnv.mailpitUrl}/api/v1/search?query=${encodeURIComponent(query)}&limit=1`,
-        { headers },
-      )
-      if (!res.ok) {
-        if (res.status >= 400 && res.status < 500) {
-          throw new Error(
-            `Mailpit search failed with client error: ${res.status}`,
-          )
-        }
-        await new Promise<void>((r) => setTimeout(r, interval))
-        continue
-      }
-      const data = (await res.json()) as MailpitSearchResponse
-      if (data.messages?.length) {
-        return data.messages[0]
+      const messages = await searchMessages(query, 1)
+      if (messages.length > 0) {
+        return messages[0]
       }
     } catch (err) {
-      if (err instanceof Error && err.message.includes('client error'))
+      if (err instanceof Error && err.message.includes('client error')) {
         throw err
+      }
     }
     await new Promise<void>((r) => setTimeout(r, interval))
   }
