@@ -57,7 +57,15 @@ After(async function (this: EpdsWorld, scenario) {
 
   // Clear emails sent to this scenario's test email so they don't bleed into the next scenario
   if (testEnv.mailpitPass && this.testEmail) {
-    await clearMailpit(this.testEmail)
+    try {
+      await clearMailpit(this.testEmail)
+    } catch (err) {
+      // Cleanup failure should not fail a passing scenario — log and move on
+      console.warn(
+        `After hook: clearMailpit cleanup failed for ${this.testEmail}:`,
+        err,
+      )
+    }
   }
 })
 

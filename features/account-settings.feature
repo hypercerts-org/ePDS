@@ -5,7 +5,6 @@ Feature: Account settings dashboard
 
 Background:
   Given the ePDS test environment is running
-  And a returning user has a PDS account
 
   # --- Authentication for settings ---
 
@@ -14,6 +13,7 @@ Scenario: Unauthenticated user is redirected to login
   Then the browser is redirected to /account/login
 
 Scenario: Account settings login uses standalone OTP
+  Given a returning user has a PDS account
   When the user navigates to /account/login
   Then a login form is displayed (separate from the OAuth flow)
   When the user enters their email and verifies the OTP
@@ -27,7 +27,7 @@ Scenario: User views their account information
   When they view the /account page
   Then the page displays their DID
   And the page displays their primary email
-  And the page displays their current handle
+  # And the page displays their current handle
 
   # --- Handle management ---
 

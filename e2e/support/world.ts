@@ -28,9 +28,6 @@ export class EpdsWorld extends World {
   /** Secondary page for multi-session account settings scenarios. */
   secondaryPage?: Page
 
-  /** User agent used to identify the secondary session in the UI. */
-  secondarySessionAgent?: string
-
   /** New handle local part submitted via account settings. */
   updatedHandleLocalPart?: string
 

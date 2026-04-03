@@ -141,10 +141,3 @@ Then(
     }
   },
 )
-
-// Descriptive step — the assertion is covered by the preceding createSession step.
-// Password-based login is the only alternative and it is rejected above.
-Then(
-  'the only way to authenticate is through the ePDS OAuth flow',
-  function (this: EpdsWorld) {},
-)

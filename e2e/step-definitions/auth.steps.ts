@@ -2,7 +2,7 @@ import { Given, Then, When } from '@cucumber/cucumber'
 import { expect } from '@playwright/test'
 import { testEnv } from '../support/env.js'
 import type { EpdsWorld } from '../support/world.js'
-import { getPage } from '../support/utils.js'
+import { getPage, resetBrowserContext } from '../support/utils.js'
 import { createAccountViaOAuth } from '../support/flows.js'
 import { sharedBrowser } from '../support/hooks.js'
 import { waitForEmail, extractOtp, clearMailpit } from '../support/mailpit.js'
@@ -38,6 +38,11 @@ async function buildIncorrectOtpCode(world: EpdsWorld): Promise<string> {
     return mutateOtpCode(world.otpCode, otpCharset)
   }
 
+  // When world.otpCode is not set (e.g. the OTP email step was skipped),
+  // we cannot read OTP_LENGTH / OTP_CHARSET from env directly because the
+  // test runner has no access to the deployed service's environment on
+  // Railway. Instead, infer the config from the DOM attributes that the
+  // auth service renders onto the #code input at render time.
   const page = getPage(world)
   const codeInput = page.locator('#code')
   const [maxLengthAttr, inputModeAttr, patternAttr] = await Promise.all([
@@ -99,12 +104,7 @@ Given('a returning user has a PDS account', async function (this: EpdsWorld) {
 
   // Reset browser context to eliminate session cookies from the sign-up
   // flow — the returning-user login must start as a fresh OAuth session
-  await this.context?.close()
-  if (!sharedBrowser) throw new Error('sharedBrowser is not initialised')
-  this.context = await sharedBrowser.newContext()
-  this.page = await this.context.newPage()
-  this.page.setDefaultNavigationTimeout(30_000)
-  this.page.setDefaultTimeout(15_000)
+  await resetBrowserContext(this, sharedBrowser)
 })
 
 /**
@@ -126,15 +126,10 @@ Given(
     await createAccountViaOAuth(this, email)
 
     // Reset context between sign-up and first returning login
-    await this.context?.close()
-    if (!sharedBrowser) throw new Error('sharedBrowser is not initialised')
-    this.context = await sharedBrowser.newContext()
-    this.page = await this.context.newPage()
-    this.page.setDefaultNavigationTimeout(30_000)
-    this.page.setDefaultTimeout(15_000)
+    await resetBrowserContext(this, sharedBrowser)
 
     // Step 2: First returning-user login — consent screen will appear, approve it
-    const page = this.page
+    const page = getPage(this)
     await page.goto(testEnv.demoUrl)
     await page.fill('#email', email)
     await clearMailpit(email)
@@ -159,11 +154,7 @@ Given(
     await clearMailpit(email)
 
     // Reset context again so the actual test scenario starts with a clean session
-    await this.context.close()
-    this.context = await sharedBrowser.newContext()
-    this.page = await this.context.newPage()
-    this.page.setDefaultNavigationTimeout(30_000)
-    this.page.setDefaultTimeout(15_000)
+    await resetBrowserContext(this, sharedBrowser)
   },
 )
 

@@ -2,6 +2,7 @@
  * Shared utility helpers for step definitions.
  */
 
+import type { Browser } from '@playwright/test'
 import type { EpdsWorld } from './world.js'
 import { testEnv } from './env.js'
 
@@ -14,6 +15,25 @@ export function getPage(world: EpdsWorld) {
   const page = world.page
   if (!page) throw new Error('page is not initialised')
   return page
+}
+
+/**
+ * Closes the current browser context on the world and opens a fresh one.
+ *
+ * Pass `sharedBrowser` from hooks.ts as the second argument. Accepting it as a
+ * parameter keeps this module free of side-effectful imports and makes the
+ * dependency explicit at each call site.
+ */
+export async function resetBrowserContext(
+  world: EpdsWorld,
+  browser: Browser | undefined,
+): Promise<void> {
+  await world.context?.close()
+  if (!browser) throw new Error('sharedBrowser is not initialised')
+  world.context = await browser.newContext()
+  world.page = await world.context.newPage()
+  world.page.setDefaultNavigationTimeout(30_000)
+  world.page.setDefaultTimeout(15_000)
 }
 
 /**
