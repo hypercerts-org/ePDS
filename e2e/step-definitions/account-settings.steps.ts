@@ -123,8 +123,14 @@ Given(
   async function (this: EpdsWorld) {
     if (!testEnv.mailpitPass) return 'pending'
 
-    const email = `account-settings-${Date.now()}@example.com`
-    await createAccountViaOAuth(this, email)
+    // This step can run standalone or be composed with prior setup steps.
+    // Reuse testEmail when a previous step already created an account
+    // (for example, the Background "a returning user has a PDS account"
+    // step) so we do not create a second unused account.
+    if (!this.testEmail) {
+      const email = `account-settings-${Date.now()}@example.com`
+      await createAccountViaOAuth(this, email)
+    }
 
     await resetContext(this)
 
