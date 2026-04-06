@@ -79,7 +79,7 @@ Then('the response body has a null DID', function (this: EpdsWorld) {
     throw new Error('No API response — query step must run first')
   if (this.lastApiResponse.did !== null) {
     throw new Error(
-      `Expected did to be null but got "${String(this.lastApiResponse.did)}"`,
+      `Expected did to be null but got "${this.lastApiResponse.did as string}"`,
     )
   }
 })

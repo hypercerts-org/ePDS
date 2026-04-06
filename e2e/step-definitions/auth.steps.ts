@@ -20,7 +20,7 @@ function mutateOtpCode(
   const alphabet = getOtpAlphabet(otpCharset)
 
   for (let i = 0; i < otpCode.length; i++) {
-    const currentChar = otpCode[i]?.toUpperCase()
+    const currentChar = otpCode[i].toUpperCase()
     const replacement = alphabet.split('').find((char) => char !== currentChar)
     if (!replacement) continue
 

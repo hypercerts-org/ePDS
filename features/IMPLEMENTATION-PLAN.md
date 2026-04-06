@@ -530,16 +530,18 @@ jobs:
 
 ## Tag Strategy
 
-| Tag                   | Meaning                                              | Docker CI | Railway |
-| --------------------- | ---------------------------------------------------- | --------- | ------- |
-| (no tag)              | Standard scenario                                    | Yes       | Yes     |
-| `@manual`             | Requires human interaction (social login)            | No        | No      |
-| `@docker-only`        | Needs Docker-specific infra (MailHog, internal API)  | Yes       | No      |
-| `@risk-of-disruption` | Regression guard for vanilla PDS behavior (existing) | Yes       | Yes     |
-| `@slow`               | Takes >30s (rate limiting, lockout scenarios)        | Yes       | Yes     |
+| Tag                   | Meaning                                                 | Docker CI | Railway |
+| --------------------- | ------------------------------------------------------- | --------- | ------- |
+| (no tag)              | Standard scenario                                       | Yes       | Yes     |
+| `@email`              | Requires a mail trap (Mailpit) to assert email delivery | Yes       | No      |
+| `@manual`             | Requires human interaction (social login)               | No        | No      |
+| `@docker-only`        | Needs Docker-specific infra (MailHog, internal API)     | Yes       | No      |
+| `@risk-of-disruption` | Regression guard for vanilla PDS behavior (existing)    | Yes       | Yes     |
+| `@slow`               | Takes >30s (rate limiting, lockout scenarios)           | Yes       | Yes     |
 
 Cucumber config excludes `@manual` by default. Railway CI additionally
-excludes `@docker-only`.
+excludes `@docker-only`. Scenarios tagged `@email` require Mailpit to be
+running; they are skipped gracefully when `E2E_MAILPIT_PASS` is unset.
 
 ## Test Data Strategy
 

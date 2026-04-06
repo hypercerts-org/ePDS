@@ -12,6 +12,7 @@ Scenario: Unauthenticated user is redirected to login
   When a user navigates to /account without a session
   Then the browser is redirected to /account/login
 
+@email
 Scenario: Account settings login uses standalone OTP
   Given a returning user has a PDS account
   When the user navigates to /account/login

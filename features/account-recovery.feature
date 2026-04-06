@@ -9,6 +9,7 @@ Feature: Account recovery via backup emails
 
   # --- Backup email setup (via account settings) ---
 
+  @email
   Scenario: User adds and verifies a backup email
     Given "alice@example.com" is logged into account settings
     When the user adds "backup@example.com" as a backup email
@@ -18,6 +19,7 @@ Feature: Account recovery via backup emails
 
   # --- Recovery flow ---
 
+  @email
   Scenario: User recovers account via verified backup email
     Given "backup@example.com" is a verified backup email for alice's account
     And an OAuth client has initiated a login flow
@@ -28,6 +30,7 @@ Feature: Account recovery via backup emails
     Then the browser is redirected back to the OAuth client with a valid session
     And the session is for alice's PDS account
 
+  @email
   Scenario: Recovery with non-existent email shows same UI (anti-enumeration)
     Given an OAuth client has initiated a login flow
     When the user navigates to the recovery page

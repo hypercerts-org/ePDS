@@ -10,6 +10,7 @@ Feature: Passwordless authentication via email OTP
 
   # --- Happy path ---
 
+  @email
   Scenario: New user authenticates with email OTP
     When the demo client initiates an OAuth login
     Then the browser is redirected to the auth service login page
@@ -23,6 +24,7 @@ Feature: Passwordless authentication via email OTP
     Then the browser is redirected back to the demo client
     And the demo client has a valid OAuth access token
 
+  @email
   Scenario: Returning user authenticates with email OTP
     Given a returning user has a PDS account
     When the demo client initiates an OAuth login
@@ -33,6 +35,7 @@ Feature: Passwordless authentication via email OTP
     And the user approves the consent screen
     Then the browser is redirected back to the demo client with a valid session
 
+  @email
   Scenario: Returning user who has already approved skips consent
     Given a returning user has already approved the demo client
     When the demo client initiates an OAuth login
