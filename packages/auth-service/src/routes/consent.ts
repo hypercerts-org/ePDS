@@ -87,6 +87,7 @@ export function createConsentRouter(ctx: AuthServiceContext): Router {
     )
   })
 
+  // if the user double clicks confirm then bug occurs
   router.post('/auth/consent', (req: Request, res: Response) => {
     const flowId = req.body.flow_id as string | undefined
     const action = req.body.action as string
@@ -241,7 +242,7 @@ function renderConsent(opts: {
       </ul>
     </div>
 
-    <form method="POST" action="/auth/consent">
+    <form method="POST" action="/auth/consent" onsubmit="this.querySelectorAll('button').forEach(button => button.disabled = true)">
       <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
       ${hiddenFields}
       <div class="actions">
