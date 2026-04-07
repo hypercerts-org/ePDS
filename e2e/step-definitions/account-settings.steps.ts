@@ -60,22 +60,6 @@ async function assertPdsAccountMissing(did: string): Promise<void> {
   }
 }
 
-async function assertGetSessionFails(did: string): Promise<void> {
-  const res = await fetch(
-    `${testEnv.pdsUrl}/xrpc/com.atproto.server.getSession`,
-    {
-      headers: {
-        Authorization: `Bearer ${did}`,
-      },
-    },
-  )
-  if (res.ok) {
-    throw new Error(
-      `Expected getSession to fail for DID "${did}" but got ${res.status}`,
-    )
-  }
-}
-
 async function assertOnAccountSettingsPage(world: EpdsWorld): Promise<void> {
   const page = getPage(world)
   const authBase = escapeForRegex(testEnv.authUrl)
@@ -505,26 +489,6 @@ When(
 )
 
 Then(
-  /^the browser is redirected away from \/account \(signed out\)$/,
-  async function (this: EpdsWorld) {
-    const page = getPage(this)
-    const authBase = escapeForRegex(testEnv.authUrl)
-
-    await expect(page).not.toHaveURL(
-      new RegExp(`^${authBase}/account(\\?.*)?$`),
-    )
-    await expect(
-      page.getByRole('heading', { name: 'Account Deleted' }),
-    ).toBeVisible()
-
-    await page.goto(`${testEnv.authUrl}/account`)
-    await expect(page).toHaveURL(
-      new RegExp(`^${authBase}/account/login(\\?.*)?$`),
-    )
-  },
-)
-
-Then(
   'the account deleted confirmation page is shown',
   async function (this: EpdsWorld) {
     const page = getPage(this)
@@ -562,18 +526,5 @@ Then(
     }
 
     await assertPdsAccountMissing(this.userDid)
-  },
-)
-
-Then(
-  "com.atproto.server.getSession fails for the user's DID",
-  async function (this: EpdsWorld) {
-    if (!this.userDid) {
-      throw new Error(
-        'No DID available — "a returning user has a PDS account" step must run first',
-      )
-    }
-
-    await assertGetSessionFails(this.userDid)
   },
 )

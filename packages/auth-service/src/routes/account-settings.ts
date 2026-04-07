@@ -63,7 +63,6 @@ export function createAccountSettingsRouter(
     // Look up DID from PDS
     const did = await getDidByEmail(email, pdsUrl, internalSecret)
     const backupEmails = did ? ctx.db.getBackupEmails(did) : []
-    const currentHandle = did ? await getHandleByDid(did, pdsUrl) : null
 
     // Get all better-auth sessions for this user
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth session type not exported
@@ -81,7 +80,6 @@ export function createAccountSettingsRouter(
       renderSettingsPage({
         did: did ?? '(unknown)',
         email,
-        currentHandle: currentHandle ?? '(unknown)',
         handleDomain,
         backupEmails,
         sessions,
@@ -402,7 +400,6 @@ export function createAccountSettingsRouter(
 function renderSettingsPage(opts: {
   did: string
   email: string
-  currentHandle: string
   handleDomain: string
   backupEmails: Array<{ email: string; verified: number; id: number }>
   sessions: Array<{
@@ -481,7 +478,6 @@ function renderSettingsPage(opts: {
     <section class="section">
       <h2>Handle</h2>
       <p class="info">Your handle is your public username on the AT Protocol network.</p>
-      <div class="setting-row"><strong>Current Handle:</strong> <code>${escapeHtml(opts.currentHandle)}</code></div>
       <form method="POST" action="/account/handle" class="inline-form">
         <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
         <input type="text" name="handle" placeholder="yourname" autocomplete="off" autocapitalize="none" spellcheck="false" required>
@@ -583,21 +579,3 @@ const SETTINGS_CSS = `
   details summary { list-style: none; }
   details summary::-webkit-details-marker { display: none; }
 `
-
-async function getHandleByDid(
-  did: string,
-  pdsUrl: string,
-): Promise<string | null> {
-  try {
-    const res = await fetch(
-      `${pdsUrl}/xrpc/com.atproto.repo.describeRepo?repo=${encodeURIComponent(did)}`,
-      { signal: AbortSignal.timeout(3000) },
-    )
-    if (!res.ok) return null
-    const data = (await res.json()) as { handle?: string | null }
-    return typeof data.handle === 'string' ? data.handle : null
-  } catch (err) {
-    logger.warn({ err, did }, 'Failed to resolve handle for account')
-    return null
-  }
-}

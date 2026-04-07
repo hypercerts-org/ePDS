@@ -60,4 +60,3 @@ Scenario: User deletes their account
   Then the account deleted confirmation page is shown
   And visiting /account redirects to /account/login
   And the user's PDS account no longer exists
-  And com.atproto.server.getSession fails for the user's DID

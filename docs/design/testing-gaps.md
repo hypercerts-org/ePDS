@@ -120,6 +120,13 @@ pds-core callback, full OAuth flow).
 - Consider exporting `buildSocialProviders` for direct unit testing.
 - The OTP email wiring is best verified by integration or e2e tests
   that trigger a real OTP flow.
+- `extractOtp` in `e2e/support/mailpit.ts` uses heuristic regex patterns
+  rather than `OTP_LENGTH` / `OTP_CHARSET` env vars. This is slightly flaky
+  by nature — the robust alternative would be keeping those env vars in sync
+  between the deployed service and `e2e/.env`, but that requires manual
+  coordination on every config change and is error-prone across environments
+  (e.g. Railway vs local). The heuristic is preferred since the email
+  templates are in-repo and their structure is stable.
 
 ### 4. `auth-service/src/context.ts` and `index.ts` (0%)
 

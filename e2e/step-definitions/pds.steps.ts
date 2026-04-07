@@ -134,7 +134,7 @@ Then(
     const status = this.lastHttpStatus
     if (!status)
       throw new Error('No HTTP status — createSession step must run first')
-    if (status < 400) {
+    if (status < 400 || status >= 500) {
       throw new Error(
         `Expected createSession to fail (4xx) but got status ${status}`,
       )

@@ -69,32 +69,39 @@ export async function waitForEmail(
 }
 
 /**
- * Extract the OTP code from the plain-text body of a Mailpit message.
+ * Extract the OTP from the plain-text body of a Mailpit message.
  *
- * Fetches the plain-text rendering via /view/{id}.txt and uses a multiline
- * regex to find a line that is exactly otpLength chars of the correct charset
- * and nothing else. The `m` flag makes ^ and $ match per-line, so the code
- * must occupy its own line with no surrounding text — this avoids false
- * positives from words like "verification" in alphanumeric mode.
+ * Uses heuristic patterns instead of OTP_LENGTH / OTP_CHARSET so it works
+ * even when e2e env vars don't match the deployed service config.
  *
- * This relies on the default email templates sending the raw code (not
- * formatOtpPlain) on its own line in the plain-text body.
+ * Slightly flaky by nature — the only robust alternative is keeping OTP_LENGTH
+ * and OTP_CHARSET in sync between the deployed service and e2e/.env, which
+ * requires manual coordination on every config change.
+ *
+ * testEnv.otpLength / otpCharset are no longer used here but remain in env.ts
+ * for buildIncorrectOtpCode in auth.steps.ts.
  */
 export async function extractOtp(messageId: string): Promise<string> {
   const res = await fetch(`${testEnv.mailpitUrl}/view/${messageId}.txt`, {
     headers: { Authorization: mailpitAuthHeader() },
   })
   const body = await res.text()
-  const charClass =
-    testEnv.otpCharset === 'alphanumeric' ? '[A-Za-z0-9]' : '\\d'
-  const pattern = new RegExp(`^(${charClass}{${testEnv.otpLength}})$`, 'm')
-  const match = pattern.exec(body)
-  if (!match) {
-    throw new Error(
-      `Could not extract OTP (length=${testEnv.otpLength}, charset=${testEnv.otpCharset}) from email body:\n${body}`,
-    )
-  }
-  return match[1]
+
+  // Default templates: raw code on its own line
+  const isolatedNumeric = /^(\d{4,12})$/m.exec(body)
+  if (isolatedNumeric) return isolatedNumeric[1]
+
+  const isolatedAlphanum = /^([A-Z0-9]{4,12})$/m.exec(body)
+  if (isolatedAlphanum) return isolatedAlphanum[1]
+
+  // Client-branded template fallback: "Your code for <AppName> is: <code>"
+  const inlineNumeric = /\bis:\s*(\d{4,12})\s*$/m.exec(body)
+  if (inlineNumeric) return inlineNumeric[1]
+
+  const inlineAlphanum = /\bis:\s*([A-Z0-9]{4,12})\s*$/m.exec(body)
+  if (inlineAlphanum) return inlineAlphanum[1]
+
+  throw new Error(`Could not extract OTP from email body:\n${body}`)
 }
 
 /**
