@@ -57,18 +57,6 @@ export class EpdsWorld extends World {
       return 'pending'
     }
   }
-
-  /**
-   * Call in any step that requires the internal API secret. If
-   * E2E_EPDS_INTERNAL_SECRET is not set, marks the step as pending and
-   * cucumber-js skips remaining steps in the scenario.
-   * When the secret is available, this is a no-op and the step executes normally.
-   */
-  skipIfNoInternalSecret(): 'pending' | undefined {
-    if (!testEnv.internalSecret) {
-      return 'pending'
-    }
-  }
 }
 
 setWorldConstructor(EpdsWorld)
