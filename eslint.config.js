@@ -16,6 +16,8 @@ export default tseslint.config(
       '**/.next/',
       // cucumber-js config requires `export default` — ignore rather than override the rule
       'e2e/cucumber.mjs',
+      // Standalone Node scripts not tracked by any tsconfig
+      'scripts/**',
     ],
   },
 

@@ -8,6 +8,10 @@
     "node": ">=20.0.0"
   },
   "packageManager": "pnpm@9.15.9",
+  "//workspaces": "This field is only read by @manypkg/get-packages (used by Changesets) to put us into single-package mode. pnpm ignores it because pnpm-workspace.yaml takes precedence for actual workspace resolution. Do not remove without reading docs/PUBLISHING.md.",
+  "workspaces": [
+    "."
+  ],
   "scripts": {
     "build": "pnpm --recursive build",
     "dev": "pnpm --recursive --parallel dev",
@@ -24,18 +28,23 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
-    "lint:fix": "eslint --fix ."
+    "lint:fix": "eslint --fix .",
+    "changeset": "changeset",
+    "version-packages": "changeset version && node scripts/changelog-audience-summary.mjs",
+    "release": "changeset tag"
   },
   "dependencies": {
     "pino": "^10.3.1"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "^0.6.0",
+    "@changesets/cli": "^2.30.0",
     "@cucumber/cucumber": "^12.7.0",
-    "dotenv": "^17.3.1",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.58.2",
     "@types/pino": "^7.0.5",
     "@vitest/coverage-v8": "^4.1.0",
+    "dotenv": "^17.3.1",
     "eslint": "^10.0.1",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.8.1",

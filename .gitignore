@@ -28,3 +28,6 @@ reports/
 # bv (beads viewer) local config and caches
 .bv/
 tmp/
+
+# Claude Code per-user local permission overrides
+.claude/settings.local.json
