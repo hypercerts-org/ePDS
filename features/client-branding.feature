@@ -1,3 +1,4 @@
+@not-implemented
 Feature: Client branding — CSS injection and custom email templates
   ePDS allows trusted OAuth clients to customize the appearance of login
   and consent pages via CSS injection, and to provide custom email templates

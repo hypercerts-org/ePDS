@@ -1,3 +1,4 @@
+@not-implemented
 Feature: Security measures
   ePDS implements multiple layers of security. Unit tests cover the
   primitives (timing-safe comparison, HTML escaping, email masking).

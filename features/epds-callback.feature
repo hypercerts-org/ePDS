@@ -1,3 +1,4 @@
+@not-implemented
 Feature: ePDS callback — the core integration bridge
   The /oauth/epds-callback endpoint on pds-core receives HMAC-signed
   redirects from the auth service after identity verification. It resolves

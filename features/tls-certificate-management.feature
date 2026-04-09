@@ -1,3 +1,4 @@
+@not-implemented
 Feature: TLS certificate management via Caddy on-demand TLS
   Caddy reverse proxy provisions TLS certificates on-demand for the PDS
   hostname, auth subdomain, and all user handle subdomains. The /tls-check
@@ -36,5 +37,4 @@ Feature: TLS certificate management via Caddy on-demand TLS
 
   Scenario: Security headers are set by Caddy
     When any HTTPS response passes through Caddy
-    Then the response includes Strict-Transport-Security, X-Frame-Options,
-         X-Content-Type-Options, and Referrer-Policy headers
+    Then the response includes Strict-Transport-Security, X-Frame-Options, X-Content-Type-Options, and Referrer-Policy headers
