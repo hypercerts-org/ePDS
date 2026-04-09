@@ -615,7 +615,7 @@ async function main() {
   // Returns only { exists: boolean } — never returns email, DID, or other account data.
   pds.app.get('/_internal/check-handle', async (req, res) => {
     if (!verifyInternalSecret(req.headers['x-internal-secret'])) {
-      res.status(403).json({ error: 'forbidden' })
+      res.status(401).json({ error: 'Unauthorized' })
       return
     }
     const handle = ((req.query.handle as string) || '').trim()
