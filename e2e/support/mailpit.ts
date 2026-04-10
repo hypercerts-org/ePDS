@@ -142,6 +142,16 @@ export async function extractOtp(messageId: string): Promise<string> {
 }
 
 /**
+ * Return the number of Mailpit messages currently matching a search query.
+ * Used by scenarios that must assert no new mail has arrived (e.g. HYPER-268
+ * session-reuse: the second OAuth flow must not send a fresh OTP email).
+ */
+export async function countMessages(query: string): Promise<number> {
+  const messages = await searchMessages(query, 100, { timeoutMs: 10_000 })
+  return messages.length
+}
+
+/**
  * Delete all Mailpit messages addressed to a specific recipient.
  * Uses the search-based delete endpoint to avoid wiping the entire inbox,
  * which would cause race conditions when scenarios run in parallel workers.

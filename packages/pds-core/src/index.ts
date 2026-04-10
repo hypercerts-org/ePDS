@@ -36,6 +36,11 @@ import {
   getClientCss,
 } from '@certified-app/shared'
 import { shouldRewriteSecFetchSite } from './lib/sec-fetch-site-rewrite.js'
+import {
+  createCookieDomainMiddleware,
+  deriveCookieDomain,
+} from './cookie-domain.js'
+import { createChooserEnrichmentMiddleware } from './chooser-enrichment.js'
 
 const logger = createLogger('pds-core')
 
@@ -642,6 +647,104 @@ async function main() {
         'CSS injection middleware installed for trusted OAuth clients',
       )
     }
+  }
+
+  // =========================================================================
+  // Account chooser enrichment (HYPER-268)
+  // =========================================================================
+  //
+  // The upstream @atproto/oauth-provider account chooser (/account) is a
+  // compiled React SPA that renders each bound account as a clickable
+  // row — showing only the handle (preferred_username), not the email.
+  // For ePDS deployments where handles may be randomly generated and
+  // hard for users to recognise, this is a real UX problem. We need
+  // email alongside handle so users can identify themselves.
+  //
+  // We also need a "Use a different account" escape hatch so users can
+  // sign in as someone else when the chooser presents only a session
+  // they don't want to reuse.
+  //
+  // Strategy — reusing the PR #9 response-rewrite pattern:
+  //   1. Intercept HTML responses from the upstream /account routes.
+  //   2. Inject a <script> in the <head> (before the hydration script
+  //      fires) that (a) captures the upstream deviceSessions payload
+  //      via an accessor on window.__deviceSessions, (b) watches the
+  //      DOM after hydration, (c) appends each account's email as a
+  //      small label next to its handle, and (d) renders a
+  //      "Use a different account" link that redirects to
+  //      auth.<parent>/oauth/authorize?prompt=login&... preserving the
+  //      original OAuth params. See hyper-268-session-reuse.md for the
+  //      design doc.
+  //
+  // Unlike PR #9's CSS injection, we're inserting JS — which requires
+  // adding a script hash to the CSP script-src directive rather than
+  // style-src.
+
+  const chooserEnrichmentMiddleware =
+    createChooserEnrichmentMiddleware(authHostname)
+
+  pds.app.use(chooserEnrichmentMiddleware)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- accessing Express internal _router stack
+  const chooserStack = (pds.app as any)._router?.stack
+  if (chooserStack) {
+    const chooserLayer = chooserStack.pop()
+    let insertIdx = 0
+    for (let i = 0; i < chooserStack.length; i++) {
+      if (chooserStack[i].name === 'expressInit') {
+        insertIdx = i + 1
+        break
+      }
+    }
+    chooserStack.splice(insertIdx, 0, chooserLayer)
+  }
+  logger.info('Account chooser enrichment middleware installed (HYPER-268)')
+
+  // =========================================================================
+  // Cookie domain broadening (HYPER-268)
+  // =========================================================================
+  //
+  // Upstream @atproto/oauth-provider sets dev-id and ses-id cookies with no
+  // Domain attribute, which scopes them to the exact pds-core host. The
+  // auth-service runs on a sibling subdomain (e.g. auth.pds.foo.com) and
+  // cannot read those cookies — so it has no way to detect an existing
+  // device session when a second OAuth client starts a new /oauth/authorize
+  // flow.
+  //
+  // Fix: intercept all outbound Set-Cookie headers for the device-session
+  // cookies and inject Domain=<parent>. With Domain=pds.foo.com both
+  // pds.foo.com and auth.pds.foo.com see the cookie, unlocking the
+  // cross-subdomain session-reuse path.
+  //
+  // Auto-derived: if AUTH_HOSTNAME ends with .<PDS_HOSTNAME>, PDS_HOSTNAME
+  // is the shared parent and we use it as the cookie domain. Otherwise
+  // (e.g. Railway preview envs where services have unrelated hostnames
+  // under a public suffix), there is no valid parent and the middleware
+  // is skipped — session reuse simply isn't possible on those topologies.
+  // Upstream's DeviceManager has no domain option, so we rewrite headers
+  // rather than pass config.
+
+  const cookieDomain = deriveCookieDomain(authHostname, handleDomain)
+  if (cookieDomain) {
+    const cookieDomainMiddleware = createCookieDomainMiddleware(cookieDomain)
+
+    pds.app.use(cookieDomainMiddleware)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- accessing Express internal _router stack
+    const cookieStack = (pds.app as any)._router?.stack
+    if (cookieStack) {
+      const cookieLayer = cookieStack.pop()
+      let insertIdx = 0
+      for (let i = 0; i < cookieStack.length; i++) {
+        if (cookieStack[i].name === 'expressInit') {
+          insertIdx = i + 1
+          break
+        }
+      }
+      cookieStack.splice(insertIdx, 0, cookieLayer)
+    }
+    logger.info(
+      { cookieDomain },
+      'Cookie domain broadening middleware installed (HYPER-268)',
+    )
   }
 
   // =========================================================================

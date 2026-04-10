@@ -42,6 +42,10 @@ import {
   fetchParLoginHint,
 } from '../lib/resolve-login-hint.js'
 import { ensurePdsUrl } from '../lib/pds-url.js'
+import {
+  buildPdsAuthorizeRedirect,
+  shouldReuseSession,
+} from '../lib/session-reuse.js'
 
 const logger = createLogger('auth:login-page')
 
@@ -89,6 +93,45 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
         .status(400)
         .type('html')
         .send(renderError('Missing request_uri parameter'))
+      return
+    }
+
+    // HYPER-268: Cross-client OAuth session reuse.
+    //
+    // If a device session already exists in this browser (dev-id cookie
+    // set on the shared parent domain by a previous sign-in via any
+    // client), hand the flow straight to pds-core's upstream
+    // /oauth/authorize. Upstream will then either auto-select the single
+    // matching session (flow 1, login_hint matches) or render the
+    // account chooser (flow 2, no hint).
+    //
+    // The prompt=login escape hatch (OIDC "force reauthentication") is
+    // honoured inside shouldReuseSession — so the "Use a different
+    // account" link on the chooser can redirect back here and force
+    // the email form to render for a fresh sign-in.
+    //
+    // Requires pds-core and auth-service to share a parent domain
+    // (AUTH_HOSTNAME ends with .<PDS_HOSTNAME>) so pds-core broadens
+    // the dev-id cookie to that parent. On deployments with unrelated
+    // hostnames (e.g. Railway preview envs) the cookie stays host-only
+    // and this branch is a no-op.
+    if (
+      shouldReuseSession({
+        cookies: (req as unknown as { cookies?: Record<string, string> })
+          .cookies,
+        headers: { cookie: req.headers.cookie },
+        query: req.query as Record<string, unknown>,
+      })
+    ) {
+      const target = buildPdsAuthorizeRedirect(
+        ctx.config.pdsPublicUrl,
+        req.query as Record<string, unknown>,
+      )
+      logger.info(
+        { requestUri, clientId, target },
+        'HYPER-268 session reuse: device session detected, redirecting to pds-core',
+      )
+      res.redirect(302, target)
       return
     }
 
