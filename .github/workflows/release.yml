@@ -123,6 +123,15 @@ jobs:
             echo "::warning::Could not parse version from package.json; leaving PR title unchanged."
             exit 0
           fi
+          # IMPORTANT: this title prefix is load-bearing. The e2e
+          # workflow (.github/workflows/e2e-tests.yml) no-ops its
+          # `e2e-run` job on PRs whose title starts with
+          # "prepare for release v", because release PRs have no
+          # Railway preview deployment to test against — the "Find
+          # Railway deployment" step would fail, and the e2e check
+          # would block the merge. If you change the prefix here,
+          # update the matching check in the "Check release PR" step
+          # of e2e-tests.yml to match.
           NEW_TITLE="prepare for release v$VERSION"
           echo "Renaming PR #$PR_NUMBER to: $NEW_TITLE"
           if ! gh pr edit "$PR_NUMBER" --title "$NEW_TITLE"; then

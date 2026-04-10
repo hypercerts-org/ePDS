@@ -28,18 +28,25 @@ jobs:
   # workflow-level `on.pull_request.paths:` filter because a workflow
   # that is skipped via `paths:` never produces a check run, which
   # breaks branch protection rules that require this check to pass.
-  # Instead we always run the workflow and skip the expensive `run`
+  # Instead we always run the workflow and skip the expensive `e2e-run`
   # job below via `if:` — a skipped *job* (unlike a skipped workflow)
   # still reports a check run with conclusion=skipped, which branch
   # protection treats as passing.
+  #
+  # NOTE: if `e2e-run` becomes a required status check, the
+  # paths-irrelevant case below will still produce a SKIPPED
+  # conclusion, which classic branch protection treats as passing but
+  # newer rulesets may not. If that becomes a problem, move the
+  # paths-irrelevant bail-out into `e2e-run` itself (alongside the
+  # release-PR check) so the job concludes as SUCCESS instead.
   #
   # Only meaningful on pull_request: dorny/paths-filter diffs the PR
   # head against the PR base via the GitHub API, with no checkout
   # required. On push/workflow_dispatch the action has no natural
   # base to diff against, so we skip this job entirely and let the
-  # `run` job below run unconditionally for those events.
-  gate:
-    name: gate
+  # `e2e-run` job below run unconditionally for those events.
+  e2e-gate:
+    name: e2e-gate
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -62,17 +69,28 @@ jobs:
               - 'playwright.config.*'
               - '.github/workflows/e2e-tests.yml'
 
-  run:
-    name: run
-    needs: gate
+  e2e-run:
+    name: e2e-run
+    needs: e2e-gate
     # Run the full suite when:
     #   - a PR touched relevant paths, OR
     #   - this is the post-merge backstop on main (push), OR
     #   - a human manually retriggered via workflow_dispatch.
     #
-    # `always()` is needed because `gate` is skipped on non-PR
+    # Changesets release PRs (title starts with "prepare for release
+    # v") are handled inside the job via the "Check release PR" step
+    # below — the job runs but every subsequent step is guarded so
+    # they are individually skipped, leaving the overall job
+    # conclusion as SUCCESS rather than SKIPPED. Release PRs have no
+    # Railway preview deployment of their own, so the "Find Railway
+    # deployment" step would fail if it actually ran; their diff is
+    # also just CHANGELOG.md and package.json version bumps, which
+    # cannot affect e2e behaviour. The post-merge backstop on `push`
+    # re-runs the full suite against main once the release lands.
+    #
+    # `always()` is needed because `e2e-gate` is skipped on non-PR
     # events, and GitHub would otherwise cascade-skip this job.
-    if: always() && (needs.gate.outputs.relevant == 'true' || github.event_name != 'pull_request')
+    if: always() && (needs.e2e-gate.outputs.relevant == 'true' || github.event_name != 'pull_request')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -84,15 +102,44 @@ jobs:
       # needs checks:write.
       checks: write
     steps:
+      # Detect changesets release PRs. The "prepare for release v"
+      # prefix is set by the "Rename Release PR with version" step in
+      # .github/workflows/release.yml. If that prefix changes, update
+      # the check below to match, or this job will try to find a
+      # Railway deployment for release PRs and fail.
+      #
+      # Release PRs bail out here so the *job* runs to completion as
+      # SUCCESS rather than being skipped via a job-level `if:` — the
+      # e2e check is intended to become a required status check, and
+      # a SKIPPED conclusion is not as reliably treated as passing by
+      # branch protection as a SUCCESS conclusion.
+      - name: Check release PR
+        id: release-check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if [[ "$EVENT_NAME" == "pull_request" && "$PR_TITLE" == "prepare for release v"* ]]; then
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+            echo "✓ Changesets release PR detected; e2e run will no-op to SUCCESS."
+          else
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: steps.release-check.outputs.is_release != 'true'
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        if: steps.release-check.outputs.is_release != 'true'
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        if: steps.release-check.outputs.is_release != 'true'
         with:
           node-version: 20
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - if: steps.release-check.outputs.is_release != 'true'
+        run: pnpm install --frozen-lockfile
 
       - name: Cache Playwright browsers
+        if: steps.release-check.outputs.is_release != 'true'
         id: playwright-cache
         uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
@@ -100,14 +147,15 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install Playwright browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        if: steps.release-check.outputs.is_release != 'true' && steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
 
       - name: Install Playwright system dependencies (cache hit)
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        if: steps.release-check.outputs.is_release != 'true' && steps.playwright-cache.outputs.cache-hit == 'true'
         run: npx playwright install-deps chromium
 
       - name: Resolve target SHA
+        if: steps.release-check.outputs.is_release != 'true'
         id: sha
         # User-controlled inputs (notably PR_HEAD_REF, which can be
         # any string an attacker chooses when opening a PR from a
@@ -213,7 +261,7 @@ jobs:
         # Skipped on workflow_dispatch, which is the manual-retrigger
         # escape hatch: the caller supplies env_name and is responsible
         # for knowing the Railway env is already up.
-        if: github.event_name != 'workflow_dispatch'
+        if: steps.release-check.outputs.is_release != 'true' && github.event_name != 'workflow_dispatch'
         id: wait-deploy
         # Every GHA expression substitution is routed through an env
         # var rather than interpolated directly into the shell script
@@ -491,6 +539,7 @@ jobs:
           exit 1
 
       - name: Derive service URLs
+        if: steps.release-check.outputs.is_release != 'true'
         id: urls
         env:
           # On workflow_dispatch we read the env name from inputs; on
@@ -551,6 +600,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Wait for all services
+        if: steps.release-check.outputs.is_release != 'true'
         # URLs routed via env even though they're derived from a
         # strictly-validated slug regex upstream, matching the general
         # policy of never interpolating ${{ }} into run-block scripts.
@@ -591,6 +641,7 @@ jobs:
           echo "All 5 services reachable."
 
       - name: Run e2e suite
+        if: steps.release-check.outputs.is_release != 'true'
         env:
           E2E_PDS_URL: ${{ steps.urls.outputs.epds_url }}
           E2E_AUTH_URL: ${{ steps.urls.outputs.auth_url }}
@@ -607,7 +658,7 @@ jobs:
         # summary and any failing scenarios get file+line annotations
         # on the PR diff. fail-on-error is off so a reporter glitch
         # can't turn a green test run red.
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.release-check.outputs.is_release != 'true' }}
         uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3.0.0
         with:
           name: e2e cucumber report
@@ -616,7 +667,7 @@ jobs:
           fail-on-error: false
 
       - name: Upload e2e report
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.release-check.outputs.is_release != 'true' }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: e2e-report
