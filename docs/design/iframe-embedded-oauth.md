@@ -4,7 +4,7 @@ Design exploration for embedding the full auth-service login flow (OTP, consent,
 handle picker) in a cross-origin iframe, so the user never leaves the client
 app's page.
 
-**Status:** Plan finalised / ready to implement  
+**Status:** Implemented and deployed (with temporary triage shortcuts)  
 **Date:** 2026-04-08  
 **Last updated:** 2026-04-08
 
@@ -169,6 +169,7 @@ if (delivery === 'iframe') {
 #### `src/app/api/oauth/login/route.ts`
 
 - When request has `?delivery=iframe`, return `{ authorizeUrl: '...&epds_delivery=iframe' }` JSON instead of 302 redirect
+- In PAR DPoP nonce-retry path, apply the same iframe JSON behavior (do not redirect in `delivery=iframe`), otherwise browser `fetch()` follows cross-origin redirect and fails CORS
 
 #### `src/app/api/oauth/exchange/route.ts` — new file
 
@@ -182,27 +183,30 @@ if (delivery === 'iframe') {
 
 - Calls `/api/oauth/login?delivery=iframe` to get the authorize URL
 - Renders `<iframe src={authorizeUrl}>` inside a modal/overlay
+- Modal opens immediately on click; spinner overlay is shown from start and removed on iframe `onLoad`
 - Listens for `postMessage` — validates `event.origin` matches the expected PDS origin before acting
 - On `epds:auth-complete`: calls `POST /api/oauth/exchange` with `{ code, state, iss }`, then updates UI
 - On `epds:auth-error`: shows error state, destroys iframe
 - Intercepts `popstate` to prevent parent-page back-navigation destroying the flow mid-auth
+- Includes temporary debug logs for message-origin and exchange diagnostics during deployment triage
 
 #### `src/app/flow-embed/page.tsx` — new file
 
 - Demo page showing the embedded flow in action
+- Currently hardcodes `pdsOrigin` as a temporary deployment workaround (to validate origin mismatch issues)
 
 ---
 
 ## What does not change
 
-| Thing                              | Why                                                                                                                                                                                    |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `connect-src 'self'` CSP           | Fetch calls inside the iframe are same-origin (`auth.pds.example`) — no change needed                                                                                                  |
-| `window.location.href` navigations | Navigate the iframe correctly, not the parent — no change needed                                                                                                                       |
-| better-auth session cookie         | Stays `SameSite=lax`. `/auth/complete` is reached via `window.location.href` (a navigation, not a fetch) — `SameSite=lax` cookies are sent on navigations even in cross-origin iframes |
-| CSRF validation logic              | Double-submit pattern is unchanged — only the cookie attribute changes                                                                                                                 |
-| Social login buttons               | Not supported in iframe mode — no change needed                                                                                                                                        |
-| `X-Frame-Options: ALLOW-FROM`      | Dropped entirely — never supported by Chrome or Safari, removed from Firefox 70                                                                                                        |
+| Thing                              | Why                                                                                                                                                                               |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `connect-src 'self'` CSP           | Fetch calls inside the iframe are same-origin (`auth.pds.example`) — no change needed                                                                                             |
+| `window.location.href` navigations | Navigate the iframe correctly, not the parent — no change needed                                                                                                                  |
+| better-auth session cookie         | **Changed during deployment triage:** configured for iframe compatibility using `SameSite=None; Secure; Partitioned` to ensure `/auth/complete` can read session in embedded flow |
+| CSRF validation logic              | Double-submit pattern is unchanged — only the cookie attribute changes                                                                                                            |
+| Social login buttons               | Not supported in iframe mode — no change needed                                                                                                                                   |
+| `X-Frame-Options: ALLOW-FROM`      | Dropped entirely — never supported by Chrome or Safari, removed from Firefox 70                                                                                                   |
 
 ---
 
@@ -212,7 +216,7 @@ if (delivery === 'iframe') {
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Allowlist source                                   | `PDS_OAUTH_TRUSTED_CLIENTS` env var — extract origins from the client_id URLs                                                                                                              |
 | Cookie policy                                      | `SameSite=none; Secure; Partitioned` (CHIPS) for `epds_auth_flow` and `epds_csrf` in iframe mode only. CHIPS now has universal browser support (Chrome 114+, Firefox 141+, Safari 26.2+)   |
-| better-auth session cookie                         | Stays `SameSite=lax` — works via navigation, no downgrade needed                                                                                                                           |
+| better-auth session cookie                         | Updated for deployed iframe flow: better-auth default cookie attributes set to `SameSite=None; Secure; Partitioned`                                                                        |
 | `delivery` propagation between auth-service routes | Stored in `auth_flow` DB row, read by all routes via `epds_auth_flow` cookie lookup — no query param threading                                                                             |
 | `delivery` propagation to pds-core                 | Via HMAC-signed callback params — the only cross-service boundary                                                                                                                          |
 | `response_mode=web_message`                        | Rejected — `OAuthResponseMode` in the atproto SDK is a strict Zod enum (`query \| fragment \| form_post`) that doesn't include `web_message` and can't be extended without forking the SDK |
@@ -232,6 +236,7 @@ Only origins in that list get a `frame-ancestors` directive — all other origin
 are blocked by the default `X-Frame-Options: DENY`.
 
 Mitigations:
+
 - The user must actively type their OTP — pure click-overlay attacks don't work
 - The consent screen shows which app is requesting access
 - The authorization code is delivered via postMessage to the `redirect_uri`
@@ -240,12 +245,13 @@ Mitigations:
 ### Cookie downgrade (`SameSite=none`)
 
 `epds_auth_flow` and `epds_csrf` cookies use `SameSite=none; Secure; Partitioned`
-in iframe mode. The `Partitioned` attribute (CHIPS) scopes these cookies to the
-(top-level-site, auth-service) pair — a different top-level site gets a different
-partition and cannot see or trigger these cookies. CHIPS has universal browser
-support: Chrome 114+, Firefox 141+, Safari 26.2+.
-
-The better-auth session cookie stays `SameSite=lax` and is unaffected.
+in iframe mode. During deployment triage, better-auth session cookies were also
+configured with `SameSite=none; Secure; Partitioned` so `/auth/complete` can
+reliably read session state inside the iframe. The `Partitioned` attribute
+(CHIPS) scopes these cookies to the (top-level-site, service-site) pair — a
+different top-level site gets a different partition and cannot see or trigger
+these cookies. CHIPS has universal browser support: Chrome 114+, Firefox 141+,
+Safari 26.2+.
 
 ### Token leakage via postMessage
 
@@ -255,9 +261,9 @@ ensures only the registered client origin can receive the code.
 
 ### Session fixation
 
-Not a concern: the better-auth session cookie stays `SameSite=lax`. The
-`epds_auth_flow` cookie is short-lived (10 min), flow-scoped, and `httpOnly` —
-JS cannot read or pre-set it.
+Not a concern in current implementation: session and flow cookies are
+`httpOnly`, flow cookie is short-lived (10 min), and callback delivery uses
+strict `postMessage` target origin (`redirect_uri` origin, never `*`).
 
 ---
 
@@ -296,3 +302,112 @@ unreachable from an iframe flow.
 | `demo/` iframe integration              | 1–2 days      |
 | Testing                                 | 1 day         |
 | **Total**                               | **~5–6 days** |
+
+---
+
+## Deployment issues and fixes (Railway)
+
+### 1) CORS error after clicking Sign in in iframe mode
+
+**Symptom**
+
+- Browser error: fetch to auth `/oauth/authorize` blocked by CORS.
+- Request path showed redirect from `/api/oauth/login?delivery=iframe`.
+
+**Root cause**
+
+- In `packages/demo/src/app/api/oauth/login/route.ts`, the PAR DPoP nonce-retry path still returned `NextResponse.redirect(authUrl)` even when `delivery=iframe`.
+- Browser `fetch()` followed the cross-origin redirect and failed CORS.
+
+**Fix**
+
+- Added missing iframe branch in nonce-retry success path:
+  - return JSON `{ authorizeUrl: '...&epds_delivery=iframe' }`
+  - set OAuth session cookie
+  - keep redirect behavior only for non-iframe mode.
+
+### 2) OTP verified, then flow looped back to email screen
+
+**Symptom**
+
+- After OTP verification, `/auth/complete` redirected back to login page.
+
+**Root cause**
+
+- better-auth session cookie was not reliably available in cross-origin iframe context.
+
+**Fix**
+
+- Updated better-auth cookie defaults for iframe compatibility:
+  - `SameSite=None`
+  - `Secure=true`
+  - `Partitioned=true`
+
+### 3) Framing blocked by CSP / X-Frame-Options
+
+**Symptom**
+
+- Browser error:
+  - `frame-ancestors 'self'` block, or
+  - `X-Frame-Options: DENY`.
+
+**Root cause**
+
+- `PDS_OAUTH_TRUSTED_CLIENTS` configured with bare hostname instead of full URL.
+- Code parses entries with `new URL(...)`; invalid entries collapsed allowlist to empty, resulting in `'self'` only.
+
+**Fix**
+
+- Set `PDS_OAUTH_TRUSTED_CLIENTS` using full URL values (prefer client metadata URL), e.g.:
+  - `https://<demo-domain>/client-metadata.json`
+- Verified `frame-ancestors` includes demo origin.
+
+### 4) Blank iframe at end of flow (postMessage not consumed)
+
+**Symptom**
+
+- pds-core logs showed `Auth code issued via postMessage`, but parent UI stayed stuck on blank iframe.
+
+**Root cause**
+
+- `EmbeddedLogin` dropped messages due origin mismatch:
+  - `event.origin` from pds-core did not equal `expectedOrigin`.
+  - `expectedOrigin` resolved to fallback `https://localhost:3000`.
+
+**Fix**
+
+- Added frontend diagnostics before origin check.
+- For immediate validation, hardcoded `pdsOrigin` in `flow-embed/page.tsx` to deployed pds-core URL.
+
+### 5) UX issue: white screen before iframe content appears
+
+**Symptom**
+
+- Modal showed empty white area while iframe loaded.
+
+**Fix**
+
+- Updated `EmbeddedLogin` UX:
+  - modal opens immediately on click
+  - spinner overlay shown from start
+  - overlay removed on iframe `onLoad`
+  - cancel remains available.
+
+## Temporary shortcuts currently in repo
+
+1. **Hardcoded pds origin in demo page**
+   - `packages/demo/src/app/flow-embed/page.tsx` currently uses a fixed URL for `pdsOrigin`.
+   - This was done to quickly validate origin-filtering issues in production.
+
+2. **Verbose debug logs in `EmbeddedLogin`**
+   - Logs include message origin/payload and exchange call traces.
+
+## Remaining gaps / follow-up (if pursuing hardening)
+
+1. Replace hardcoded `pdsOrigin` with robust runtime configuration.
+2. Reduce or gate frontend debug logs for production.
+3. Add deployment-time validation for `PDS_OAUTH_TRUSTED_CLIENTS` format (must be valid URLs).
+4. Add regression tests for:
+   - PAR nonce-retry iframe path
+   - postMessage origin handling
+   - iframe completion path to `/api/oauth/exchange`.
