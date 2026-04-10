@@ -1,3 +1,4 @@
+@untrusted-client
 Feature: OAuth consent screen
   When a user logs into a new OAuth client for the first time, ePDS shows
   a consent screen asking for approval. Consent decisions are remembered

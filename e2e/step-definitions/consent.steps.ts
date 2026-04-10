@@ -23,17 +23,13 @@ import {
 import { sharedBrowser } from '../support/hooks.js'
 import { waitForEmail, extractOtp, clearMailpit } from '../support/mailpit.js'
 
-function requireUntrustedDemoUrl(): string {
-  const url = testEnv.demoUntrustedUrl
-  if (!url) {
-    throw new Error(
-      'E2E_DEMO_UNTRUSTED_URL is not set — required by consent-screen scenarios ' +
-        'that exercise the trusted-vs-untrusted client distinction. Set it in ' +
-        'e2e/.env (locally) or in the GitHub Actions workflow (CI).',
-    )
-  }
-  return url
-}
+// Steps that drive the untrusted demo client start with an early
+// `if (!testEnv.demoUntrustedUrl) return 'pending'` guard. This is
+// defence-in-depth for --name invocations: normally these scenarios
+// are tagged @untrusted-client and excluded by cucumber.mjs when
+// E2E_DEMO_UNTRUSTED_URL is unset, but a user running a single
+// scenario by name bypasses tag exclusions, so the step-level guard
+// is the only safety net.
 
 // Note: When('the user clicks {string}') lives in common.steps.ts — it is a
 // generic UI interaction step used here for "Authorize" and "Deny access" buttons.
@@ -72,6 +68,7 @@ Then('a consent screen is displayed', async function (this: EpdsWorld) {
 Then(
   'it identifies the untrusted demo client by its URL host',
   async function (this: EpdsWorld) {
+    if (!testEnv.demoUntrustedUrl) return 'pending'
     // @atproto/oauth-provider-ui's <ClientName> component only renders
     // the self-declared client_name for clients listed in
     // PDS_OAUTH_TRUSTED_CLIENTS. For untrusted clients it falls through
@@ -85,8 +82,7 @@ Then(
     // working and that the PDS is classifying the demo client as
     // untrusted, exactly as the PDS_OAUTH_TRUSTED_CLIENTS allowlist
     // should be doing.
-    const untrustedUrl = requireUntrustedDemoUrl()
-    const host = new URL(untrustedUrl).host
+    const host = new URL(testEnv.demoUntrustedUrl).host
 
     const page = getPage(this)
     await expect(page.getByText(host)).toBeVisible()
@@ -96,14 +92,16 @@ Then(
 When(
   'the untrusted demo client initiates an OAuth login',
   async function (this: EpdsWorld) {
+    if (!testEnv.demoUntrustedUrl) return 'pending'
     const page = getPage(this)
-    await page.goto(requireUntrustedDemoUrl())
+    await page.goto(testEnv.demoUntrustedUrl)
   },
 )
 
 Then(
   'the browser is redirected back to the untrusted demo client with an auth error',
   async function (this: EpdsWorld) {
+    if (!testEnv.demoUntrustedUrl) return 'pending'
     // Per RFC 6749 §4.1.2.1, denying consent causes the authorization
     // server to redirect to the client's redirect_uri with
     // `error=access_denied`. The demo client's callback route sees the
@@ -112,8 +110,7 @@ Then(
     // packages/demo/src/app/api/oauth/callback/route.ts). By the time
     // waitForURL fires, the browser is already on the final landing
     // page, so we assert against that.
-    const untrustedUrl = requireUntrustedDemoUrl()
-    const origin = new URL(untrustedUrl).origin
+    const origin = new URL(testEnv.demoUntrustedUrl).origin
 
     const page = getPage(this)
     await page.waitForURL(`${origin}/?error=auth_failed*`, {
@@ -147,8 +144,9 @@ When(
   'a new user starts signing up via the untrusted demo client',
   async function (this: EpdsWorld) {
     if (!testEnv.mailpitPass) return 'pending'
+    if (!testEnv.demoUntrustedUrl) return 'pending'
     const email = `untrusted-signup-${Date.now()}@example.com`
-    await startSignUpAwaitingConsent(this, email, requireUntrustedDemoUrl())
+    await startSignUpAwaitingConsent(this, email, testEnv.demoUntrustedUrl)
   },
 )
 
@@ -162,7 +160,8 @@ Then(
 Then(
   'the browser is redirected back to the untrusted demo client with a valid session',
   async function (this: EpdsWorld) {
-    await assertDemoClientSession(this, requireUntrustedDemoUrl())
+    if (!testEnv.demoUntrustedUrl) return 'pending'
+    await assertDemoClientSession(this, testEnv.demoUntrustedUrl)
   },
 )
 
@@ -186,9 +185,10 @@ Given(
   'a returning user has already approved the untrusted demo client',
   async function (this: EpdsWorld) {
     if (!testEnv.mailpitPass) return 'pending'
+    if (!testEnv.demoUntrustedUrl) return 'pending'
 
     const email = `approved-untrusted-${Date.now()}@example.com`
-    await startSignUpAwaitingConsent(this, email, requireUntrustedDemoUrl())
+    await startSignUpAwaitingConsent(this, email, testEnv.demoUntrustedUrl)
 
     // Explicitly click Authorize — this is the click that HYPER-270
     // claims does not result in a persistent grant being recorded.
@@ -233,6 +233,7 @@ When(
   'the user later initiates an OAuth login via the untrusted demo client',
   async function (this: EpdsWorld) {
     if (!testEnv.mailpitPass) return 'pending'
+    if (!testEnv.demoUntrustedUrl) return 'pending'
     if (!this.testEmail) {
       throw new Error(
         'No testEmail on world — the "signed up via the trusted demo client" ' +
@@ -245,7 +246,7 @@ When(
     // below reads the code generated by this flow, not a leftover one.
     await clearMailpit(this.testEmail)
 
-    await page.goto(requireUntrustedDemoUrl())
+    await page.goto(testEnv.demoUntrustedUrl)
     await page.fill('#email', this.testEmail)
     await page.click('button[type=submit]')
     await expect(page.locator('#step-otp.active')).toBeVisible({

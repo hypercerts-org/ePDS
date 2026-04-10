@@ -64,12 +64,12 @@ Given(
 Given(
   "the untrusted demo OAuth client's metadata is discoverable",
   async function (this: EpdsWorld) {
-    if (!testEnv.demoUntrustedUrl) {
-      throw new Error(
-        'E2E_DEMO_UNTRUSTED_URL is not set — required by consent-screen scenarios ' +
-          'that exercise the trusted-vs-untrusted client distinction.',
-      )
-    }
+    // Defence-in-depth for --name invocations: normally scenarios
+    // that reach this Given are tagged @untrusted-client and are
+    // already excluded by cucumber.mjs when E2E_DEMO_UNTRUSTED_URL
+    // is unset, but a user running `--name "..."` bypasses tag
+    // exclusions entirely.
+    if (!testEnv.demoUntrustedUrl) return 'pending'
     await assertClientMetadataDiscoverable(
       testEnv.demoUntrustedUrl,
       'untrusted demo',

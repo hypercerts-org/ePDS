@@ -85,14 +85,20 @@ screen) or that needs two distinct OAuth clients in the same browser session
 `testEnv.demoUntrustedUrl`. The untrusted demo only exists in `pr-base` and
 PR preview environments — not in `test`, `production`, or `dev`.
 
-`E2E_DEMO_UNTRUSTED_URL` is typed as optional, but there is currently no
-tag-based opt-out for scenarios that touch the untrusted demo — they will
-throw from `requireUntrustedDemoUrl()` if the env var is unset. When
-writing a new scenario that requires it, follow the guard pattern in
+Scenarios that depend on the untrusted demo are tagged
+`@untrusted-client`, and `e2e/cucumber.mjs` automatically adds
+`not @untrusted-client` to the tag exclusion expression when
+`E2E_DEMO_UNTRUSTED_URL` is unset — so scenarios skip cleanly at
+discovery time rather than failing. When adding a new scenario or
+step that drives the untrusted demo, (a) add the `@untrusted-client`
+tag to the scenario or feature, and (b) guard the step body with an
+early `if (!testEnv.demoUntrustedUrl) return 'pending'` as
+defence-in-depth for `cucumber-js --name "..."` invocations (which
+bypass tag exclusions). See
+[`e2e/README.md#two-demo-clients`](e2e/README.md#two-demo-clients)
+for the full reference and
 [`e2e/step-definitions/consent.steps.ts`](e2e/step-definitions/consent.steps.ts)
-(`requireUntrustedDemoUrl()` helper) so the failure message names the env
-var. See [`e2e/README.md#two-demo-clients`](e2e/README.md#two-demo-clients)
-for the full reference.
+for examples.
 
 ### Writing Tests
 

@@ -58,16 +58,16 @@ For OTP scenarios you also need a local Mailpit instance (see
 
 ## Environment variables
 
-| Variable                 | Required | Default   | Description                                                                                                                                                                                                                             |
-| ------------------------ | -------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `E2E_PDS_URL`            | Yes      | —         | PDS core base URL                                                                                                                                                                                                                       |
-| `E2E_AUTH_URL`           | Yes      | —         | Auth service base URL                                                                                                                                                                                                                   |
-| `E2E_DEMO_URL`           | Yes      | —         | Trusted demo client base URL (listed in `pds-core`'s `PDS_OAUTH_TRUSTED_CLIENTS`)                                                                                                                                                       |
-| `E2E_DEMO_UNTRUSTED_URL` | No\*     | —         | Untrusted demo client base URL. \*Optional at the type level, but any scenario that touches the untrusted demo will fail loudly if unset — there is currently no tag-based way to skip them. See [Two demo clients](#two-demo-clients). |
-| `E2E_MAILPIT_URL`        | No       | —         | Mailpit base URL. Required for OTP scenarios.                                                                                                                                                                                           |
-| `E2E_MAILPIT_USER`       | No       | `karma`   | Mailpit HTTP basic auth username                                                                                                                                                                                                        |
-| `E2E_MAILPIT_PASS`       | No       | _(empty)_ | Mailpit HTTP basic auth password. Leave empty to skip OTP scenarios.                                                                                                                                                                    |
-| `E2E_HEADLESS`           | No       | `false`   | Set to `true` to run without a visible browser window                                                                                                                                                                                   |
+| Variable                 | Required | Default   | Description                                                                                                                                             |
+| ------------------------ | -------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `E2E_PDS_URL`            | Yes      | —         | PDS core base URL                                                                                                                                       |
+| `E2E_AUTH_URL`           | Yes      | —         | Auth service base URL                                                                                                                                   |
+| `E2E_DEMO_URL`           | Yes      | —         | Trusted demo client base URL (listed in `pds-core`'s `PDS_OAUTH_TRUSTED_CLIENTS`)                                                                       |
+| `E2E_DEMO_UNTRUSTED_URL` | No       | —         | Untrusted demo client base URL. When unset, scenarios tagged `@untrusted-client` are automatically excluded. See [Two demo clients](#two-demo-clients). |
+| `E2E_MAILPIT_URL`        | No       | —         | Mailpit base URL. Required for OTP scenarios.                                                                                                           |
+| `E2E_MAILPIT_USER`       | No       | `karma`   | Mailpit HTTP basic auth username                                                                                                                        |
+| `E2E_MAILPIT_PASS`       | No       | _(empty)_ | Mailpit HTTP basic auth password. Leave empty to skip OTP scenarios.                                                                                    |
+| `E2E_HEADLESS`           | No       | `false`   | Set to `true` to run without a visible browser window                                                                                                   |
 
 ## Two demo clients
 
@@ -138,21 +138,27 @@ await createAccountViaOAuth(world, email, testEnv.demoUntrustedUrl)
 await startSignUpAwaitingConsent(world, email, testEnv.demoUntrustedUrl)
 ```
 
-`testEnv.demoUntrustedUrl` is typed as `string | undefined`, so any step
-that requires it must guard against the unset case. The canonical guard
-pattern is to fail loudly rather than silently passing — see
-`requireUntrustedDemoUrl()` in
-[`e2e/step-definitions/consent.steps.ts`](step-definitions/consent.steps.ts)
-for a reusable example.
+`testEnv.demoUntrustedUrl` is typed as `string | undefined`. Any step
+that reads it must guard against the unset case with an early
+`if (!testEnv.demoUntrustedUrl) return 'pending'` at the top of the
+step body — the same pattern as the `E2E_MAILPIT_PASS` check in
+mailpit-dependent steps. See `e2e/step-definitions/consent.steps.ts`
+for examples.
 
-> **Note on skippability**: unlike `@email` scenarios, which are
-> automatically marked `pending` when `E2E_MAILPIT_PASS` is unset,
-> there is currently no tag that excludes untrusted-demo scenarios
-> when `E2E_DEMO_UNTRUSTED_URL` is unset. If you run the suite against
-> an environment without an untrusted demo, the affected scenarios
-> will throw from `requireUntrustedDemoUrl()`. Adding a tag-based
-> opt-out (analogous to `@email`) is tracked as follow-up work on
-> this branch.
+### Skipping untrusted-client scenarios when the var is unset
+
+Scenarios (or whole features) that depend on the untrusted demo are
+tagged `@untrusted-client`. When `E2E_DEMO_UNTRUSTED_URL` is unset,
+`e2e/cucumber.mjs` automatically adds `not @untrusted-client` to the
+tag exclusion expression, so the affected scenarios are skipped
+cleanly at discovery time rather than failing at run time.
+
+The step-level `return 'pending'` guards described above are
+defence-in-depth for `cucumber-js --name "..."` invocations, which
+bypass tag exclusions entirely — if you run a single scenario by
+name against an environment without an untrusted demo, its steps
+will return `'pending'` one by one and cucumber will mark the
+scenario as pending.
 
 ### Existing consumers
 
