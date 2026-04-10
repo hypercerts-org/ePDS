@@ -70,6 +70,30 @@ See [`e2e/README.md`](e2e/README.md#running-the-ci-e2e-job-against-a-railway-env
 for details (env-name formats, URL derivation, how to handle missing Railway
 domains).
 
+#### Two demo clients
+
+The e2e suite uses **two** demo OAuth clients deployed as separate Railway
+services: `@certified-app/demo` (trusted) and `@certified-app/demo untrusted`
+(untrusted, note the space in the service name). Only the trusted demo's
+`client-metadata.json` URL is listed in `pds-core`'s `PDS_OAUTH_TRUSTED_CLIENTS`
+env var — that's where the trust check lives, not on the demos themselves.
+
+Any e2e scenario that needs to exercise trust-gated behaviour (consent-skip
+on sign-up, custom CSS branding, trusted client display name in the consent
+screen) or that needs two distinct OAuth clients in the same browser session
+(cross-client SSO / session reuse) must drive the untrusted demo via
+`testEnv.demoUntrustedUrl`. The untrusted demo only exists in `pr-base` and
+PR preview environments — not in `test`, `production`, or `dev`.
+
+`E2E_DEMO_UNTRUSTED_URL` is typed as optional, but there is currently no
+tag-based opt-out for scenarios that touch the untrusted demo — they will
+throw from `requireUntrustedDemoUrl()` if the env var is unset. When
+writing a new scenario that requires it, follow the guard pattern in
+[`e2e/step-definitions/consent.steps.ts`](e2e/step-definitions/consent.steps.ts)
+(`requireUntrustedDemoUrl()` helper) so the failure message names the env
+var. See [`e2e/README.md#two-demo-clients`](e2e/README.md#two-demo-clients)
+for the full reference.
+
 ### Writing Tests
 
 Before designing or writing new tests, read
