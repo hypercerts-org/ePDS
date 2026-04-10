@@ -43,6 +43,9 @@ export class EpdsWorld extends World {
   /** Most recent PAR request_uri — set by PAR submission steps. */
   lastRequestUri?: string
 
+  /** Computed background colors captured by client-branding scenarios, keyed by label. */
+  capturedBgColors?: Record<string, string>
+
   get env() {
     return testEnv
   }

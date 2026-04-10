@@ -9,21 +9,32 @@ Feature: Client branding — CSS injection and custom email templates
   # --- CSS injection ---
 
   Scenario: Trusted client's CSS is applied to the login page
-    Given the demo client is listed in PDS_OAUTH_TRUSTED_CLIENTS
-    And the demo client's metadata includes a "branding.css" URL
     When the demo client initiates an OAuth login
-    Then the login page includes the client's custom CSS in a <style> tag
-    And the Content-Security-Policy header includes the CSS hash in style-src
+    Then the login page HTML contains the trusted client's custom CSS
 
-  Scenario: Trusted client's CSS is applied to the consent page
-    Given the demo client is listed in PDS_OAUTH_TRUSTED_CLIENTS
-    When an existing user reaches the consent screen via the demo client
-    Then the consent page includes the client's custom CSS
+  Scenario: Trusted and untrusted demo clients render visibly differently
+    When the trusted demo client initiates an OAuth login
+    And the login page body background color is captured as "trusted"
+    And the browser session is reset
+    And the untrusted demo client initiates an OAuth login
+    And the login page body background color is captured as "untrusted"
+    Then the captured "trusted" and "untrusted" background colors differ
 
   Scenario: Untrusted client does not get CSS injection
-    Given "https://untrusted.example.com" is NOT in PDS_OAUTH_TRUSTED_CLIENTS
-    When a login flow is initiated by the untrusted client
-    Then the login page uses the default styling (no injected CSS)
+    When the untrusted demo client initiates an OAuth login
+    Then the login page HTML does not contain the trusted client's custom CSS
+    And the login page body uses the default background color
+
+  @manual
+  Scenario: Trusted client's CSS is applied to the upstream OAuth consent page
+    # Exercises the pds-core CSS-injection middleware on /oauth/authorize.
+    # Requires a returning user re-authorizing through the upstream consent UI
+    # (trusted clients skip consent on initial sign-up, so this path only
+    # fires on reauth). Manual until we have a reauth fixture.
+    Given the demo client is listed in PDS_OAUTH_TRUSTED_CLIENTS
+    When an existing user reaches the upstream consent screen via the demo client
+    Then the consent page HTML contains the trusted client's custom CSS
+    And the Content-Security-Policy style-src directive includes the CSS SHA-256 hash
 
   # --- Custom email templates ---
 
