@@ -7,12 +7,15 @@
  * same metadata but is not in PDS_OAUTH_TRUSTED_CLIENTS, so injection must
  * be suppressed — that asymmetry is what these scenarios verify end-to-end.
  */
+import * as crypto from 'node:crypto'
 import { Given, Then, When } from '@cucumber/cucumber'
 import { expect } from '@playwright/test'
 import { testEnv } from '../support/env.js'
 import type { EpdsWorld } from '../support/world.js'
 import { getPage, resetBrowserContext } from '../support/utils.js'
 import { sharedBrowser } from '../support/hooks.js'
+import { startSignUpAwaitingConsent } from '../support/flows.js'
+import { waitForEmail, extractOtp, clearMailpit } from '../support/mailpit.js'
 
 // A short, stable fragment from the demo's branding.css. Any substring that
 // only the injected CSS would produce works — we pick the dark body bg since
@@ -115,14 +118,118 @@ Then(
 )
 
 // ---------------------------------------------------------------------------
-// Manual / placeholder Givens referenced by the @manual consent scenario.
-// Defined so Cucumber doesn't emit "undefined step" warnings on dry runs.
+// PDS-core consent-page CSS injection (trusted client on /oauth/authorize)
 // ---------------------------------------------------------------------------
 
+// Sign up via the untrusted demo to create an account without triggering
+// the consent-skip path. This gives us an existing user who has never
+// approved the trusted demo client — so the next login via the trusted
+// demo will hit the stock /oauth/authorize consent UI, where the pds-core
+// CSS-injection middleware can be exercised.
 Given(
-  'the demo client is listed in PDS_OAUTH_TRUSTED_CLIENTS',
-  function (this: EpdsWorld) {
-    // Environmental precondition — asserted implicitly by other scenarios
-    // that observe CSS injection working. No runtime assertion here.
+  'a user has signed up via the untrusted demo client',
+  async function (this: EpdsWorld) {
+    if (!testEnv.mailpitPass) return 'pending'
+    if (!testEnv.demoUntrustedUrl) return 'pending'
+
+    const email = `css-consent-${Date.now()}@example.com`
+    await startSignUpAwaitingConsent(this, email, testEnv.demoUntrustedUrl)
+
+    // Click Authorize on the untrusted demo's consent screen
+    const page = getPage(this)
+    await page.getByRole('button', { name: 'Authorize' }).click()
+    await page.waitForURL('**/welcome', { timeout: 30_000 })
+
+    // Reset browser so the next login starts clean
+    await resetBrowserContext(this, sharedBrowser)
+  },
+)
+
+// Log into the trusted demo as an existing user. Since the user has never
+// approved the trusted client, this will show the stock /oauth/authorize
+// consent page — exactly the surface where pds-core injects CSS for
+// trusted clients.
+When(
+  'the user logs into the trusted demo client for the first time',
+  async function (this: EpdsWorld) {
+    if (!testEnv.mailpitPass) return 'pending'
+    if (!this.testEmail) {
+      throw new Error(
+        'No testEmail on world — the "signed up via untrusted" Given must run first',
+      )
+    }
+
+    const page = getPage(this)
+    await clearMailpit(this.testEmail)
+
+    await page.goto(testEnv.demoTrustedUrl)
+    await page.fill('#email', this.testEmail)
+    await page.click('button[type=submit]')
+    await expect(page.locator('#step-otp.active')).toBeVisible({
+      timeout: 30_000,
+    })
+
+    const message = await waitForEmail(`to:${this.testEmail}`)
+    const otp = await extractOtp(message.ID)
+    await page.fill('#code', otp)
+    await page.click('#form-verify-otp .btn-primary')
+
+    // Wait for the consent screen's Authorize button — this is the
+    // stock @atproto/oauth-provider consent UI served by pds-core at
+    // /oauth/authorize. The pds-core CSS-injection middleware should
+    // have modified this response.
+    await expect(page.getByRole('button', { name: 'Authorize' })).toBeVisible({
+      timeout: 30_000,
+    })
+  },
+)
+
+Then(
+  "the consent page HTML contains the trusted client's custom CSS",
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    const html = await page.content()
+    expect(html).toContain(INJECTED_CSS_SIGNATURE)
+  },
+)
+
+Then(
+  'the Content-Security-Policy style-src directive includes the CSS SHA-256 hash',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    // The pds-core middleware computes SHA-256 of the injected CSS and
+    // appends it to the CSP style-src directive as 'sha256-<base64>'.
+    // We compute the same hash from the known CSS signature to verify.
+    const html = await page.content()
+
+    // Extract the full injected <style> content
+    const styleMatch = /<style[^>]*>([\s\S]*?)<\/style>/i.exec(html)
+    if (!styleMatch) {
+      throw new Error('No <style> tag found in consent page HTML')
+    }
+    const cssContent = styleMatch[1]
+
+    // Compute SHA-256 hash the same way the middleware does
+    const hash = crypto.createHash('sha256').update(cssContent).digest('base64')
+    const expectedDirective = `'sha256-${hash}'`
+
+    // Read the CSP header from the page's response. Playwright doesn't
+    // expose response headers on page.content(), so we check the <meta>
+    // http-equiv="Content-Security-Policy" tag that @atproto/oauth-provider
+    // renders, or fall back to checking the response header via a
+    // fresh fetch.
+    const cspMeta = await page
+      .locator('meta[http-equiv="Content-Security-Policy"]')
+      .getAttribute('content')
+      .catch(() => null)
+
+    if (cspMeta) {
+      expect(cspMeta).toContain(expectedDirective)
+    } else {
+      // Fall back: fetch the current URL and check the response header
+      const response = await page.context().request.get(page.url())
+      const cspHeader = response.headers()['content-security-policy'] ?? ''
+      expect(cspHeader).toContain(expectedDirective)
+    }
   },
 )

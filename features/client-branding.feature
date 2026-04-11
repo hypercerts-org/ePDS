@@ -28,14 +28,14 @@ Feature: Client branding — CSS injection and custom email templates
     Then the login page HTML does not contain the trusted client's custom CSS
     And the login page body uses the default background color
 
-  @manual
+  @untrusted-client
   Scenario: Trusted client's CSS is applied to the upstream OAuth consent page
     # Exercises the pds-core CSS-injection middleware on /oauth/authorize.
-    # Requires a returning user re-authorizing through the upstream consent UI
-    # (trusted clients skip consent on initial sign-up, so this path only
-    # fires on reauth). Manual until we have a reauth fixture.
-    Given the demo client is listed in PDS_OAUTH_TRUSTED_CLIENTS
-    When an existing user reaches the upstream consent screen via the demo client
+    # Trusted clients skip consent on sign-up, so we create the account via
+    # the untrusted demo first, then log in via the trusted demo — a new
+    # client for the existing user, which triggers the stock consent UI.
+    Given a user has signed up via the untrusted demo client
+    When the user logs into the trusted demo client for the first time
     Then the consent page HTML contains the trusted client's custom CSS
     And the Content-Security-Policy style-src directive includes the CSS SHA-256 hash
 
