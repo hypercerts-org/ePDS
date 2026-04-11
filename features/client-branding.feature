@@ -10,7 +10,7 @@ Feature: Client branding — CSS injection and custom email templates
   # --- CSS injection ---
 
   Scenario: Trusted client's CSS is applied to the login page
-    When the demo client initiates an OAuth login
+    When the trusted demo client initiates an OAuth login
     Then the login page HTML contains the trusted client's custom CSS
 
   @untrusted-client
@@ -18,13 +18,13 @@ Feature: Client branding — CSS injection and custom email templates
     When the trusted demo client initiates an OAuth login
     And the login page body background color is captured as "trusted"
     And the browser session is reset
-    And the untrusted demo client initiates an OAuth login
+    And the untrusted demo client initiates an OAuth login to the auth service
     And the login page body background color is captured as "untrusted"
     Then the captured "trusted" and "untrusted" background colors differ
 
   @untrusted-client
   Scenario: Untrusted client does not get CSS injection
-    When the untrusted demo client initiates an OAuth login
+    When the untrusted demo client initiates an OAuth login to the auth service
     Then the login page HTML does not contain the trusted client's custom CSS
     And the login page body uses the default background color
 

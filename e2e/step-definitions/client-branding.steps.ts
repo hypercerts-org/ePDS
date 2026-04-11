@@ -28,7 +28,35 @@ const DEFAULT_LOGIN_BG_RGB = 'rgb(248, 249, 250)' // #f8f9fa
 
 async function waitForLoginPage(world: EpdsWorld): Promise<void> {
   const page = getPage(world)
+  // Wait for auth-service-specific element — #step-email only exists on
+  // the auth-service login page, not the demo app's email form.
+  await expect(page.locator('#step-email')).toBeVisible({ timeout: 30_000 })
+}
+
+/**
+ * Navigate through a demo app to reach the auth-service login page.
+ *
+ * The demo's home page and the auth-service login page both have an
+ * #email input, so waiting for #email alone is ambiguous. This helper
+ * submits the demo's email form with a dummy address, which triggers
+ * the OAuth PAR + redirect to the auth-service. We then wait for the
+ * auth-service-specific #step-email element to confirm we've arrived.
+ */
+async function navigateToAuthLoginPage(
+  world: EpdsWorld,
+  demoUrl: string,
+): Promise<void> {
+  const page = getPage(world)
+  await page.goto(demoUrl)
   await expect(page.locator('#email')).toBeVisible({ timeout: 30_000 })
+  // Fill a dummy email and submit to trigger the OAuth redirect.
+  // The email doesn't need to be real — we only need to reach the
+  // auth-service login page, not complete the OTP flow.
+  await page.fill('#email', `css-test-${Date.now()}@example.com`)
+  await page.click('button[type=submit]')
+  // Wait for the auth-service login page — #step-email is specific to
+  // the auth-service and does not exist on the demo page.
+  await expect(page.locator('#step-email')).toBeVisible({ timeout: 30_000 })
 }
 
 // ---------------------------------------------------------------------------
@@ -38,16 +66,17 @@ async function waitForLoginPage(world: EpdsWorld): Promise<void> {
 When(
   'the trusted demo client initiates an OAuth login',
   async function (this: EpdsWorld) {
-    await this.page?.goto(testEnv.demoTrustedUrl)
-    await waitForLoginPage(this)
+    await navigateToAuthLoginPage(this, testEnv.demoTrustedUrl)
   },
 )
 
-// Note: "the untrusted demo client initiates an OAuth login" is already
-// defined in consent.steps.ts (it navigates but does not wait for the
-// login page to be interactive). "the demo client initiates an OAuth
-// login" is defined in auth.steps.ts and targets the trusted demo.
-// We reuse both rather than duplicating them here.
+When(
+  'the untrusted demo client initiates an OAuth login to the auth service',
+  async function (this: EpdsWorld) {
+    if (!testEnv.demoUntrustedUrl) return 'pending'
+    await navigateToAuthLoginPage(this, testEnv.demoUntrustedUrl)
+  },
+)
 
 // ---------------------------------------------------------------------------
 // HTML-level assertions — <style> tag content
