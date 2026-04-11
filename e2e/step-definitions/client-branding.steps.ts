@@ -28,9 +28,12 @@ const DEFAULT_LOGIN_BG_RGB = 'rgb(248, 249, 250)' // #f8f9fa
 
 async function waitForLoginPage(world: EpdsWorld): Promise<void> {
   const page = getPage(world)
-  // Wait for auth-service-specific element — #step-email only exists on
-  // the auth-service login page, not the demo app's email form.
-  await expect(page.locator('#step-email')).toBeVisible({ timeout: 30_000 })
+  // Wait for auth-service-specific element — #step-otp only exists on
+  // the auth-service login page, not the demo app. Use toBeAttached
+  // rather than toBeVisible because #step-otp may be hidden (no
+  // 'active' class) if the email step is showing, and #step-email may
+  // be hidden if the OTP step is showing (login_hint provided).
+  await expect(page.locator('#step-otp')).toBeAttached({ timeout: 30_000 })
 }
 
 /**
@@ -54,9 +57,11 @@ async function navigateToAuthLoginPage(
   // auth-service login page, not complete the OTP flow.
   await page.fill('#email', `css-test-${Date.now()}@example.com`)
   await page.click('button[type=submit]')
-  // Wait for the auth-service login page — #step-email is specific to
-  // the auth-service and does not exist on the demo page.
-  await expect(page.locator('#step-email')).toBeVisible({ timeout: 30_000 })
+  // Wait for the auth-service login page — #step-otp is specific to
+  // the auth-service and does not exist on the demo page. Use
+  // toBeAttached because the OTP step may be immediately active
+  // (email provided via login_hint) or hidden (email step showing).
+  await expect(page.locator('#step-otp')).toBeAttached({ timeout: 30_000 })
 }
 
 // ---------------------------------------------------------------------------
