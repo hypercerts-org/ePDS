@@ -568,7 +568,25 @@ async function main() {
         return next()
       }
 
-      const clientId = req.query?.client_id as string | undefined
+      // Resolve client_id: it may be on the query string directly, or
+      // inside a PAR request_uri that needs to be looked up via the
+      // oauth-provider's request manager. PAR-based flows (the common
+      // case in ePDS) only carry request_uri on the query string.
+      let clientId = req.query?.client_id as string | undefined
+      if (!clientId) {
+        const requestUri = req.query?.request_uri as string | undefined
+        if (requestUri && provider) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
+            const requestData = await (provider.requestManager as any).get(
+              requestUri,
+            )
+            clientId = requestData?.clientId
+          } catch {
+            // request_uri expired or invalid — skip CSS injection
+          }
+        }
+      }
       if (!clientId || !trustedClients.includes(clientId)) {
         return next()
       }
