@@ -454,6 +454,28 @@ export class EpdsDb {
       .get(requestUri, Date.now()) as AuthFlowRow | undefined
   }
 
+  // ── Per-client login tracking ──
+
+  /** Record that `email` has logged into `clientId` for the first time. */
+  recordClientLogin(email: string, clientId: string): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO client_logins (email, client_id, first_login_at)
+         VALUES (LOWER(?), ?, ?)`,
+      )
+      .run(email, clientId, Date.now())
+  }
+
+  /** Check whether `email` has previously logged into `clientId`. */
+  hasClientLogin(email: string, clientId: string): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT 1 FROM client_logins WHERE email = LOWER(?) AND client_id = ?`,
+      )
+      .get(email, clientId)
+    return row !== undefined
+  }
+
   deleteAuthFlow(flowId: string): void {
     this.db.prepare(`DELETE FROM auth_flow WHERE flow_id = ?`).run(flowId)
   }

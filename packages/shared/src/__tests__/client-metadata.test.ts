@@ -3,6 +3,10 @@
  * and CSS extraction (getClientCss).
  *
  * Uses global fetch mocking to simulate HTTP responses without real network calls.
+ * Since resolveClientMetadata uses safeFetch (which delegates to globalThis.fetch
+ * at call time), mocking globalThis.fetch is sufficient — but mocks must return
+ * Response-shaped objects with a `.headers` property because safeFetch checks
+ * Content-Length.
  */
 import {
   describe,
@@ -16,16 +20,14 @@ import {
 import {
   resolveClientName,
   resolveClientMetadata,
+  clearClientMetadataCache,
   getClientCss,
 } from '../client-metadata.js'
 
 // ── fetch mock helpers ─────────────────────────────────────────────────────
 //
-// Every test in this file either resolves fetch with a JSON body, resolves
-// with a non-ok status, or rejects. Collapsing those three shapes into
-// helpers keeps each test focused on what's specific to it (the URL, the
-// body, the assertion) rather than the boilerplate of building a Response-
-// shaped mock.
+// safeFetch checks res.headers.get('content-length'), so mocks must include
+// a headers object. Using real Response objects avoids shape mismatches.
 
 function installFetchMock(impl: Mock): Mock {
   globalThis.fetch = impl as unknown as typeof fetch
@@ -33,16 +35,21 @@ function installFetchMock(impl: Mock): Mock {
 }
 
 function mockFetchOk(body: Record<string, unknown>): Mock {
+  const json = JSON.stringify(body)
   return installFetchMock(
-    vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(body),
-    }),
+    vi.fn().mockResolvedValue(
+      new Response(json, {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    ),
   )
 }
 
 function mockFetchNotOk(status: number): Mock {
-  return installFetchMock(vi.fn().mockResolvedValue({ ok: false, status }))
+  return installFetchMock(
+    vi.fn().mockResolvedValue(new Response('', { status })),
+  )
 }
 
 function mockFetchReject(message: string): Mock {
@@ -55,6 +62,7 @@ const originalFetch = globalThis.fetch
 
 beforeEach(() => {
   globalThis.fetch = originalFetch
+  clearClientMetadataCache()
 })
 
 afterEach(() => {
@@ -144,13 +152,12 @@ describe('resolveClientMetadata', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1)
   })
 
-  it('handles http:// URLs', async () => {
-    mockFetchOk({ client_name: 'HTTP App' })
-
+  it('falls back to domain for http:// URLs (safeFetch rejects non-HTTPS)', async () => {
     const metadata = await resolveClientMetadata(
       'http://shared-local.app/client-metadata.json',
     )
-    expect(metadata.client_name).toBe('HTTP App')
+    // safeFetch blocks http:// → catch branch returns fallback with domain name
+    expect(metadata.client_name).toBe('shared-local.app')
   })
 })
 
@@ -181,8 +188,6 @@ describe('resolveClientName', () => {
   it('returns "an application" when domain extraction fails', async () => {
     mockFetchOk({})
 
-    // The client_name is undefined, but extractDomain returns hostname
-    // so this falls back to the domain. Test a truly broken URL case.
     const name = await resolveClientName('not-a-url')
     expect(name).toBe('not-a-url')
   })

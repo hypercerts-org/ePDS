@@ -574,6 +574,13 @@ async function main() {
       trustedClients,
       resolveClientMetadata,
       getClientCss,
+      resolveClientIdFromRequestUri: provider
+        ? async (requestUri: string) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
+            const requestData = await (provider.requestManager as any).get(requestUri)
+            return requestData?.clientId as string | undefined
+          }
+        : undefined,
       logger,
     })
 

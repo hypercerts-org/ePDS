@@ -14,6 +14,8 @@ type ClientCssInjectionDeps = {
     metadata: ClientMetadata,
     trustedClients: string[],
   ) => string | null
+  /** Resolve client_id from a PAR request_uri (optional). */
+  resolveClientIdFromRequestUri?: (requestUri: string) => Promise<string | undefined>
   logger: LoggerLike
 }
 
@@ -79,6 +81,7 @@ export function createClientCssInjectionMiddleware({
   trustedClients,
   resolveClientMetadata,
   getClientCss,
+  resolveClientIdFromRequestUri,
   logger,
 }: ClientCssInjectionDeps) {
   return async function clientCssInjectionMiddleware(
@@ -89,22 +92,31 @@ export function createClientCssInjectionMiddleware({
     const request = req as RequestLike
     const response = res as ResponseLike
     const query = request.query
-    const clientId =
-      typeof query.client_id === 'string' ? query.client_id : undefined
 
-    if (
-      !shouldInjectClientCss(
-        request.method,
-        request.path,
-        clientId,
-        trustedClients,
-      )
-    ) {
+    if (request.method !== 'GET' || request.path !== '/oauth/authorize') {
       next()
       return
     }
 
-    if (!clientId) {
+    // Resolve client_id: it may be on the query string directly, or
+    // inside a PAR request_uri that needs to be looked up via the
+    // oauth-provider's request manager. PAR-based flows (the common
+    // case in ePDS) only carry request_uri on the query string.
+    let clientId =
+      typeof query.client_id === 'string' ? query.client_id : undefined
+    if (!clientId && resolveClientIdFromRequestUri) {
+      const requestUri =
+        typeof query.request_uri === 'string' ? query.request_uri : undefined
+      if (requestUri) {
+        try {
+          clientId = await resolveClientIdFromRequestUri(requestUri)
+        } catch {
+          // request_uri expired or invalid — skip CSS injection
+        }
+      }
+    }
+
+    if (!clientId || !trustedClients.includes(clientId)) {
       next()
       return
     }
