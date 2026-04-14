@@ -1,0 +1,2 @@
+coverage_decreased_threshold: 0.05
+coverage_threshold_for_failure: 32.3
