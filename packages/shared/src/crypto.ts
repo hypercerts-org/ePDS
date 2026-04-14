@@ -121,11 +121,13 @@ export function verifyCallback(
     .digest('hex')
 
   // Both are hex-encoded HMAC-SHA256 (always 64 chars / 32 bytes).
-  // Guard against wrong-length input to keep timingSafeEqual happy.
-  if (sig.length !== expected.length) return { valid: false }
+  // Normalize and validate sig format before decoding to prevent Buffer.from
+  // truncation on non-hex input, which would cause timingSafeEqual to throw.
+  const normalizedSig = sig.toLowerCase()
+  if (!/^[0-9a-f]{64}$/.test(normalizedSig)) return { valid: false }
   const isValid = crypto.timingSafeEqual(
     Buffer.from(expected, 'hex'),
-    Buffer.from(sig, 'hex'),
+    Buffer.from(normalizedSig, 'hex'),
   )
   if (!isValid) return { valid: false }
   return { valid: true, ...(params.handle ? { handle: params.handle } : {}) }

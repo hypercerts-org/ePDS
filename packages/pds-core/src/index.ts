@@ -19,10 +19,13 @@ dotenv.config()
 import type * as http from 'node:http'
 import { randomBytes, timingSafeEqual, createHash } from 'node:crypto'
 import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
+import { HandleUnavailableError } from '@atproto/oauth-provider'
 import {
   generateRandomHandle,
   createLogger,
   verifyCallback,
+  escapeHtml,
+  validateLocalPart,
 } from '@certified-app/shared'
 
 const logger = createLogger('pds-core')
@@ -121,7 +124,7 @@ async function main() {
     // Defense in depth: validate the local part format before use.
     // (auth-service already validated, but we re-check at the trust boundary)
     if (chosenHandleLocal) {
-      if (!/^[a-z0-9][a-z0-9-]{1,18}[a-z0-9]$/.test(chosenHandleLocal)) {
+      if (validateLocalPart(chosenHandleLocal, handleDomain) === null) {
         logger.error(
           { handle: chosenHandleLocal },
           'invalid handle local part format in epds-callback',
@@ -171,7 +174,26 @@ async function main() {
         const accountData = await provider.accountManager.getAccount(did)
         account = accountData.account
       } else if (chosenHandle) {
-        // User chose a handle — use it directly, no retry loop
+        // User chose a handle — pre-check existence before attempting createAccount.
+        // This avoids treating non-collision errors (datastore failures, invite-code
+        // misconfiguration, etc.) as handle collisions.
+        const existingHandle =
+          await pds.ctx.accountManager.getAccount(chosenHandle)
+        if (existingHandle) {
+          logger.warn(
+            { handle: chosenHandle },
+            'chosen handle already taken (pre-check)',
+          )
+          res.redirect(
+            303,
+            `https://${authHostname}/auth/choose-handle?error=handle_taken`,
+          )
+          return
+        }
+
+        // Handle is free — attempt account creation. Any error here is NOT a
+        // collision (we just confirmed the handle is available), so log as error
+        // and return 500 rather than silently redirecting to handle_taken.
         try {
           account = await provider.accountManager.createAccount(
             deviceId,
@@ -196,15 +218,27 @@ async function main() {
             'Created account with chosen handle',
           )
         } catch (createErr: unknown) {
-          // Handle collision — redirect back to choose-handle page
-          logger.warn(
+          if (createErr instanceof HandleUnavailableError) {
+            // Reserved handle slipped past the pre-check (pre-check only tests DB existence,
+            // not the reserved-subdomain list). Redirect back to handle picker.
+            logger.warn(
+              { handle: chosenHandle },
+              'Handle unavailable during createAccount (reserved or taken)',
+            )
+            res.redirect(
+              303,
+              `https://${authHostname}/auth/choose-handle?error=handle_taken`,
+            )
+            return
+          }
+          logger.error(
             { err: createErr, handle: chosenHandle },
-            'chosen handle collision at createAccount',
+            'createAccount failed',
           )
-          res.redirect(
-            303,
-            `https://${authHostname}/auth/choose-handle?error=handle_taken`,
-          )
+          res
+            .status(500)
+            .type('html')
+            .send(renderError('Account creation failed. Please try again.'))
           return
         }
       } else {
@@ -466,8 +500,43 @@ async function main() {
     try {
       const account = await pds.ctx.accountManager.getAccount(handle)
       res.json({ exists: !!account })
-    } catch {
-      res.json({ exists: false })
+    } catch (err) {
+      logger.error({ err, handle }, 'Failed to check handle availability')
+      res.status(503).json({ error: 'handle_check_failed' })
+    }
+  })
+
+  // Protected internal endpoint for auth service to reset the inactivity timer
+  // on a pending PAR request_uri. Called when the user loads the handle selection
+  // page so the request doesn't expire while they are choosing a handle.
+  // atproto's AUTHORIZATION_INACTIVITY_TIMEOUT is 5 minutes — without this ping,
+  // users who take >5 min on the handle page would get "This request has expired"
+  // inside epds-callback after account creation, leaving the auth flow broken.
+  pds.app.get('/_internal/ping-request', async (req, res) => {
+    if (!verifyInternalSecret(req.headers['x-internal-secret'])) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+    const requestUri = ((req.query.request_uri as string) || '').trim()
+    if (!requestUri) {
+      res.status(400).json({ error: 'Missing request_uri' })
+      return
+    }
+    if (!provider) {
+      res.status(503).json({ error: 'OAuth provider not available' })
+      return
+    }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
+      await (provider.requestManager as any).get(requestUri)
+      res.json({ ok: true })
+    } catch (err) {
+      // Request expired or not found — not a server error, just report it
+      logger.debug(
+        { err, requestUri },
+        'ping-request: request_uri expired or not found',
+      )
+      res.status(404).json({ error: 'request_expired' })
     }
   })
 
@@ -501,14 +570,6 @@ async function main() {
       // Not found or expired — not an error, just no hint available
       res.json({ login_hint: null })
     }
-  })
-
-  // =========================================================================
-  // TLS check - used by Caddy on-demand TLS to verify handle ownership
-  // =========================================================================
-
-  pds.app.get('/tls-check', async (req, res) => {
-    await checkHandleRoute(pds, authHostname, req, res)
   })
 
   // =========================================================================
@@ -568,6 +629,15 @@ async function checkHandleRoute(
         message: 'handles are not provided on this domain',
       })
     }
+    // Only allow exactly one subdomain label (e.g. xyz.climateai.org).
+    // Reject bare apex domains (empty localPart) and nested subdomains (abc.xyz.climateai.org).
+    const localPart = domain.slice(0, domain.length - isHostedHandle.length)
+    if (!localPart || localPart.includes('.')) {
+      return res.status(400).json({
+        error: 'InvalidRequest',
+        message: 'domain must have exactly one subdomain label',
+      })
+    }
     const account = await pds.ctx.accountManager.getAccount(domain)
     if (!account) {
       return res.status(404).json({
@@ -582,6 +652,14 @@ async function checkHandleRoute(
       .status(500)
       .json({ error: 'InternalServerError', message: 'Internal Server Error' })
   }
+}
+
+function renderError(message: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Error</title></head>
+<body><p style="color:red;padding:20px">${escapeHtml(message)}</p></body>
+</html>`
 }
 
 main().catch((err: unknown) => {

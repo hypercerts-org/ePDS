@@ -25,3 +25,4 @@ export type {
 export { DEFAULT_RATE_LIMITS } from './types.js'
 export { createLogger } from './logger.js'
 export { escapeHtml, maskEmail } from './html.js'
+export { validateLocalPart, LOCAL_PART_MIN, LOCAL_PART_MAX } from './handle.js'

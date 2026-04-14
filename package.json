@@ -5,7 +5,7 @@
   "description": "ePDS — extended Personal Data Server for AT Protocol with passwordless OTP authentication",
   "license": "MIT",
   "engines": {
-    "node": ">=18.7.0"
+    "node": ">=20.0.0"
   },
   "packageManager": "pnpm@9.15.9",
   "scripts": {
@@ -17,6 +17,7 @@
     "start": "pnpm --recursive --parallel start",
     "typecheck": "tsc --build tsconfig.json",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -29,11 +30,12 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/pino": "^7.0.5",
+    "@vitest/coverage-v8": "^4.1.0",
     "eslint": "^10.0.1",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.8.1",
     "typescript-eslint": "^8.56.0",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.0"
   },
   "type": "module"
 }

@@ -16,41 +16,18 @@
  */
 import { Router, type Request, type Response } from 'express'
 import type { AuthServiceContext } from '../context.js'
-import { createLogger, escapeHtml, signCallback } from '@certified-app/shared'
+import {
+  createLogger,
+  escapeHtml,
+  signCallback,
+  validateLocalPart,
+} from '@certified-app/shared'
 import { fromNodeHeaders } from 'better-auth/node'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
 
 const logger = createLogger('auth:choose-handle')
 
 const AUTH_FLOW_COOKIE = 'epds_auth_flow'
-
-/** Regex for valid handle local parts: 3-20 chars, lowercase alphanumeric + hyphens, no leading/trailing hyphen */
-export const HANDLE_REGEX = /^[a-z0-9][a-z0-9-]{1,18}[a-z0-9]$/
-
-/** Reserved handles that cannot be registered */
-export const RESERVED_HANDLES = new Set([
-  'admin',
-  'support',
-  'help',
-  'abuse',
-  'postmaster',
-  'root',
-  'system',
-  'moderator',
-  'www',
-  'mail',
-  'ftp',
-  'api',
-  'auth',
-  'oauth',
-  'account',
-  'settings',
-  'security',
-  'info',
-  'contact',
-  'noreply',
-  'no-reply',
-])
 
 export function createChooseHandleRouter(
   ctx: AuthServiceContext,
@@ -59,8 +36,11 @@ export function createChooseHandleRouter(
 ): Router {
   const router = Router()
 
-  const pdsUrl = process.env.PDS_INTERNAL_URL || ctx.config.pdsPublicUrl
-  const internalSecret = process.env.EPDS_INTERNAL_SECRET ?? ''
+  const pdsUrl = process.env.PDS_INTERNAL_URL
+  const internalSecret = process.env.EPDS_INTERNAL_SECRET
+  if (!pdsUrl || !internalSecret) {
+    throw new Error('PDS_INTERNAL_URL and EPDS_INTERNAL_SECRET must be set')
+  }
   const handleDomain = ctx.config.pdsHostname
 
   /**
@@ -149,6 +129,38 @@ export function createChooseHandleRouter(
       return
     }
 
+    // Reset the PAR request inactivity timer so it doesn't expire while the
+    // user is on this page. atproto's AUTHORIZATION_INACTIVITY_TIMEOUT is 5 min
+    // — without this ping, users who take >5 min to pick a handle would hit
+    // "This request has expired" inside epds-callback after account creation.
+    try {
+      const pingRes = await fetch(
+        `${pdsUrl}/_internal/ping-request?request_uri=${encodeURIComponent(result.flow.requestUri)}`,
+        {
+          headers: { 'x-internal-secret': internalSecret },
+          signal: AbortSignal.timeout(3000),
+        },
+      )
+      if (!pingRes.ok) {
+        logger.warn(
+          { status: pingRes.status, requestUri: result.flow.requestUri },
+          'Failed to extend request_uri on choose-handle',
+        )
+        res
+          .status(400)
+          .type('html')
+          .send(renderError('Session expired, please start over'))
+        return
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Failed to ping request_uri on choose-handle')
+      res
+        .status(400)
+        .type('html')
+        .send(renderError('Session expired, please start over'))
+      return
+    }
+
     const error = req.query.error as string | undefined
     res
       .type('html')
@@ -173,18 +185,63 @@ export function createChooseHandleRouter(
 
     const { flowId, flow, email } = result
 
-    // Step 1: Read and normalise the local part
-    const rawHandle = ((req.body.handle as string) || '').trim().toLowerCase()
+    // Guard: if PDS account already exists, bounce back to /auth/complete
+    // (mirrors the same check in the GET handler — prevents signing a
+    // new_account callback for an existing user who somehow reaches this POST)
+    const did = await getDidByEmail(email, pdsUrl, internalSecret)
+    if (did) {
+      logger.info(
+        { email },
+        'Existing user reached POST choose-handle — redirecting to /auth/complete',
+      )
+      res.redirect(303, '/auth/complete')
+      return
+    }
 
-    // Step 2: Validate format
-    if (!HANDLE_REGEX.test(rawHandle)) {
+    // Re-ping the PAR request to ensure it hasn't expired while the user was
+    // on the handle picker page. Without this, a user who took >5 min would
+    // get "This request has expired" inside epds-callback after account creation.
+    try {
+      const pingRes = await fetch(
+        `${pdsUrl}/_internal/ping-request?request_uri=${encodeURIComponent(flow.requestUri)}`,
+        {
+          headers: { 'x-internal-secret': internalSecret },
+          signal: AbortSignal.timeout(3000),
+        },
+      )
+      if (!pingRes.ok) {
+        logger.warn(
+          { status: pingRes.status, requestUri: flow.requestUri },
+          'Failed to extend request_uri on POST choose-handle',
+        )
+        res
+          .status(400)
+          .type('html')
+          .send(renderError('Session expired, please start over'))
+        return
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Failed to ping request_uri on POST choose-handle')
+      res
+        .status(400)
+        .type('html')
+        .send(renderError('Session expired, please start over'))
+      return
+    }
+
+    // Step 1: Read and normalise the local part
+    const rawHandle = ((req.body.handle as string) || '').trim()
+
+    // Step 2: Validate format and normalise via atproto spec + product constraints
+    const normalizedLocal = validateLocalPart(rawHandle, handleDomain)
+    if (normalizedLocal === null) {
       logger.debug({ rawHandle }, 'Invalid handle format on POST choose-handle')
       res
         .type('html')
         .send(
           renderChooseHandlePage(
             handleDomain,
-            'Invalid handle format. Use 3-20 lowercase letters, numbers, or hyphens.',
+            'Invalid handle format. Use 5-20 lowercase letters, numbers, or hyphens.',
             res.locals.csrfToken,
             ctx.config.brandColor,
             ctx.config.backgroundColor,
@@ -194,30 +251,9 @@ export function createChooseHandleRouter(
       return
     }
 
-    // Step 3: Check reserved blocklist
-    if (RESERVED_HANDLES.has(rawHandle)) {
-      logger.debug(
-        { rawHandle },
-        'Reserved handle rejected on POST choose-handle',
-      )
-      res
-        .type('html')
-        .send(
-          renderChooseHandlePage(
-            handleDomain,
-            'That handle is reserved.',
-            res.locals.csrfToken,
-            ctx.config.brandColor,
-            ctx.config.backgroundColor,
-            ctx.config.panelColor,
-          ),
-        )
-      return
-    }
-
-    // Step 4: Construct full handle and check availability via PDS internal API
-    const fullHandle = `${rawHandle}.${handleDomain}`
-    let handleAvailable = false
+    // Step 3: Construct full handle and check availability via PDS internal API
+    const fullHandle = `${normalizedLocal}.${handleDomain}`
+    let handleAvailable: boolean
     try {
       const checkRes = await fetch(
         `${pdsUrl}/_internal/check-handle?handle=${encodeURIComponent(fullHandle)}`,
@@ -289,7 +325,7 @@ export function createChooseHandleRouter(
       email,
       approved: '1',
       new_account: '1',
-      handle: rawHandle,
+      handle: normalizedLocal,
     }
     const { sig, ts } = signCallback(
       callbackParams,
@@ -297,9 +333,10 @@ export function createChooseHandleRouter(
     )
     const params = new URLSearchParams({ ...callbackParams, ts, sig })
 
-    // Step 6: Cleanup — delete auth_flow row and clear cookie
-    ctx.db.deleteAuthFlow(flowId)
-    res.clearCookie(AUTH_FLOW_COOKIE)
+    // auth_flow row and cookie are intentionally kept alive here.
+    // If pds-core redirects back with ?error=handle_taken, the user still has
+    // their session and can retry with a different handle. Stale rows are
+    // cleaned up by cleanupExpiredAuthFlows() every 5 minutes (10-min TTL).
 
     logger.info(
       { email, flowId, fullHandle },
@@ -332,20 +369,15 @@ export function createChooseHandleRouter(
       return
     }
 
-    // Read and validate the local part
-    const localPart = ((req.query.handle as string) || '').trim().toLowerCase()
-
-    if (!HANDLE_REGEX.test(localPart)) {
+    // Read, validate and normalise the local part
+    const rawLocalPart = ((req.query.handle as string) || '').trim()
+    const normalizedLocal = validateLocalPart(rawLocalPart, handleDomain)
+    if (normalizedLocal === null) {
       res.json({ error: 'invalid_format' })
       return
     }
 
-    if (RESERVED_HANDLES.has(localPart)) {
-      res.json({ error: 'reserved', available: false })
-      return
-    }
-
-    const fullHandle = `${localPart}.${handleDomain}`
+    const fullHandle = `${normalizedLocal}.${handleDomain}`
 
     try {
       const checkRes = await fetch(
@@ -878,7 +910,7 @@ function renderChooseHandlePage(
         <div class="validation-rules" id="validation-rules">
           <div class="validation-rule" id="rule-length">
             <span class="rule-icon" id="rule-length-icon">·</span>
-            <span>Between 3 and 20 characters</span>
+            <span>Between 5 and 20 characters</span>
           </div>
           <div class="validation-rule" id="rule-charset">
             <span class="rule-icon" id="rule-charset-icon">·</span>
@@ -929,12 +961,9 @@ function renderChooseHandlePage(
   <script>
     (function() {
       var HANDLE_DOMAIN = '${escapeHtml(handleDomain)}';
-      var HANDLE_REGEX = /^[a-z0-9][a-z0-9-]{1,18}[a-z0-9]$/;
-      var RESERVED = new Set([
-        'admin','support','help','abuse','postmaster','root','system',
-        'moderator','www','mail','ftp','api','auth','oauth','account',
-        'settings','security','info','contact','noreply','no-reply'
-      ]);
+      // Client-side regex for immediate visual rule feedback only.
+      // Authoritative validation happens server-side via validateLocalPart (atproto/syntax).
+      var HANDLE_REGEX = /^[a-z0-9][a-z0-9-]{3,18}[a-z0-9]$/;
 
       var input = document.getElementById('handle-input');
       var inputInner = document.getElementById('input-inner');
@@ -948,8 +977,11 @@ function renderChooseHandlePage(
       var ruleLengthIcon = document.getElementById('rule-length-icon');
       var ruleCharsetIcon = document.getElementById('rule-charset-icon');
       var debounceTimer = null;
-      var lastChecked = '';
-      var isAvailable = false;
+      var currentAbort = null;
+
+      // isAvailable: null = unknown, true = confirmed available, false = confirmed taken.
+      // submitBtn is disabled only when handle is confirmed taken or unavailable.
+      var isAvailable = null;
 
       function setStatus(text, cls) {
         statusEl.textContent = text;
@@ -957,7 +989,7 @@ function renderChooseHandlePage(
       }
 
       function updateSubmit() {
-        submitBtn.disabled = !isAvailable;
+        submitBtn.disabled = isAvailable === false;
       }
 
       function setRule(el, iconEl, state) {
@@ -972,7 +1004,7 @@ function renderChooseHandlePage(
           setRule(ruleCharsetEl, ruleCharsetIcon, 'neutral');
           return;
         }
-        var validLength = raw.length >= 3 && raw.length <= 20;
+        var validLength = raw.length >= 5 && raw.length <= 20;
         var validCharset = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(raw) || (raw.length >= 1 && /^[a-z0-9]+$/.test(raw));
         var noLeadTrailHyphen = !/^-|-$/.test(raw);
         setRule(ruleLengthEl, ruleLengthIcon, validLength ? 'pass' : 'fail');
@@ -991,38 +1023,52 @@ function renderChooseHandlePage(
       }
 
       function checkAvailability(value) {
-        if (value === lastChecked) return;
-        lastChecked = value;
-        isAvailable = false;
+        // Cancel any in-flight request for a previous value
+        if (currentAbort) currentAbort.abort();
+        currentAbort = new AbortController();
+
+        isAvailable = null;
         updateSubmit();
 
         setStatus('Checking\u2026', 'checking');
 
-        fetch('/api/check-handle?handle=' + encodeURIComponent(value))
+        fetch('/api/check-handle?handle=' + encodeURIComponent(value), {
+          signal: currentAbort.signal,
+        })
           .then(function(r) { return r.json(); })
           .then(function(data) {
+            currentAbort = null;
             if (data.error === 'invalid_format') {
-              setStatus('Invalid format.', 'format-error');
+              isAvailable = false;
+              setStatus('5\u201320 characters, letters, numbers, or hyphens. Cannot start or end with a hyphen.', 'format-error');
             } else if (data.error === 'reserved') {
+              isAvailable = false;
               setStatus('\u2717 That handle is reserved.', 'taken');
             } else if (data.error) {
+              // Service error: unknown state — don't block the button
+              isAvailable = null;
               setStatus('Could not check availability.', 'format-error');
             } else if (data.available) {
               setStatus('\u2713 Available!', 'available');
               isAvailable = true;
             } else {
+              isAvailable = false;
               setStatus('\u2717 Already taken.', 'taken');
             }
             updateSubmit();
           })
-          .catch(function() {
+          .catch(function(err) {
+            if (err.name === 'AbortError') return; // silently ignore cancelled requests
+            currentAbort = null;
+            // Network/timeout error: unknown state — don't block
+            isAvailable = null;
             setStatus('Could not check availability.', 'format-error');
             updateSubmit();
           });
       }
 
       input.addEventListener('input', function() {
-        // Normalise: lowercase, strip invalid chars
+        // Normalise: lowercase, strip invalid chars as you type
         var raw = this.value.toLowerCase().replace(/[^a-z0-9-]/g, '');
         if (this.value !== raw) {
           var pos = this.selectionStart;
@@ -1030,32 +1076,34 @@ function renderChooseHandlePage(
           this.setSelectionRange(pos, pos);
         }
 
-        isAvailable = false;
-        updateSubmit();
+        // Reset state unconditionally on every keystroke
+        isAvailable = null;
+        if (currentAbort) { currentAbort.abort(); currentAbort = null; }
         clearTimeout(debounceTimer);
         updateRules(raw);
         updatePreview(raw);
 
         if (!raw) {
           setStatus('', '');
+          updateSubmit();
           return;
         }
 
-        if (RESERVED.has(raw)) {
-          setStatus('\u2717 That handle is reserved.', 'taken');
-          return;
-        }
-
-        if (!HANDLE_REGEX.test(raw)) {
-          setStatus('3\u201320 characters, letters, numbers, or hyphens. Cannot start or end with a hyphen.', 'format-error');
-          return;
-        }
-
-        // Valid format — debounce the availability check
+        // Let the server validate format and reserved-word check via validateLocalPart
+        updateSubmit();
         debounceTimer = setTimeout(function() {
           checkAvailability(raw);
         }, 500);
       });
+
+      // Disable button for the duration of the POST to prevent double-submit
+      var form = document.getElementById('handle-form');
+      if (form) {
+        form.addEventListener('submit', function() {
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'Creating\u2026';
+        });
+      }
 
       // Hide server-rendered error once user starts typing
       input.addEventListener('input', function() {

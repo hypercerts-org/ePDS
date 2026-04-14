@@ -9,6 +9,7 @@
     "dev": "tsc --build --watch"
   },
   "dependencies": {
+    "@atproto/syntax": "0.4.3",
     "better-sqlite3": "^12.0.0",
     "pino": "^10.3.1"
   },

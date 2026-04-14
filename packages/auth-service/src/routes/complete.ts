@@ -35,6 +35,12 @@ export function createCompleteRouter(
 ): Router {
   const router = Router()
 
+  const pdsUrl = process.env.PDS_INTERNAL_URL
+  const internalSecret = process.env.EPDS_INTERNAL_SECRET
+  if (!pdsUrl || !internalSecret) {
+    throw new Error('PDS_INTERNAL_URL and EPDS_INTERNAL_SECRET must be set')
+  }
+
   router.get('/auth/complete', async (req: Request, res: Response) => {
     // Step 1: Get flow_id from cookie
     const flowId = req.cookies[AUTH_FLOW_COOKIE] as string | undefined
@@ -88,8 +94,6 @@ export function createCompleteRouter(
     // Step 4: Check whether this is a new account.
     // New accounts (no PDS account yet) are redirected to the handle picker.
     // Existing accounts may need consent for first-time client logins.
-    const pdsUrl = process.env.PDS_INTERNAL_URL || ctx.config.pdsPublicUrl
-    const internalSecret = process.env.EPDS_INTERNAL_SECRET ?? ''
     const did = await getDidByEmail(email, pdsUrl, internalSecret)
     const isNewAccount = !did
 
@@ -99,9 +103,8 @@ export function createCompleteRouter(
 
     if (isNewAccount) {
       // Step 5a (new user): Redirect to handle picker.
-      // Do NOT delete auth_flow or clear cookie here — the POST /auth/choose-handle
-      // handler will do cleanup after the user picks a handle (deferred-cleanup
-      // pattern, same as consent.ts).
+      // Do NOT delete auth_flow or clear cookie here — TTL cleanup handles expiry.
+      // If pds-core redirects back with ?error=handle_taken, the user can retry.
       logger.info({ email, flowId }, 'New user: redirecting to choose-handle')
       res.redirect(303, '/auth/choose-handle')
       return
@@ -123,7 +126,9 @@ export function createCompleteRouter(
     }
 
     // Step 5c: Record client login before redirecting (no consent needed, existing user)
-    ctx.db.recordClientLogin(email, clientId || 'better-auth')
+    if (clientId) {
+      ctx.db.recordClientLogin(email, clientId)
+    }
 
     // Cleanup: remove auth_flow row and cookie
     ctx.db.deleteAuthFlow(flowId)
@@ -134,7 +139,7 @@ export function createCompleteRouter(
       request_uri: flow.requestUri,
       email,
       approved: '1',
-      new_account: isNewAccount ? '1' : '0',
+      new_account: '0',
     }
     const { sig, ts } = signCallback(
       callbackParams,

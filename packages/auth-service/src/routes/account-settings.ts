@@ -1,8 +1,12 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import type { AuthServiceContext } from '../context.js'
-import { createLogger } from '@certified-app/shared'
-import { hashToken, generateVerificationToken } from '@certified-app/shared'
-import { escapeHtml } from '@certified-app/shared'
+import {
+  createLogger,
+  hashToken,
+  generateVerificationToken,
+  escapeHtml,
+  validateLocalPart,
+} from '@certified-app/shared'
 import { fromNodeHeaders } from 'better-auth/node'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
 
@@ -251,22 +255,16 @@ export function createAccountSettingsRouter(
     requireAuth,
     async (req: Request, res: Response) => {
       const session = res.locals.betterAuthSession
-      const handle = ((req.body.handle as string) || '').trim().toLowerCase()
+      const rawHandle = ((req.body.handle as string) || '').trim()
       const handleDomain = ctx.config.pdsHostname
 
-      if (!handle) {
+      const normalizedLocal = validateLocalPart(rawHandle, handleDomain)
+      if (normalizedLocal === null) {
         res.redirect(303, '/account?error=invalid_handle')
         return
       }
 
-      const fullHandle = handle.includes('.')
-        ? handle
-        : handle + '.' + handleDomain
-      const localPart = fullHandle.replace('.' + handleDomain, '')
-      if (!/^[a-z0-9]([a-z0-9-]{1,18}[a-z0-9])?$/.test(localPart)) {
-        res.redirect(303, '/account?error=invalid_handle')
-        return
-      }
+      const fullHandle = `${normalizedLocal}.${handleDomain}`
 
       const did = await getDidByEmail(
         session.user.email,
@@ -478,7 +476,7 @@ function renderSettingsPage(opts: {
       <p class="info">Your handle is your public username on the AT Protocol network.</p>
       <form method="POST" action="/account/handle" class="inline-form">
         <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
-        <input type="text" name="handle" placeholder="yourname" required pattern="[a-z0-9][a-z0-9-]{1,18}[a-z0-9]" title="3-20 lowercase letters, numbers, or hyphens">
+        <input type="text" name="handle" placeholder="yourname" autocomplete="off" autocapitalize="none" spellcheck="false" required>
         <span class="handle-suffix">.${escapeHtml(opts.handleDomain)}</span>
         <button type="submit" class="btn-primary-sm">Update</button>
       </form>

@@ -14,6 +14,9 @@ data/
 .vscode/
 .idea/
 
+# test coverage reports
+coverage/
+
 # beads runtime files (Dolt server state, not repo data)
 .beads/dolt-server.*
 .beads/dolt-monitor.pid

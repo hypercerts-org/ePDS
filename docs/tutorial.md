@@ -27,9 +27,11 @@ your app, and your app exchanges that redirect for a token.
 3. Your app redirects the user's browser to the ePDS auth page (with the email)
 4. ePDS immediately sends the OTP and shows the code-entry screen
 5. User reads the 8-digit code from their email and submits it
-6. ePDS verifies the code and redirects back to your app's callback URL
-7. Your callback handler exchanges the redirect for an access token
-8. User is logged in
+6. ePDS verifies the code
+7. **New users only**: ePDS shows a handle picker — user chooses their handle
+8. ePDS redirects back to your app's callback URL
+9. Your callback handler exchanges the redirect for an access token
+10. User is logged in
 
 ## Flow 2 — App has a simple login button
 
@@ -40,9 +42,11 @@ your app, and your app exchanges that redirect for a token.
 5. User enters their email and submits
 6. ePDS sends the OTP and shows the code-entry screen
 7. User reads the 8-digit code from their email and submits it
-8. ePDS verifies the code and redirects back to your app's callback URL
-9. Your callback handler exchanges the redirect for an access token
-10. User is logged in
+8. ePDS verifies the code
+9. **New users only**: ePDS shows a handle picker — user chooses their handle
+10. ePDS redirects back to your app's callback URL
+11. Your callback handler exchanges the redirect for an access token
+12. User is logged in
 
 ## Sequence Diagrams
 
@@ -76,8 +80,19 @@ sequenceDiagram
 
     User->>Auth: GET /auth/complete
     Auth->>Auth: Reads epds_auth_flow cookie → flow_id → request_uri<br/>Gets email from better-auth session
-    Auth->>PDS: GET /oauth/epds-callback<br/>?request_uri=...&email=...&approved=1&ts=...&sig=HMAC
-    PDS->>PDS: Verifies HMAC signature<br/>Creates PDS account if new user<br/>Issues authorization code
+
+    alt New user (no PDS account)
+        Auth-->>User: 302 redirect to /auth/choose-handle
+        Auth->>PDS: GET /_internal/ping-request (resets PAR inactivity timer)
+        User->>Auth: Picks handle, POST /auth/choose-handle
+        Auth->>PDS: GET /_internal/check-handle (availability check)
+        Auth->>PDS: GET /oauth/epds-callback<br/>?request_uri=...&email=...&approved=1&new_account=1&handle=...&ts=...&sig=HMAC
+        PDS->>PDS: Verifies HMAC signature<br/>Creates PDS account with chosen handle<br/>Issues authorization code
+    else Existing user
+        Auth->>PDS: GET /oauth/epds-callback<br/>?request_uri=...&email=...&approved=1&new_account=0&ts=...&sig=HMAC
+        PDS->>PDS: Verifies HMAC signature<br/>Issues authorization code
+    end
+
     PDS-->>User: 302 redirect to client redirect_uri?code=...&state=...
 
     User->>App: GET /api/oauth/callback?code=...&state=...
@@ -120,8 +135,19 @@ sequenceDiagram
 
     User->>Auth: GET /auth/complete
     Auth->>Auth: Reads epds_auth_flow cookie → flow_id → request_uri<br/>Gets email from better-auth session
-    Auth->>PDS: GET /oauth/epds-callback<br/>?request_uri=...&email=...&approved=1&ts=...&sig=HMAC
-    PDS->>PDS: Verifies HMAC signature<br/>Creates PDS account if new user<br/>Issues authorization code
+
+    alt New user (no PDS account)
+        Auth-->>User: 302 redirect to /auth/choose-handle
+        Auth->>PDS: GET /_internal/ping-request (resets PAR inactivity timer)
+        User->>Auth: Picks handle, POST /auth/choose-handle
+        Auth->>PDS: GET /_internal/check-handle (availability check)
+        Auth->>PDS: GET /oauth/epds-callback<br/>?request_uri=...&email=...&approved=1&new_account=1&handle=...&ts=...&sig=HMAC
+        PDS->>PDS: Verifies HMAC signature<br/>Creates PDS account with chosen handle<br/>Issues authorization code
+    else Existing user
+        Auth->>PDS: GET /oauth/epds-callback<br/>?request_uri=...&email=...&approved=1&new_account=0&ts=...&sig=HMAC
+        PDS->>PDS: Verifies HMAC signature<br/>Issues authorization code
+    end
+
     PDS-->>User: 302 redirect to client redirect_uri?code=...&state=...
 
     User->>App: GET /api/oauth/callback?code=...&state=...
@@ -439,13 +465,16 @@ const { alsoKnownAs } = await plcRes.json()
 const handle = alsoKnownAs
   ?.find((u: string) => u.startsWith('at://'))
   ?.replace('at://', '')
-// e.g. "a3x9kf.epds-poc1.example.com"
+// e.g. "alice.pds.example.com"
 ```
 
 ### User handles
 
-Each user gets a randomly generated handle (e.g. `a3x9kf.pds.example.com`).
+New users choose their handle during signup (e.g. `alice.pds.example.com`).
+The local part must be 5–20 characters, alphanumeric with hyphens, no dots.
+Real-time availability checking is shown in the handle picker UI.
 Handles are not derived from the user's email address, for privacy.
+Users can change their handle later via account settings.
 
 ## Why does the user have to leave my app at all? (Flow 1)
 
