@@ -172,7 +172,7 @@ export function createClientCssInjectionMiddleware({
           clientId = await resolveClientIdFromRequestUri(requestUri)
         } catch (err) {
           logger.warn(
-            { err, requestUri },
+            { err, hasRequestUri: true },
             'CSS middleware: failed to resolve client_id from request_uri',
           )
         }
