@@ -9,6 +9,7 @@ export default tseslint.config(
       '**/dist/',
       'node_modules/',
       'tmp/',
+      'coverage/',
       'vitest.config.ts',
       'eslint.config.js',
       '**/next-env.d.ts',
