@@ -28,6 +28,7 @@ import { fromNodeHeaders } from 'better-auth/node'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
 import { pingParRequest } from '../lib/ping-par-request.js'
 import { requireInternalEnv } from '../lib/require-internal-env.js'
+import { renderError } from '../lib/render-error.js'
 import { resolveClientBranding } from '../lib/client-metadata.js'
 import { renderOptionalStyleTag } from '../lib/page-helpers.js'
 
@@ -691,10 +692,3 @@ function renderChooseHandlePage(
 </html>`
 }
 
-function renderError(message: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Error</title></head>
-<body><p style="color:red;padding:20px">${escapeHtml(message)}</p></body>
-</html>`
-}

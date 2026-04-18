@@ -20,6 +20,7 @@ import { createLogger, escapeHtml, maskEmail } from '@certified-app/shared'
 import { buildOtpInputProps } from '../otp-input.js'
 import { resolveClientBranding } from '../lib/client-metadata.js'
 import { renderOptionalStyleTag } from '../lib/page-helpers.js'
+import { renderError } from '../lib/render-error.js'
 
 const logger = createLogger('auth:recovery')
 
@@ -189,7 +190,7 @@ export function createRecoveryRouter(
     const requestUri = req.body.request_uri as string
 
     if (!code || !email || !requestUri) {
-      res.status(400).send('<p>Missing required fields.</p>')
+      res.status(400).send(renderError('Missing required fields.'))
       return
     }
 
@@ -343,14 +344,6 @@ function renderOtpForm(opts: {
     <a href="${backHref}" class="btn-secondary">Back to sign in</a>
   </div>
 </body>
-</html>`
-}
-
-function renderError(message: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Error</title><style>${CSS}</style></head>
-<body><div class="container"><h1>Error</h1><p class="error">${escapeHtml(message)}</p></div></body>
 </html>`
 }
 

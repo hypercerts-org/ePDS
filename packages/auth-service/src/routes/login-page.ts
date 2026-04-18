@@ -43,6 +43,7 @@ import {
 } from '../lib/resolve-login-hint.js'
 import { ensurePdsUrl } from '../lib/pds-url.js'
 import { renderOptionalStyleTag } from '../lib/page-helpers.js'
+import { renderError } from '../lib/render-error.js'
 
 const logger = createLogger('auth:login-page')
 
@@ -579,10 +580,3 @@ function renderLoginPage(opts: {
 </html>`
 }
 
-function renderError(message: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Error</title></head>
-<body><p style="color:red;padding:20px">${escapeHtml(message)}</p></body>
-</html>`
-}

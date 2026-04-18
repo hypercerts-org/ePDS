@@ -28,6 +28,7 @@ import { fromNodeHeaders } from 'better-auth/node'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
 import { pingParRequest } from '../lib/ping-par-request.js'
 import { requireInternalEnv } from '../lib/require-internal-env.js'
+import { renderError } from '../lib/render-error.js'
 
 const logger = createLogger('auth:complete')
 
@@ -49,7 +50,7 @@ export function createCompleteRouter(
       logger.warn('No epds_auth_flow cookie found on /auth/complete')
       res
         .status(400)
-        .send('<p>Authentication session expired. Please try again.</p>')
+        .send(renderError('Authentication session expired. Please try again.'))
       return
     }
 
@@ -60,7 +61,7 @@ export function createCompleteRouter(
       res.clearCookie(AUTH_FLOW_COOKIE)
       res
         .status(400)
-        .send('<p>Authentication session expired. Please try again.</p>')
+        .send(renderError('Authentication session expired. Please try again.'))
       return
     }
 
@@ -73,7 +74,9 @@ export function createCompleteRouter(
       })
     } catch (err) {
       logger.error({ err }, 'Failed to get better-auth session')
-      res.status(500).send('<p>Authentication failed. Please try again.</p>')
+      res
+        .status(500)
+        .send(renderError('Authentication failed. Please try again.'))
       return
     }
 

@@ -16,6 +16,7 @@ import { createAccountSettingsRouter } from './routes/account-settings.js'
 import { createCompleteRouter } from './routes/complete.js'
 import { createChooseHandleRouter } from './routes/choose-handle.js'
 import { resolveAuthPort } from './lib/resolve-port.js'
+import { renderError } from './lib/render-error.js'
 
 const logger = createLogger('auth-service')
 
@@ -117,6 +118,41 @@ export function createAuthService(config: AuthServiceConfig): {
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', service: 'auth', version: getEpdsVersion() })
   })
+
+  // Styled 404 for any unmatched HTML route. JSON clients get JSON.
+  app.use((req, res) => {
+    if (req.accepts('html')) {
+      res
+        .status(404)
+        .send(
+          renderError(
+            "The page you're looking for doesn't exist.",
+            'Page not found',
+          ),
+        )
+    } else {
+      res.status(404).json({ error: 'not_found' })
+    }
+  })
+
+  // Styled 500 for any uncaught error. Log the cause, keep the user-facing
+  // message generic to avoid leaking internals.
+  app.use(
+    (
+      err: unknown,
+      req: express.Request,
+      res: express.Response,
+      _next: express.NextFunction,
+    ) => {
+      logger.error({ err, path: req.path }, 'Unhandled error in auth-service')
+      if (res.headersSent) return
+      if (req.accepts('html')) {
+        res.status(500).send(renderError('Something went wrong. Please try again.'))
+      } else {
+        res.status(500).json({ error: 'internal_error' })
+      }
+    },
+  )
 
   return { app, ctx }
 }
