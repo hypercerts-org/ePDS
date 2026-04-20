@@ -142,10 +142,10 @@ export function createAuthService(config: AuthServiceConfig): {
       err: unknown,
       req: express.Request,
       res: express.Response,
-      _next: express.NextFunction,
+      next: express.NextFunction,
     ) => {
       logger.error({ err, path: req.path }, 'Unhandled error in auth-service')
-      if (res.headersSent) return
+      if (res.headersSent) return next(err)
       if (req.accepts('html')) {
         res.status(500).send(renderError('Something went wrong. Please try again.'))
       } else {
