@@ -145,7 +145,10 @@ export function createAuthService(config: AuthServiceConfig): {
       next: express.NextFunction,
     ) => {
       logger.error({ err, path: req.path }, 'Unhandled error in auth-service')
-      if (res.headersSent) return next(err)
+      if (res.headersSent) {
+        next(err)
+        return
+      }
       if (req.accepts('html')) {
         res
           .status(500)
