@@ -46,6 +46,31 @@ These are cheap. Run them all before `git push` — not just the ones you
 think are relevant to the change. In particular, `pnpm format:check`
 catches prettier drift that `pnpm format` fixes in-place.
 
+## Writing for external contributors
+
+ePDS is open-source. Default to making repo artifacts friendly for
+external readers — people who don't have access to our Linear
+workspace, Slack, or internal context.
+
+- **Don't lead with internal ticket IDs.** File names, document titles,
+  PR titles, changelog entries, and release notes should describe the
+  change, not the ticket slug. `HYPER-268` is opaque to anyone outside
+  the project; `cross-client-session-reuse` isn't.
+- **Tickets can appear _inside_ internal docs,** just not as the first
+  thing a reader sees. Design docs under `docs/design/` may cite
+  `HYPER-NNN` as a tracking-issue subtitle or inline reference — the
+  filename and H1 title should still be change-descriptive.
+- **Never in changesets.** Changesets ship externally via `CHANGELOG.md`
+  and GitHub Releases. See `.agents/skills/writing-changesets/SKILL.md`
+  § "Internal ticket IDs" for the full rule.
+- **Avoid internal-only jargon** in anything that leaves the repo
+  (release notes, README, top-level docs). Internal names are fine in
+  code comments and contributor-facing docs where the audience has
+  repo-level context.
+
+When in doubt, ask: "will this make sense to someone reading it on
+GitHub with no other context?" If not, rename or rephrase.
+
 ## Documentation
 
 **Always update documentation when your changes would render existing docs

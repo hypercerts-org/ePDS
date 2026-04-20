@@ -70,6 +70,28 @@ Do **not** list "library consumers" as an audience. The
 and never published to any registry; the only "consumer" of the
 shared exports is ePDS itself, and that's contributor territory.
 
+## Internal ticket IDs
+
+Changesets are consumer-facing release notes. Do **not** reference
+internal Linear ticket IDs (`HYPER-123`, `HYPER-268`, etc.) anywhere
+in a changeset — not in the summary, not in per-audience sections,
+not in the filename, and not via internal design-doc links whose
+paths embed the ticket slug (e.g. `docs/design/hyper-268-*.md`).
+Linear is private to the project's contributors; a reader seeing
+`HYPER-268` in a published changelog gets a bare opaque token they
+cannot resolve.
+
+Describe the change by what it does, not by its ticket. If you need
+to point at the underlying design discussion, either link to a
+public artifact (a merged PR, a public issue) or drop the pointer
+entirely — per-audience sections should already contain enough
+detail to adapt without further reading.
+
+Filenames follow the same rule: name changeset files after the
+change (`cross-client-session-reuse.md`,
+`fix-post-flush-headers-sent-crash.md`), not after the ticket
+(`hyper-268-session-reuse.md`).
+
 ## Format
 
 ePDS treats itself as a single release unit even though the source
