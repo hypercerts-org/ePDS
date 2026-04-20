@@ -345,7 +345,7 @@ export function renderLoginPage(opts: {
   loginHint: string
   initialStep: 'email' | 'otp'
   otpAlreadySent: boolean
-  isNewUser: boolean | null
+  isNewUser?: boolean | null
   csrfToken: string
   authBasePath: string
   pdsPublicUrl: string
@@ -709,7 +709,7 @@ export function renderLoginPage(opts: {
       var loginHint = ${JSON.stringify(opts.loginHint)};
       var initialStep = ${JSON.stringify(opts.initialStep)};
       var otpAlreadySent = ${JSON.stringify(opts.otpAlreadySent)};
-      var isNewUser = ${JSON.stringify(opts.isNewUser)};
+      var isNewUser = ${JSON.stringify(opts.isNewUser ?? null)};
       var csrfToken = ${JSON.stringify(opts.csrfToken)};
 
       if (isNewUser === true) {
