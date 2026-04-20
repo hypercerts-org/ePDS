@@ -99,16 +99,17 @@ Feature: Security measures
 
   # --- Terms of Service enforcement ---
 
+  @email
   Scenario: Server rejects OTP sign-in for new user without ToS acceptance
     When a new user submits a valid OTP code without the tosAccepted flag
     Then the auth service returns a 400 Bad Request
     And the error message is "You must accept the Terms of Service to create an account."
 
+  @email
   Scenario: Returning user can sign in without sending tosAccepted
-    Given "bob@example.com" already has a PDS account
-    When "bob@example.com" submits a valid OTP code without the tosAccepted flag
+    Given a returning user has a PDS account
+    When the returning user submits a valid OTP code without the tosAccepted flag
     Then the sign-in succeeds
-
 
   # --- Email privacy ---
 
