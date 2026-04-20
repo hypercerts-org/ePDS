@@ -32,6 +32,7 @@ import * as os from 'node:os'
 import type { AddressInfo } from 'node:net'
 import { _seedClientMetadataCacheForTest } from '@certified-app/shared'
 import { csrfProtection } from '../middleware/csrf.js'
+import { createSecurityHeadersMiddleware } from '../lib/security-headers.js'
 import { createLoginPageRouter } from '../routes/login-page.js'
 import { AuthServiceContext, type AuthServiceConfig } from '../context.js'
 
@@ -89,6 +90,9 @@ async function startApp(ctx: AuthServiceContext): Promise<{
   app.disable('x-powered-by')
   app.use(cookieParser())
   app.use(csrfProtection(ctx.config.csrfSecret))
+  // Mirrors main(): the login page reads res.locals.cspNonce to stamp its
+  // inline <script> tags, so the router can't be mounted without it.
+  app.use(createSecurityHeadersMiddleware())
   app.use(createLoginPageRouter(ctx))
   const server = app.listen(0)
   await new Promise<void>((resolve, reject) => {

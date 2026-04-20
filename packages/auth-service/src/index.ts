@@ -127,17 +127,21 @@ export function createAuthService(config: AuthServiceConfig): {
 
   // Metrics endpoint (protect with admin auth in production)
   app.get('/metrics', (req, res) => {
+    // Metrics expose process-level signal (uptime, RSS, DB counts) that
+    // we don't want leaking unauthenticated. Deny-by-default: if no
+    // admin password is configured, the endpoint is unavailable rather
+    // than open.
     const adminPassword = process.env.PDS_ADMIN_PASSWORD
-    if (adminPassword) {
-      const authHeader = req.headers.authorization
-      if (
-        !authHeader ||
-        authHeader !==
-          'Basic ' + Buffer.from('admin:' + adminPassword).toString('base64')
-      ) {
-        res.status(401).json({ error: 'Unauthorized' })
-        return
-      }
+    if (!adminPassword) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+    const authHeader = req.headers.authorization
+    const expected =
+      'Basic ' + Buffer.from('admin:' + adminPassword).toString('base64')
+    if (!authHeader || authHeader !== expected) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
     }
     const metrics = ctx.db.getMetrics()
     res.json({

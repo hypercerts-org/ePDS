@@ -431,6 +431,7 @@ describe('renderLoginPage handle login button', () => {
       otpLength: 6,
       otpCharset: 'numeric',
       heartbeatEnabled: false,
+      cspNonce: 'test-nonce',
     })
   }
 
@@ -520,6 +521,7 @@ function renderDefault(overrides: Partial<LoginPageOpts> = {}): string {
     otpLength: 6,
     otpCharset: 'numeric',
     heartbeatEnabled: false,
+    cspNonce: 'test-nonce',
     ...overrides,
   })
 }

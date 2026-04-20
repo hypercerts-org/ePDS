@@ -455,6 +455,7 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
         initialStep,
         otpAlreadySent,
         csrfToken: res.locals.csrfToken,
+        cspNonce: res.locals.cspNonce as string,
         authBasePath: '/api/auth',
         pdsPublicUrl: ctx.config.pdsPublicUrl,
         termsOfServiceUrl: ctx.config.termsOfServiceUrl,
@@ -482,6 +483,7 @@ export function renderLoginPage(opts: {
   initialStep: 'email' | 'otp'
   otpAlreadySent: boolean
   csrfToken: string
+  cspNonce: string
   authBasePath: string
   pdsPublicUrl: string
   termsOfServiceUrl?: string
@@ -760,8 +762,9 @@ export function renderLoginPage(opts: {
     </a>
   </div>
 
-  ${renderEmailTypoGuardScript('form-send-otp', 'email')}
-  <script>
+  ${renderEmailTypoGuardScript('form-send-otp', 'email', opts.cspNonce)}
+  <script nonce="${escapeHtml(opts.cspNonce)}">
+
     (function() {
       var authBasePath = ${JSON.stringify(opts.authBasePath)};
       var handleLoginUrl = ${JSON.stringify(handleLoginUrl)};

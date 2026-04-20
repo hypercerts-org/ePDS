@@ -53,6 +53,20 @@ describe('buildAuthServiceCsp', () => {
     expect(csp).toContain("style-src 'self' 'unsafe-inline'")
     expect(csp).toContain("connect-src 'self'")
   })
+
+  it('uses the nonce in script-src and drops unsafe-inline from script-src when nonce is supplied', () => {
+    const csp = buildAuthServiceCsp(null, 'abc123')
+    expect(csp).toContain("script-src 'self' 'nonce-abc123'")
+    expect(csp).not.toContain("script-src 'self' 'unsafe-inline'")
+    // style-src keeps 'unsafe-inline' — scoped fallback for our own stylesheets.
+    expect(csp).toContain("style-src 'self' 'unsafe-inline'")
+  })
+
+  it('still widens img-src when both client_id and nonce are supplied', () => {
+    const csp = buildAuthServiceCsp('https://app.example.com/cm.json', 'abc123')
+    expect(csp).toContain("img-src 'self' data: https://app.example.com")
+    expect(csp).toContain("script-src 'self' 'nonce-abc123'")
+  })
 })
 
 describe('extractClientIdFromRequest', () => {
@@ -107,6 +121,7 @@ describe('createSecurityHeadersMiddleware', () => {
       setHeader: vi.fn((name: string, value: string) => {
         calls.push([name, value])
       }),
+      locals: {} as Record<string, unknown>,
     }
     return { res, calls }
   }
@@ -161,6 +176,35 @@ describe('createSecurityHeadersMiddleware', () => {
     mw({ query: { request_uri: 'urn:req:abc' } }, res, () => {})
     const csp = calls.find(([name]) => name === 'Content-Security-Policy')?.[1]
     expect(csp).toContain("img-src 'self' data: https://app.example.com")
+  })
+
+  it('writes a base64url nonce to res.locals.cspNonce', () => {
+    const mw = createSecurityHeadersMiddleware()
+    const { res } = makeRes()
+    mw({ query: {} }, res, () => {})
+    const nonce = res.locals.cspNonce
+    expect(typeof nonce).toBe('string')
+    expect(nonce as string).toMatch(/^[A-Za-z0-9_-]+$/)
+    // 16 random bytes base64url-encoded = 22 chars (no padding).
+    expect((nonce as string).length).toBeGreaterThanOrEqual(20)
+  })
+
+  it('uses the same nonce value in script-src that it wrote to res.locals', () => {
+    const mw = createSecurityHeadersMiddleware()
+    const { res, calls } = makeRes()
+    mw({ query: {} }, res, () => {})
+    const nonce = res.locals.cspNonce as string
+    const csp = calls.find(([name]) => name === 'Content-Security-Policy')?.[1]
+    expect(csp).toContain(`script-src 'self' 'nonce-${nonce}'`)
+  })
+
+  it('generates a fresh nonce per request', () => {
+    const mw = createSecurityHeadersMiddleware()
+    const first = makeRes()
+    const second = makeRes()
+    mw({ query: {} }, first.res, () => {})
+    mw({ query: {} }, second.res, () => {})
+    expect(first.res.locals.cspNonce).not.toBe(second.res.locals.cspNonce)
   })
 
   it('prefers direct client_id over authFlowLookup', () => {

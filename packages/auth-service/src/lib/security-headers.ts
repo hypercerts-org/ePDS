@@ -14,6 +14,8 @@
  * chooser-enrichment middleware factories in pds-core.
  */
 
+import { randomBytes } from 'node:crypto'
+
 /**
  * Build the `img-src` directive for the auth-service's CSP. Always
  * includes `'self'` and `data:`. If a `client_id` is supplied AND it
@@ -41,12 +43,24 @@ export function buildImgSrcDirective(clientId?: string | null): string {
  * Build the full Content-Security-Policy header value used by the
  * auth-service. Composed of fixed directives plus a dynamically
  * computed `img-src`.
+ *
+ * When `nonce` is supplied, `script-src` uses `'nonce-<value>'` in
+ * place of `'unsafe-inline'`. Callers that stamp the matching nonce
+ * onto their inline `<script>` tags therefore get a strict CSP; those
+ * that don't supply a nonce fall back to `'unsafe-inline'` so the
+ * helper stays useful in non-request contexts.
  */
-export function buildAuthServiceCsp(clientId?: string | null): string {
+export function buildAuthServiceCsp(
+  clientId?: string | null,
+  nonce?: string | null,
+): string {
   const imgSrc = buildImgSrcDirective(clientId)
+  const scriptSrc = nonce
+    ? `script-src 'self' 'nonce-${nonce}'`
+    : "script-src 'self' 'unsafe-inline'"
   return [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'",
+    scriptSrc,
     "style-src 'self' 'unsafe-inline'",
     `img-src ${imgSrc}`,
     "connect-src 'self'",
@@ -60,6 +74,13 @@ export function buildAuthServiceCsp(clientId?: string | null): string {
  */
 export interface SecurityHeadersResponse {
   setHeader: (name: string, value: string) => unknown
+  /**
+   * Per-request scratchpad. Express's `res.locals` lives here; templates
+   * read `cspNonce` so they can stamp the matching `nonce="..."` onto
+   * inline `<script>` tags. Typed narrow to keep the helpers free of
+   * Express types.
+   */
+  locals: Record<string, unknown>
 }
 
 /**
@@ -143,8 +164,17 @@ export function createSecurityHeadersMiddleware(
     res.setHeader('X-Content-Type-Options', 'nosniff')
     res.setHeader('Referrer-Policy', 'no-referrer')
 
+    // Per-response nonce: lets script-src drop 'unsafe-inline' while still
+    // permitting the inline <script> tags ePDS ships, which are stamped
+    // with the matching nonce via res.locals.cspNonce.
+    const nonce = randomBytes(16).toString('base64url')
+    res.locals.cspNonce = nonce
+
     const clientId = resolveClientIdForCsp(req, authFlowLookup)
-    res.setHeader('Content-Security-Policy', buildAuthServiceCsp(clientId))
+    res.setHeader(
+      'Content-Security-Policy',
+      buildAuthServiceCsp(clientId, nonce),
+    )
     res.setHeader(
       'Strict-Transport-Security',
       'max-age=63072000; includeSubDomains; preload',

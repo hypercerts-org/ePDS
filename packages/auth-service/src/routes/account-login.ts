@@ -17,7 +17,7 @@ import { Router, type Request, type Response } from 'express'
 import { escapeHtml, maskEmail, createLogger } from '@certified-app/shared'
 import { fromNodeHeaders } from 'better-auth/node'
 import type { AuthServiceContext } from '../context.js'
-import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
+import { buildOtpInputProps, renderOtpInputFilterScript } from '../otp-input.js'
 import type { BetterAuthInstance } from '../better-auth.js'
 import { POWERED_BY_CSS, POWERED_BY_HTML } from '../lib/page-helpers.js'
 import {
@@ -48,7 +48,12 @@ export function createAccountLoginRouter(
       /* not logged in, continue */
     }
 
-    res.type('html').send(renderLoginForm({ csrfToken: res.locals.csrfToken }))
+    res.type('html').send(
+      renderLoginForm({
+        csrfToken: res.locals.csrfToken,
+        cspNonce: res.locals.cspNonce as string,
+      }),
+    )
   })
 
   // POST /account/send-otp - send OTP via better-auth, show OTP form
@@ -59,6 +64,7 @@ export function createAccountLoginRouter(
       res.status(400).send(
         renderLoginForm({
           csrfToken: res.locals.csrfToken,
+          cspNonce: res.locals.cspNonce as string,
           error: 'Email is required.',
         }),
       )
@@ -79,6 +85,7 @@ export function createAccountLoginRouter(
       renderOtpForm({
         email,
         csrfToken: res.locals.csrfToken,
+        cspNonce: res.locals.cspNonce as string,
         otpLength: ctx.config.otpLength,
         otpCharset: ctx.config.otpCharset,
       }),
@@ -97,6 +104,7 @@ export function createAccountLoginRouter(
           csrfToken: res.locals.csrfToken,
           otpLength: ctx.config.otpLength,
           otpCharset: ctx.config.otpCharset,
+          cspNonce: res.locals.cspNonce as string,
           error: 'Email and code are required.',
         }),
       )
@@ -131,6 +139,7 @@ export function createAccountLoginRouter(
           csrfToken: res.locals.csrfToken,
           otpLength: ctx.config.otpLength,
           otpCharset: ctx.config.otpCharset,
+          cspNonce: res.locals.cspNonce as string,
           error: errMsg,
         }),
       )
@@ -140,7 +149,11 @@ export function createAccountLoginRouter(
   return router
 }
 
-function renderLoginForm(opts: { csrfToken: string; error?: string }): string {
+function renderLoginForm(opts: {
+  csrfToken: string
+  cspNonce: string
+  error?: string
+}): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -171,7 +184,7 @@ function renderLoginForm(opts: { csrfToken: string; error?: string }): string {
     </div>
     ${POWERED_BY_HTML}
   </div>
-  ${renderEmailTypoGuardScript('form-account-send-otp', 'email')}
+  ${renderEmailTypoGuardScript('form-account-send-otp', 'email', opts.cspNonce)}
 </body>
 </html>`
 }
@@ -179,13 +192,13 @@ function renderLoginForm(opts: { csrfToken: string; error?: string }): string {
 function renderOtpForm(opts: {
   email: string
   csrfToken: string
+  cspNonce: string
   otpLength: number
   otpCharset: 'numeric' | 'alphanumeric'
   error?: string
 }): string {
   const maskedEmail = maskEmail(opts.email)
   const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
-  const inputFilter = buildOtpInputFilter(opts.otpCharset)
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -217,7 +230,6 @@ function renderOtpForm(opts: {
                  autocapitalize="${inputProps.autocapitalize}"
                  placeholder="${inputProps.placeholder}"
                  class="otp-input"
-                 oninput="this.value=this.value.replace(${inputFilter.toString()},'')${opts.otpCharset === 'alphanumeric' ? '.toUpperCase()' : ''}"
                  style="letter-spacing: ${Math.max(2, Math.round(32 / opts.otpLength))}px">
         </div>
         <button type="submit" class="btn-primary">Verify</button>
@@ -230,6 +242,7 @@ function renderOtpForm(opts: {
     </div>
     ${POWERED_BY_HTML}
   </div>
+  ${renderOtpInputFilterScript('otp', opts.otpCharset, opts.cspNonce)}
 </body>
 </html>`
 }

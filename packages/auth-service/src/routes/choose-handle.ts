@@ -234,6 +234,7 @@ export function createChooseHandleRouter(
           branding.customCss,
           branding.customFaviconUrl,
           branding.customFaviconUrlDark,
+          res.locals.cspNonce as string,
         ),
       )
   })
@@ -317,6 +318,7 @@ export function createChooseHandleRouter(
             branding.customCss,
             branding.customFaviconUrl,
             branding.customFaviconUrlDark,
+            res.locals.cspNonce as string,
           ),
         )
       return
@@ -352,6 +354,7 @@ export function createChooseHandleRouter(
               branding.customCss,
               branding.customFaviconUrl,
               branding.customFaviconUrlDark,
+              res.locals.cspNonce as string,
             ),
           )
         return
@@ -369,6 +372,7 @@ export function createChooseHandleRouter(
             branding.customCss,
             branding.customFaviconUrl,
             branding.customFaviconUrlDark,
+            res.locals.cspNonce as string,
           ),
         )
       return
@@ -386,6 +390,7 @@ export function createChooseHandleRouter(
             branding.customCss,
             branding.customFaviconUrl,
             branding.customFaviconUrlDark,
+            res.locals.cspNonce as string,
           ),
         )
       return
@@ -496,6 +501,7 @@ export function renderChooseHandlePage(
   customCss?: string | null,
   customFaviconUrl?: string | null,
   customFaviconUrlDark?: string | null,
+  cspNonce?: string,
 ): string {
   // role=alert only on the populated branch: it is static at render
   // time, so the default assertive announcement is what we want. The
@@ -588,7 +594,7 @@ export function renderChooseHandlePage(
     ${POWERED_BY_HTML}
   </div>
 
-  <script>
+  <script${cspNonce ? ` nonce="${escapeHtml(cspNonce)}"` : ''}>
     (function() {
       var input = document.getElementById('handle-input');
       var statusEl = document.getElementById('handle-status');

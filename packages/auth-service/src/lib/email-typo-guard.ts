@@ -100,12 +100,18 @@ export function renderEmailTypoGuardMarkup(): string {
  * Input changes reveal likely corrections immediately. The capture-phase
  * submit listener remains as defence in depth, so a typo cannot fire an OTP
  * request until the user accepts or dismisses the suggestion.
+ *
+ * When `cspNonce` is supplied the tag is stamped with `nonce="..."` so it
+ * survives the auth-service's `script-src 'nonce-...'` policy; callers that
+ * render outside a nonce-bearing response omit it.
  */
 export function renderEmailTypoGuardScript(
   formId: string,
   inputId: string,
+  cspNonce?: string,
 ): string {
-  return `<script>
+  const nonceAttr = cspNonce ? ` nonce="${cspNonce}"` : ''
+  return `<script${nonceAttr}>
 (function() {
   var form = document.getElementById(${JSON.stringify(formId)});
   var input = document.getElementById(${JSON.stringify(inputId)});

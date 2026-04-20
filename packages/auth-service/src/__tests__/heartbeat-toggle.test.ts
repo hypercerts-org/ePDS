@@ -97,6 +97,7 @@ function renderLoginPageWithHeartbeat(heartbeatEnabled: boolean): string {
     pdsPublicUrl: 'https://pds.example.com',
     otpLength: 6,
     otpCharset: 'numeric',
+    cspNonce: 'test-nonce',
     heartbeatEnabled,
   })
 }
@@ -105,6 +106,7 @@ function renderRecoveryOtpFormWithHeartbeat(heartbeatEnabled: boolean): string {
   return renderRecoveryOtpForm({
     email: 'user@example.com',
     csrfToken: 'csrf',
+    cspNonce: 'test-nonce',
     requestUri: 'urn:ietf:params:oauth:request_uri:req-abc',
     otpLength: 6,
     otpCharset: 'numeric',

@@ -354,6 +354,12 @@ export function renderPreviewIndexPage(opts: {
   currentService: 'auth' | 'pds'
   authPublicUrl: string
   pdsPublicUrl: string
+  /**
+   * CSP nonce to stamp on the inline <script>. Required on services that
+   * emit a `script-src 'nonce-...'` CSP (auth-service); omit on services
+   * that don't set a CSP (pds-core).
+   */
+  cspNonce?: string
 }): string {
   const serviceName =
     opts.currentService === 'auth' ? 'auth-service' : 'pds-core'
@@ -382,7 +388,7 @@ export function renderPreviewIndexPage(opts: {
   <p>Alternatively, skip the field and append this query string to any of the links above:</p>
   <pre><code>?client_id=&lt;URL-of-your-client-metadata.json&gt;</code></pre>
   ${PREVIEW_CACHE_STATUS_HTML}
-  ${PREVIEW_CLIENT_ID_SCRIPT_HTML}
+  ${previewClientIdScriptHtml(opts.cspNonce)}
 </body>
 </html>`
 }
@@ -413,8 +419,7 @@ export const PREVIEW_CACHE_STATUS_HTML = `<section id="cache-status" class="cach
  * interpolated from user input — so it's safe to embed verbatim inside
  * a <script> tag.
  */
-export const PREVIEW_CLIENT_ID_SCRIPT_HTML = `<script>
-(function () {
+const PREVIEW_CLIENT_ID_SCRIPT_BODY = `(function () {
   var STORAGE_KEY = 'epds:preview:client_id';
   var input = document.getElementById('client-id-input');
   // Single shared link-rewriter so per-link controls and the
@@ -684,4 +689,22 @@ export const PREVIEW_CLIENT_ID_SCRIPT_HTML = `<script>
     setInterval(render, 1000);
   }
 })();
-</script>`
+`
+
+/**
+ * Inline <script> tag that wires the preview index page. If `cspNonce` is
+ * passed, the tag is stamped with `nonce="..."` so it passes a
+ * `script-src 'nonce-...'` CSP; otherwise it's emitted bare (for services
+ * like pds-core that don't set a CSP on preview pages).
+ */
+export function previewClientIdScriptHtml(cspNonce?: string): string {
+  const nonceAttr = cspNonce ? ` nonce="${cspNonce}"` : ''
+  return `<script${nonceAttr}>\n${PREVIEW_CLIENT_ID_SCRIPT_BODY}</script>`
+}
+
+/**
+ * Back-compat: the no-nonce variant of the inline script tag. Callers on
+ * services that set a CSP with `script-src 'nonce-...'` must use
+ * {@link previewClientIdScriptHtml} instead, passing the request nonce.
+ */
+export const PREVIEW_CLIENT_ID_SCRIPT_HTML = previewClientIdScriptHtml()
