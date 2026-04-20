@@ -147,7 +147,9 @@ export function createAuthService(config: AuthServiceConfig): {
       logger.error({ err, path: req.path }, 'Unhandled error in auth-service')
       if (res.headersSent) return next(err)
       if (req.accepts('html')) {
-        res.status(500).send(renderError('Something went wrong. Please try again.'))
+        res
+          .status(500)
+          .send(renderError('Something went wrong. Please try again.'))
       } else {
         res.status(500).json({ error: 'internal_error' })
       }
