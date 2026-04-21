@@ -57,6 +57,18 @@ describe('timingSafeEqual', () => {
   it('returns false for different lengths', () => {
     expect(timingSafeEqual('short', 'longer-string')).toBe(false)
   })
+
+  it('returns false (no throw) for inputs of equal code-unit length but different byte length', () => {
+    // Guards against a regression where the length check was done in
+    // JavaScript code units (a.length) but the underlying
+    // crypto.timingSafeEqual compares UTF-8 byte length, which throws
+    // RangeError when the two differ. A non-ASCII attacker-supplied
+    // value trivially hits this path.
+    const ascii = 'x'.repeat(30)
+    const nonAscii = 'é'.repeat(30)
+    expect(() => timingSafeEqual(nonAscii, ascii)).not.toThrow()
+    expect(timingSafeEqual(nonAscii, ascii)).toBe(false)
+  })
 })
 
 describe('verifyInternalSecret', () => {

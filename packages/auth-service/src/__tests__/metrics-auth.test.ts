@@ -72,5 +72,19 @@ describe('checkMetricsAuth', () => {
       const r = checkMetricsAuth(samelengthWrong, adminPassword)
       expect(r.ok).toBe(false)
     })
+
+    it('rejects a non-ASCII header with the same code-unit length as expected', () => {
+      // Guard against the timingSafeEqual footgun where an attacker
+      // can trigger RangeError (500) instead of 401 by sending a
+      // header whose JS .length matches but whose UTF-8 byte length
+      // does not (e.g. multibyte chars). Must return 401, not throw.
+      const expected = basic('admin', adminPassword)
+      const sameCodeUnitsWrong = 'é'.repeat(expected.length)
+      expect(() =>
+        checkMetricsAuth(sameCodeUnitsWrong, adminPassword),
+      ).not.toThrow()
+      const r = checkMetricsAuth(sameCodeUnitsWrong, adminPassword)
+      expect(r.ok).toBe(false)
+    })
   })
 })

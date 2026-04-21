@@ -55,10 +55,15 @@ When('the recovery page is loaded', async function (this: EpdsWorld) {
 
 Then('the response sets a CSRF cookie', function (this: EpdsWorld) {
   const { headers } = getCapturedResponse(this)
-  const setCookie = headers.get('set-cookie') ?? ''
-  if (!/epds_csrf=/.test(setCookie)) {
+  // `headers.get('set-cookie')` collapses multiple Set-Cookie values
+  // into a single comma-separated string in the Fetch API, which is
+  // ambiguous because cookie values may themselves contain commas
+  // (e.g. Expires=Thu, 01 Jan …). Use Headers.getSetCookie() (Node
+  // >=18) to get each cookie as its own entry.
+  const setCookies = headers.getSetCookie()
+  if (!setCookies.some((cookie) => /^epds_csrf=/.test(cookie))) {
     throw new Error(
-      `Expected Set-Cookie to include epds_csrf=..., got: ${setCookie || '(none)'}`,
+      `Expected Set-Cookie to include epds_csrf=..., got: ${setCookies.join(', ') || '(none)'}`,
     )
   }
 })
@@ -186,14 +191,38 @@ Then(
   },
 )
 
+function extractScriptSrcNonce(csp: string): string {
+  const scriptSrc = getScriptSrcDirective(csp)
+  const match = /'nonce-([A-Za-z0-9_-]+)'/.exec(scriptSrc)
+  if (!match) {
+    throw new Error(`script-src directive has no 'nonce-...': "${scriptSrc}"`)
+  }
+  return match[1]
+}
+
 Then(
   'the script-src directive carries a per-response nonce',
-  function (this: EpdsWorld) {
+  async function (this: EpdsWorld) {
+    // Assert two things: (a) the current response has a nonce-shaped
+    // token in script-src, and (b) the nonce is freshly generated per
+    // response — otherwise a hardcoded constant would pass (a) but
+    // defeat the whole point of a CSP nonce. Hit the same endpoint a
+    // second time and compare.
     const { headers } = getCapturedResponse(this)
-    const csp = headers.get('content-security-policy') ?? ''
-    const scriptSrc = getScriptSrcDirective(csp)
-    if (!/'nonce-[A-Za-z0-9_-]+'/.test(scriptSrc)) {
-      throw new Error(`script-src directive has no 'nonce-...': "${scriptSrc}"`)
+    const firstCsp = headers.get('content-security-policy') ?? ''
+    const firstNonce = extractScriptSrcNonce(firstCsp)
+
+    const previewUrl = `${testEnv.authUrl}/preview/login`
+    let second = await fetch(previewUrl, { redirect: 'manual' })
+    if (second.status === 404) {
+      second = await fetch(`${testEnv.authUrl}/health`, { redirect: 'manual' })
+    }
+    const secondCsp = second.headers.get('content-security-policy') ?? ''
+    const secondNonce = extractScriptSrcNonce(secondCsp)
+    if (firstNonce === secondNonce) {
+      throw new Error(
+        `CSP nonce reused across responses: "${firstNonce}" — expected a fresh nonce per request`,
+      )
     }
   },
 )
