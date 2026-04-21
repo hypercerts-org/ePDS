@@ -289,6 +289,7 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
         css,
         faviconUrl,
         faviconUrlDark,
+        res.locals.cspNonce as string,
       ),
     )
   })

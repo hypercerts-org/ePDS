@@ -1,4 +1,8 @@
-import { createLogger, getEpdsVersion } from '@certified-app/shared'
+import {
+  createLogger,
+  getEpdsVersion,
+  timingSafeEqual,
+} from '@certified-app/shared'
 import express from 'express'
 import cookieParser from 'cookie-parser'
 import * as path from 'node:path'
@@ -139,7 +143,7 @@ export function createAuthService(config: AuthServiceConfig): {
     const authHeader = req.headers.authorization
     const expected =
       'Basic ' + Buffer.from('admin:' + adminPassword).toString('base64')
-    if (!authHeader || authHeader !== expected) {
+    if (!authHeader || !timingSafeEqual(authHeader, expected)) {
       res.status(401).json({ error: 'Unauthorized' })
       return
     }
