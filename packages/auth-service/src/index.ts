@@ -1,8 +1,4 @@
-import {
-  createLogger,
-  getEpdsVersion,
-  timingSafeEqual,
-} from '@certified-app/shared'
+import { createLogger, getEpdsVersion } from '@certified-app/shared'
 import express from 'express'
 import cookieParser from 'cookie-parser'
 import * as path from 'node:path'
@@ -30,6 +26,7 @@ import { createRootRouter } from './routes/root.js'
 import { createTestHooksRouter } from './routes/test-hooks.js'
 import { resolveAuthPort } from './lib/resolve-port.js'
 import { createSecurityHeadersMiddleware } from './lib/security-headers.js'
+import { checkMetricsAuth } from './lib/metrics-auth.js'
 import {
   validateOtpCharset,
   validateOtpLength,
@@ -129,28 +126,15 @@ export function createAuthService(config: AuthServiceConfig): {
   app.use(createPreviewRouter(ctx))
   app.use(createPreviewEmailsRouter(ctx))
 
-  // Metrics endpoint (protect with admin auth in production)
+  // Metrics endpoint — HTTP Basic auth, deny-by-default. See
+  // packages/auth-service/src/lib/metrics-auth.ts for the rules.
   app.get('/metrics', (req, res) => {
-    // Metrics expose process-level signal (uptime, RSS, DB counts) that
-    // we don't want leaking unauthenticated. Deny-by-default: if no
-    // admin password is configured, the endpoint is unavailable rather
-    // than open.
-    const adminPassword = process.env.PDS_ADMIN_PASSWORD
-    if (!adminPassword) {
-      res
-        .set('WWW-Authenticate', 'Basic realm="metrics"')
-        .status(401)
-        .json({ error: 'Unauthorized' })
-      return
-    }
-    const authHeader = req.headers.authorization
-    const expected =
-      'Basic ' + Buffer.from('admin:' + adminPassword).toString('base64')
-    if (!authHeader || !timingSafeEqual(authHeader, expected)) {
-      res
-        .set('WWW-Authenticate', 'Basic realm="metrics"')
-        .status(401)
-        .json({ error: 'Unauthorized' })
+    const auth = checkMetricsAuth(
+      req.headers.authorization,
+      process.env.PDS_ADMIN_PASSWORD,
+    )
+    if (!auth.ok) {
+      res.set(auth.headers).status(auth.status).json(auth.body)
       return
     }
     const metrics = ctx.db.getMetrics()
