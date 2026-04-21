@@ -35,6 +35,7 @@ Feature: Passwordless authentication via email OTP
     Then the verification form shows an error message
     And the sign-in is not completed
 
+  @email
   Scenario: Returning user authenticates with email OTP
     Given a returning user has a PDS account
     When the demo client initiates an OAuth login
