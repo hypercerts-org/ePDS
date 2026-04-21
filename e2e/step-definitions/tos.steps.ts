@@ -157,13 +157,17 @@ When(
     const otp = await extractOtp(message.ID)
     this.otpCode = otp
 
-    // Deliberately leave #tos-accept unchecked. The client-side gate
-    // (if (isNewUser === true && !tosChecked)) would block submit — strip
-    // the `required` attribute so the form actually POSTs, letting the
-    // server's enforceTosAcceptance hook return the 400 we want to test.
-    // Remove the `required` attribute so the form can submit with the
-    // checkbox unchecked — letting the server's enforceTosAcceptance hook
-    // reject with 400 (the behavior under test).
+    // Deliberately leave #tos-accept unchecked. This scenario verifies the
+    // *client-side* guard: by the time we click Verify, #tos-field is
+    // visible (the prior step waited for it) so isNewUser === true, and the
+    // submit handler short-circuits with showError(...) before any fetch is
+    // issued. The "sign-in is not completed" assertion below confirms the UI
+    // stayed put. The server-side enforceTosAcceptance hook is covered
+    // separately by the direct-HTTP scenario in features/security.feature.
+    //
+    // Strip the HTML5 `required` attribute so the browser's native form
+    // validation doesn't block submission first — we want the JS guard to
+    // be the thing that fires.
     await page.evaluate(() => {
       document.getElementById('tos-accept')?.removeAttribute('required')
     })
