@@ -6,6 +6,8 @@
  * both services.
  */
 
+import { escapeHtml } from './html.js'
+
 /**
  * <label> + <input> markup for the persisted client_id field. The
  * surrounding page is expected to have CSS that styles label/input — we
@@ -698,7 +700,10 @@ const PREVIEW_CLIENT_ID_SCRIPT_BODY = `(function () {
  * like pds-core that don't set a CSP on preview pages).
  */
 export function previewClientIdScriptHtml(cspNonce?: string): string {
-  const nonceAttr = cspNonce ? ` nonce="${cspNonce}"` : ''
+  // escapeHtml defence-in-depth: callers currently pass a base64url
+  // crypto.randomBytes(16) nonce so nothing unsafe reaches this attribute,
+  // but escaping keeps the helper safe if that ever changes.
+  const nonceAttr = cspNonce ? ` nonce="${escapeHtml(cspNonce)}"` : ''
   return `<script${nonceAttr}>\n${PREVIEW_CLIENT_ID_SCRIPT_BODY}</script>`
 }
 

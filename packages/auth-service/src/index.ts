@@ -137,14 +137,20 @@ export function createAuthService(config: AuthServiceConfig): {
     // than open.
     const adminPassword = process.env.PDS_ADMIN_PASSWORD
     if (!adminPassword) {
-      res.status(401).json({ error: 'Unauthorized' })
+      res
+        .set('WWW-Authenticate', 'Basic realm="metrics"')
+        .status(401)
+        .json({ error: 'Unauthorized' })
       return
     }
     const authHeader = req.headers.authorization
     const expected =
       'Basic ' + Buffer.from('admin:' + adminPassword).toString('base64')
     if (!authHeader || !timingSafeEqual(authHeader, expected)) {
-      res.status(401).json({ error: 'Unauthorized' })
+      res
+        .set('WWW-Authenticate', 'Basic realm="metrics"')
+        .status(401)
+        .json({ error: 'Unauthorized' })
       return
     }
     const metrics = ctx.db.getMetrics()
