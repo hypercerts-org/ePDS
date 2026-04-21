@@ -696,8 +696,9 @@ const PREVIEW_CLIENT_ID_SCRIPT_BODY = `(function () {
 /**
  * Inline <script> tag that wires the preview index page. If `cspNonce` is
  * passed, the tag is stamped with `nonce="..."` so it passes a
- * `script-src 'nonce-...'` CSP; otherwise it's emitted bare (for services
- * like pds-core that don't set a CSP on preview pages).
+ * `script-src 'nonce-...'` CSP. Otherwise the tag is emitted bare, which
+ * only works for callers whose CSP permits this inline script without a
+ * nonce (e.g. a `script-src` that still includes `'unsafe-inline'`).
  */
 export function previewClientIdScriptHtml(cspNonce?: string): string {
   // escapeHtml defence-in-depth: callers currently pass a base64url
