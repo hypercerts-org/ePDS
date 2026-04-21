@@ -24,6 +24,7 @@ Feature: Passwordless authentication via email OTP
     And the OTP form shows a Terms of Service checkbox
     When the user accepts the Terms of Service
     And the user enters the OTP code from the email
+    And the user picks a handle
     Then the browser is redirected back to the demo client
     And the demo client has a valid OAuth access token
 

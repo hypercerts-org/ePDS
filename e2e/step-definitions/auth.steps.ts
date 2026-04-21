@@ -318,6 +318,13 @@ When('enters an incorrect OTP code', async function (this: EpdsWorld) {
   const wrongOtp = await buildIncorrectOtpCode(this)
 
   await page.fill('#code', wrongOtp)
+  // New users see a ToS checkbox that becomes `required` once the client-side
+  // check resolves. We want to reach the server-side OTP validation, so accept
+  // ToS if the field has been revealed.
+  const tosField = page.locator('#tos-field')
+  if (await tosField.isVisible()) {
+    await page.check('#tos-accept')
+  }
   await page.click('#form-verify-otp .btn-primary')
 })
 
@@ -326,6 +333,14 @@ When(
   async function (this: EpdsWorld, times: number) {
     const page = getPage(this)
     const wrongOtp = await buildIncorrectOtpCode(this)
+
+    // New users see a ToS checkbox that becomes `required` once the client-side
+    // check resolves. Accept it once up front so the POSTs go through on every
+    // iteration.
+    const tosField = page.locator('#tos-field')
+    if (await tosField.isVisible()) {
+      await page.check('#tos-accept')
+    }
 
     for (let i = 0; i < times; i++) {
       await page.fill('#code', wrongOtp)
