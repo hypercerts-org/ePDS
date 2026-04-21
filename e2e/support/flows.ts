@@ -117,6 +117,11 @@ export async function startSignUpAwaitingConsent(
   const message = await waitForEmail(`to:${email}`)
   const otp = await extractOtp(message.ID)
   await page.fill('#code', otp)
+  // New users must accept the Terms of Service before the client-side submit
+  // guard (and the server-side enforceTosAcceptance hook) will let the sign-in
+  // through. The #tos-field is revealed once checkIsNewUser resolves to true.
+  await expect(page.locator('#tos-field')).toBeVisible({ timeout: 10_000 })
+  await page.check('#tos-accept')
   await page.click('#form-verify-otp .btn-primary')
 
   await pickHandle(world)
@@ -154,6 +159,11 @@ export async function createAccountViaOAuth(
   const message = await waitForEmail(`to:${email}`)
   const otp = await extractOtp(message.ID)
   await page.fill('#code', otp)
+  // New users must accept the Terms of Service before the client-side submit
+  // guard (and the server-side enforceTosAcceptance hook) will let the sign-in
+  // through. The #tos-field is revealed once checkIsNewUser resolves to true.
+  await expect(page.locator('#tos-field')).toBeVisible({ timeout: 10_000 })
+  await page.check('#tos-accept')
   await page.click('#form-verify-otp .btn-primary')
 
   // Pick a handle on the /auth/choose-handle page. The handle-picking logic
