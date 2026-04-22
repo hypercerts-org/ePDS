@@ -198,9 +198,14 @@ export function createRecoveryRouter(
     }
 
     try {
-      // Verify OTP via better-auth — this creates/updates a session
+      // Verify OTP via better-auth — this creates/updates a session.
+      //
+      // `tosAccepted: true` bypasses the enforceTosAcceptance hook. Recovery
+      // is only reachable for existing users who have already accepted the
+      // ToS at sign-up. The hook otherwise treats the backup email as a
+      // "new user" (no PDS account is bound to it) and would reject with 400.
       const response = await auth.api.signInEmailOTP({
-        body: { email, otp: code.toUpperCase() },
+        body: { email, otp: code.toUpperCase(), tosAccepted: true },
         asResponse: true,
       })
 
