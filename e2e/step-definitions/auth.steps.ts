@@ -318,13 +318,14 @@ When('enters an incorrect OTP code', async function (this: EpdsWorld) {
   const wrongOtp = await buildIncorrectOtpCode(this)
 
   await page.fill('#code', wrongOtp)
-  // New users see a ToS checkbox that becomes `required` once the client-side
-  // check resolves. We want to reach the server-side OTP validation, so accept
-  // ToS if the field has been revealed.
-  const tosField = page.locator('#tos-field')
-  if (await tosField.isVisible()) {
-    await page.check('#tos-accept')
-  }
+  // New users see a ToS checkbox that becomes `required` once the async
+  // new-user check resolves. `requests an OTP for a unique test email`
+  // always creates a new user, so wait for #tos-field to appear and check
+  // it — otherwise the HTML5 `required` guard or the JS submit guard will
+  // short-circuit before the server OTP validation we actually want to
+  // exercise here. Synchronous isVisible() races the background check.
+  await expect(page.locator('#tos-field')).toBeVisible({ timeout: 10_000 })
+  await page.check('#tos-accept')
   await page.click('#form-verify-otp .btn-primary')
 })
 
@@ -334,13 +335,13 @@ When(
     const page = getPage(this)
     const wrongOtp = await buildIncorrectOtpCode(this)
 
-    // New users see a ToS checkbox that becomes `required` once the client-side
-    // check resolves. Accept it once up front so the POSTs go through on every
-    // iteration.
-    const tosField = page.locator('#tos-field')
-    if (await tosField.isVisible()) {
-      await page.check('#tos-accept')
-    }
+    // New users see a ToS checkbox that becomes `required` once the async
+    // new-user check resolves. `requests an OTP for a unique test email`
+    // always creates a new user, so wait for #tos-field and accept the ToS
+    // once up front so the POSTs go through on every iteration. Synchronous
+    // isVisible() races the background check.
+    await expect(page.locator('#tos-field')).toBeVisible({ timeout: 10_000 })
+    await page.check('#tos-accept')
 
     for (let i = 0; i < times; i++) {
       await page.fill('#code', wrongOtp)
