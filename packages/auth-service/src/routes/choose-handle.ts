@@ -495,13 +495,13 @@ export function createChooseHandleRouter(
 
 export function renderChooseHandlePage(
   handleDomain: string,
-  error?: string,
-  csrfToken?: string,
-  showRandomButton?: boolean,
-  customCss?: string | null,
-  customFaviconUrl?: string | null,
-  customFaviconUrlDark?: string | null,
-  cspNonce?: string,
+  error: string | undefined,
+  csrfToken: string | undefined,
+  showRandomButton: boolean,
+  customCss: string | null,
+  customFaviconUrl: string | null,
+  customFaviconUrlDark: string | null,
+  cspNonce: string,
 ): string {
   // role=alert only on the populated branch: it is static at render
   // time, so the default assertive announcement is what we want. The
@@ -594,7 +594,7 @@ export function renderChooseHandlePage(
     ${POWERED_BY_HTML}
   </div>
 
-  <script${cspNonce ? ` nonce="${escapeHtml(cspNonce)}"` : ''}>
+  <script nonce="${escapeHtml(cspNonce)}">
     (function() {
       var input = document.getElementById('handle-input');
       var statusEl = document.getElementById('handle-status');

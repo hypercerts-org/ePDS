@@ -357,9 +357,11 @@ export function renderPreviewIndexPage(opts: {
   authPublicUrl: string
   pdsPublicUrl: string
   /**
-   * CSP nonce to stamp on the inline <script>. Required on services that
-   * emit a `script-src 'nonce-...'` CSP (auth-service); omit on services
-   * that don't set a CSP (pds-core).
+   * CSP nonce to stamp on the inline <script>. Required when this preview
+   * index is served with a `script-src 'nonce-...'` CSP (e.g. auth-service);
+   * omit when it's served with a policy that permits inline scripts
+   * without a nonce (e.g. pds-core's `/preview` index, which doesn't set
+   * a CSP at all, or any page served with `script-src ... 'unsafe-inline'`).
    */
   cspNonce?: string
 }): string {
