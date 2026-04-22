@@ -212,10 +212,16 @@ Then(
     const firstCsp = headers.get('content-security-policy') ?? ''
     const firstNonce = extractScriptSrcNonce(firstCsp)
 
+    // Under Node's fetch/undici, an un-drained response body keeps the
+    // socket open and can leave open-handles after the test exits. Drain
+    // each response's body (via .text()) before moving on, matching the
+    // pattern in captureGet() above.
     const previewUrl = `${testEnv.authUrl}/preview/login`
     let second = await fetch(previewUrl, { redirect: 'manual' })
+    await second.text()
     if (second.status === 404) {
       second = await fetch(`${testEnv.authUrl}/health`, { redirect: 'manual' })
+      await second.text()
     }
     const secondCsp = second.headers.get('content-security-policy') ?? ''
     const secondNonce = extractScriptSrcNonce(secondCsp)
