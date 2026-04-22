@@ -56,3 +56,11 @@ export function validateLocalPart(
   }
   return normalizedLocal
 }
+
+/** Valid handle assignment modes for the OAuth signup flow. */
+export const VALID_HANDLE_MODES = [
+  'random',
+  'picker',
+  'picker-with-random',
+] as const
+export type HandleMode = (typeof VALID_HANDLE_MODES)[number]

@@ -1,0 +1,137 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Generate Release Bot App Token
+        id: generate-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Persist releasebot app credentials so the changesets/action push
+          # can bypass branch protection rules on main.
+          token: ${{ steps.generate-token.outputs.token }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      # Only main is supported. No beta/prerelease channel yet.
+      - name: Validate branch
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::Release workflow can only be run from the 'main' branch."
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      # Fail fast before any versioning/git operations.
+      - run: pnpm build
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      # Guard: no prerelease mode should be active on main.
+      - name: Verify no active prerelease mode
+        run: |
+          if [ -f .changeset/pre.json ]; then
+            mode=$(jq -r '.mode' .changeset/pre.json)
+            if [ "$mode" = "pre" ]; then
+              echo "::error::Active prerelease mode detected on main."
+              echo "Prerelease mode must be exited before running a stable release."
+              exit 1
+            fi
+            echo "Prerelease mode is not active (mode=$mode)"
+          else
+            echo "No prerelease mode detected"
+          fi
+
+      # Changesets is configured (.changeset/config.json) to scope only the
+      # root `ePDS` package — the packages/* subpackages are not tracked,
+      # so there is a single CHANGELOG.md at the repo root and a single
+      # release per version.
+      #
+      # On each run:
+      #   1. If pending changesets exist, opens/updates a "Version Packages" PR
+      #      that bumps the root package.json and updates CHANGELOG.md.
+      #   2. If the previous Version Packages PR has been merged (no pending
+      #      changesets, version ahead of tag), runs `pnpm release` which
+      #      calls `changeset tag`. Because the root package is private,
+      #      nothing is published to any registry; `changesets/action` then
+      #      creates the `v<version>` git tag and the single GitHub Release
+      #      whose body is the CHANGELOG entry for this version.
+      - name: Create Release Pull Request or Tag Release
+        id: changesets
+        uses: changesets/action@6a0a831ff30acef54f2c6aa1cbbc1096b066edaf # v1.7.0
+        with:
+          publish: pnpm release
+          version: pnpm version-packages
+          title: 'chore: release'
+          commit: 'chore: release'
+          createGithubReleases: true
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+
+      # changesets/action does not support templating the version into the
+      # PR title (see changesets/action#388). As a workaround, rename the
+      # Release PR to include the version number after the action has run
+      # the version bump. The commit message on the release branch is left
+      # as the static "chore: release" value — it gets rewritten on every
+      # re-run of this workflow, and the merge commit title on main is
+      # controlled by the person merging the PR.
+      - name: Rename Release PR with version
+        if: steps.changesets.outputs.pullRequestNumber != ''
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          PR_NUMBER: ${{ steps.changesets.outputs.pullRequestNumber }}
+        run: |
+          set -o pipefail
+          if ! PACKAGE_JSON=$(gh api \
+              "repos/${{ github.repository }}/contents/package.json?ref=changeset-release/main" \
+              -H "Accept: application/vnd.github.raw"); then
+            echo "::warning::Could not fetch package.json from changeset-release/main; leaving PR title unchanged."
+            exit 0
+          fi
+          VERSION=$(node -e "
+            try {
+              const v = JSON.parse(process.argv[1]).version;
+              if (!v) process.exit(1);
+              process.stdout.write(v);
+            } catch (e) { process.exit(1); }
+          " "$PACKAGE_JSON" || true)
+          if [ -z "$VERSION" ]; then
+            echo "::warning::Could not parse version from package.json; leaving PR title unchanged."
+            exit 0
+          fi
+          NEW_TITLE="prepare for release v$VERSION"
+          echo "Renaming PR #$PR_NUMBER to: $NEW_TITLE"
+          if ! gh pr edit "$PR_NUMBER" --title "$NEW_TITLE"; then
+            echo "::warning::Failed to rename PR #$PR_NUMBER; leaving title unchanged."
+            exit 0
+          fi
+
+      - name: Log release
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "Released ePDS v${VERSION}"

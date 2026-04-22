@@ -9,14 +9,18 @@
  * The instance is mounted at /api/auth/* alongside the existing custom routes.
  * No existing behavior is changed — this is a foundation-only step.
  */
-import Database from 'better-sqlite3'
+import type { EpdsDb } from '@certified-app/shared'
+import { createLogger } from '@certified-app/shared'
 import { betterAuth } from 'better-auth'
+import { generateRandomString } from 'better-auth/crypto'
 import { getMigrations } from 'better-auth/db'
 import { emailOTP } from 'better-auth/plugins'
-import { createLogger } from '@certified-app/shared'
-import type { EpdsDb } from '@certified-app/shared'
+import Database from 'better-sqlite3'
 import type { EmailSender } from './email/sender.js'
 import { getDidByEmail } from './lib/get-did-by-email.js'
+import { ensurePdsUrl } from './lib/pds-url.js'
+
+export type BetterAuthInstance = ReturnType<typeof createBetterAuth>
 
 const logger = createLogger('auth:better-auth')
 
@@ -68,10 +72,16 @@ export let socialProviders: Record<
  * Run better-auth migrations at startup — creates user, session, account,
  * and verification tables if they don't exist yet. Safe to call on every
  * startup (no-ops when tables are already present).
+ *
+ * The otpLength parameter is accepted for API consistency but does not affect
+ * the schema — better-auth stores OTP codes as hashed strings regardless of
+ * length, so the column definition is the same for any valid otpLength.
  */
 export async function runBetterAuthMigrations(
   dbLocation: string,
   authHostname: string,
+  otpLength: number,
+  otpCharset: 'numeric' | 'alphanumeric' = 'numeric',
 ): Promise<void> {
   const betterAuthDb = new Database(dbLocation)
   const tempAuth = betterAuth({
@@ -81,10 +91,13 @@ export async function runBetterAuthMigrations(
     basePath: '/api/auth',
     plugins: [
       emailOTP({
-        otpLength: 8,
+        otpLength,
         expiresIn: 600,
         allowedAttempts: 5,
         storeOTP: 'hashed',
+        ...(otpCharset === 'alphanumeric'
+          ? { generateOTP: () => generateRandomString(otpLength, 'A-Z', '0-9') }
+          : {}),
         async sendVerificationOTP() {},
       }),
     ],
@@ -108,8 +121,12 @@ export async function runBetterAuthMigrations(
   betterAuthDb.close()
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createBetterAuth(emailSender: EmailSender, db: EpdsDb): any {
+export function createBetterAuth(
+  emailSender: EmailSender,
+  db: EpdsDb,
+  otpLength: number,
+  otpCharset: 'numeric' | 'alphanumeric' = 'numeric',
+) {
   const dbLocation = process.env.DB_LOCATION ?? './data/epds.sqlite'
   const authHostname = process.env.AUTH_HOSTNAME ?? 'auth.localhost'
   const pdsName = process.env.SMTP_FROM_NAME ?? 'ePDS'
@@ -133,7 +150,11 @@ export function createBetterAuth(emailSender: EmailSender, db: EpdsDb): any {
     // Use AUTH_SESSION_SECRET so better-auth doesn't fall back to its
     // default secret (which throws in production).
     secret: process.env.AUTH_SESSION_SECRET,
-    database: betterAuthDb,
+    // TS4058: BetterSqlite3.Database leaks into the inferred return type when
+    // passed directly; casting to `any` breaks the inference chain so declaration
+    // emit succeeds without casting the entire createBetterAuth return value.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    database: betterAuthDb as any,
     baseURL: `https://${authHostname}`,
     basePath: '/api/auth',
 
@@ -146,10 +167,13 @@ export function createBetterAuth(emailSender: EmailSender, db: EpdsDb): any {
 
     plugins: [
       emailOTP({
-        otpLength: 8,
+        otpLength,
         expiresIn: 600,
         allowedAttempts: 5,
         storeOTP: 'hashed',
+        ...(otpCharset === 'alphanumeric'
+          ? { generateOTP: () => generateRandomString(otpLength, 'A-Z', '0-9') }
+          : {}),
 
         /**
          * Wire OTP sending to the existing EmailSender.
@@ -164,9 +188,10 @@ export function createBetterAuth(emailSender: EmailSender, db: EpdsDb): any {
         async sendVerificationOTP({ email, otp }, ctx) {
           // Determine whether this is a first-time sign-up or a returning user
           // by checking if a PDS account already exists for this email.
-          const pdsUrl =
-            process.env.PDS_INTERNAL_URL ||
-            `https://${process.env.PDS_HOSTNAME ?? 'localhost'}`
+          const pdsUrl = ensurePdsUrl(
+            process.env.PDS_INTERNAL_URL,
+            `https://${process.env.PDS_HOSTNAME ?? 'localhost'}`,
+          )
           const internalSecret = process.env.EPDS_INTERNAL_SECRET ?? ''
           const did = await getDidByEmail(email, pdsUrl, internalSecret)
           const isNewUser = !did

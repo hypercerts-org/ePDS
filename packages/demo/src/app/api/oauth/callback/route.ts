@@ -20,6 +20,7 @@ import {
   PDS_URL,
   PLC_DIRECTORY_URL,
 } from '@/lib/auth'
+import { signClientAssertion } from '@/lib/client-jwk'
 import { cookies } from 'next/headers'
 import {
   getOAuthSessionFromCookie,
@@ -60,6 +61,9 @@ export async function GET(request: NextRequest) {
 
     const codeVerifier = stateData.codeVerifier
     const tokenUrl = stateData.tokenEndpoint || `${PDS_URL}/oauth/token`
+    // Authorization server issuer identifier from the login-time
+    // discovery, used as the `aud` claim on client_assertion JWTs.
+    const issuer = stateData.issuer
 
     const clientId = `${baseUrl}/client-metadata.json`
     const redirectUri = `${baseUrl}/api/oauth/callback`
@@ -76,6 +80,30 @@ export async function GET(request: NextRequest) {
       client_id: clientId,
       code_verifier: codeVerifier,
     })
+
+    // If this demo is configured as a confidential OAuth client
+    // (EPDS_CLIENT_PRIVATE_JWK set), sign a client_assertion and add
+    // it to the token exchange request. This is required to convince
+    // @atproto/oauth-provider to honour previously-recorded consent
+    // grants on return logins — otherwise the upstream force-consent
+    // rule for public clients kicks in. See HYPER-270 for the full
+    // diagnosis.
+    //
+    // The `aud` claim MUST be the authorization server's issuer
+    // identifier (not the token endpoint URL) — upstream atproto
+    // explicitly checks `audience: this.issuer` when verifying the
+    // client_assertion (see @atproto/oauth-provider's client.ts).
+    const clientAssertion = await signClientAssertion({
+      clientId,
+      audience: issuer,
+    })
+    if (clientAssertion) {
+      tokenBody.set(
+        'client_assertion_type',
+        'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
+      )
+      tokenBody.set('client_assertion', clientAssertion)
+    }
 
     // First attempt
     let dpopProof = createDpopProof({
@@ -105,6 +133,17 @@ export async function GET(request: NextRequest) {
           url: tokenUrl,
           nonce: dpopNonce,
         })
+
+        // Regenerate the client_assertion for the retry so its jti is
+        // fresh (see the matching comment in the PAR retry path in
+        // api/oauth/login/route.ts).
+        const clientAssertionRetry = await signClientAssertion({
+          clientId,
+          audience: issuer,
+        })
+        if (clientAssertionRetry) {
+          tokenBody.set('client_assertion', clientAssertionRetry)
+        }
 
         tokenRes = await fetch(tokenUrl, {
           method: 'POST',

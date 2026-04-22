@@ -1,8 +1,17 @@
 import pino from 'pino'
 
-const LOG_LEVEL =
-  process.env.LOG_LEVEL ||
-  (process.env.NODE_ENV === 'development' ? 'debug' : 'info')
+function defaultLogLevel(): string {
+  switch (process.env.NODE_ENV) {
+    case 'development':
+      return 'debug'
+    case 'test':
+      return 'silent'
+    default:
+      return 'info'
+  }
+}
+
+const LOG_LEVEL = process.env.LOG_LEVEL || defaultLogLevel()
 
 export function createLogger(name: string): pino.Logger {
   return pino({

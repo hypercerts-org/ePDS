@@ -9,6 +9,10 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { getSessionFromCookie, SESSION_COOKIE } from '@/lib/session'
 import { AppLogo } from '../components/AppLogo'
+import { getPageTheme } from '@/lib/theme'
+
+// Force runtime rendering so EPDS_CLIENT_THEME is read at request time
+export const dynamic = 'force-dynamic'
 
 async function signOut() {
   'use server'
@@ -26,6 +30,8 @@ export default async function Welcome() {
     redirect('/')
   }
 
+  const t = getPageTheme()
+
   return (
     <div
       style={{
@@ -34,7 +40,7 @@ export default async function Welcome() {
         justifyContent: 'center',
         minHeight: '100vh',
         padding: '20px',
-        background: '#f8f9fa',
+        background: t?.bg ?? '#f8f9fa',
       }}
     >
       <div
@@ -44,21 +50,21 @@ export default async function Welcome() {
           textAlign: 'center',
         }}
       >
-        <AppLogo size={64} />
+        <AppLogo size={64} logoBg={t?.logoBg} />
         <h1
           style={{
             fontSize: '22px',
             fontWeight: 600,
-            color: '#1a1a2e',
+            color: t?.text ?? '#1a1a2e',
             margin: '12px 0 4px',
           }}
         >
-          ePDS Demo
+          {process.env.EPDS_CLIENT_NAME ?? 'ePDS Demo'}
         </h1>
         <p
           style={{
             fontSize: '17px',
-            color: '#6b7280',
+            color: t?.textMuted ?? '#6b7280',
             lineHeight: 1.6,
             margin: '0 0 24px 0',
           }}
@@ -68,11 +74,11 @@ export default async function Welcome() {
 
         <div
           style={{
-            background: '#fff',
+            background: t?.surface ?? '#fff',
             borderRadius: '12px',
             padding: '28px 32px',
             textAlign: 'left',
-            boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+            boxShadow: t?.surfaceShadow ?? '0 1px 4px rgba(0,0,0,0.06)',
             marginBottom: '32px',
           }}
         >
@@ -81,7 +87,7 @@ export default async function Welcome() {
               style={{
                 fontSize: '12px',
                 fontWeight: 600,
-                color: '#6b7280',
+                color: t?.textMuted ?? '#6b7280',
                 textTransform: 'uppercase',
                 letterSpacing: '0.5px',
                 marginBottom: '4px',
@@ -89,7 +95,7 @@ export default async function Welcome() {
             >
               Handle
             </div>
-            <div style={{ fontSize: '17px', color: '#1a1a2e' }}>
+            <div style={{ fontSize: '17px', color: t?.text ?? '#1a1a2e' }}>
               @{session.userHandle}
             </div>
           </div>
@@ -98,7 +104,7 @@ export default async function Welcome() {
               style={{
                 fontSize: '12px',
                 fontWeight: 600,
-                color: '#6b7280',
+                color: t?.textMuted ?? '#6b7280',
                 textTransform: 'uppercase',
                 letterSpacing: '0.5px',
                 marginBottom: '4px',
@@ -109,7 +115,7 @@ export default async function Welcome() {
             <div
               style={{
                 fontSize: '13px',
-                color: '#6b7280',
+                color: t?.textMuted ?? '#6b7280',
                 fontFamily: "'SF Mono', Menlo, Consolas, monospace",
                 wordBreak: 'break-all',
               }}
@@ -130,7 +136,7 @@ export default async function Welcome() {
               fontSize: '16px',
               fontWeight: 500,
               color: '#ffffff',
-              background: '#2563eb',
+              background: t?.primary ?? '#2563eb',
               border: 'none',
               borderRadius: '8px',
               cursor: 'pointer',

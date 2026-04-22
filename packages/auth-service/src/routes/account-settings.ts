@@ -9,6 +9,7 @@ import {
 } from '@certified-app/shared'
 import { fromNodeHeaders } from 'better-auth/node'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
+import { ensurePdsUrl } from '../lib/pds-url.js'
 
 const logger = createLogger('auth:account-settings')
 
@@ -47,7 +48,10 @@ export function createAccountSettingsRouter(
   const router = Router()
   const requireAuth = requireBetterAuth(auth)
 
-  const pdsUrl = process.env.PDS_INTERNAL_URL || ctx.config.pdsPublicUrl
+  const pdsUrl = ensurePdsUrl(
+    process.env.PDS_INTERNAL_URL,
+    ctx.config.pdsPublicUrl,
+  )
   const internalSecret = process.env.EPDS_INTERNAL_SECRET ?? ''
 
   // GET /account - main settings page
@@ -560,8 +564,8 @@ const SETTINGS_CSS = `
   .session-agent { display: block; font-size: 13px; color: #333; }
   .session-date { display: block; font-size: 12px; color: #999; }
   .info { color: #666; font-size: 14px; line-height: 1.5; margin-bottom: 12px; }
-  .inline-form { display: flex; gap: 8px; margin-top: 12px; }
-  .inline-form input[type="email"] { flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+  .inline-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .inline-form input[type="text"], .inline-form input[type="email"] { flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; min-width: 120px; }
   .btn-primary-sm { padding: 8px 16px; background: #0f1828; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; white-space: nowrap; }
   .btn-primary-sm:hover { background: #1a2a40; }
   .btn-secondary { color: #0f1828; background: none; border: none; font-size: 14px; cursor: pointer; text-decoration: underline; }
@@ -569,7 +573,7 @@ const SETTINGS_CSS = `
   .btn-danger:hover { background: #c82333; }
   .btn-danger-sm { padding: 4px 12px; background: none; color: #dc3545; border: 1px solid #dc3545; border-radius: 4px; font-size: 12px; cursor: pointer; }
   .btn-danger-sm:hover { background: #dc3545; color: white; }
-  .handle-suffix { font-size: 14px; color: #666; white-space: nowrap; align-self: center; }
+  .handle-suffix { font-size: 14px; color: #666; white-space: nowrap; align-self: center; overflow: hidden; text-overflow: ellipsis; }
   .danger-zone { border-color: #f5c6cb; }
   .danger-zone h2 { color: #dc3545; }
   details summary { list-style: none; }

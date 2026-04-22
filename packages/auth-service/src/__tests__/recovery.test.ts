@@ -119,30 +119,6 @@ describe('Recovery flow: auth_flow creation for request_uri threading', () => {
   })
 })
 
-describe('Recovery flow: OTP pattern (8 digits)', () => {
-  it('OTP sent by better-auth is 8 digits (configured in emailOTP plugin)', () => {
-    // Verify the configured OTP length matches what users expect
-    const OTP_LENGTH = 8
-    const pattern = new RegExp(`^[0-9]{${OTP_LENGTH}}$`)
-
-    // Simulate an 8-digit OTP
-    const otp = '12345678'
-    expect(pattern.test(otp)).toBe(true)
-
-    // 6 digits should not match (old format)
-    expect(pattern.test('123456')).toBe(false)
-  })
-
-  it('OTP entry form uses maxlength=8 and pattern [0-9]{8}', () => {
-    // This is a documentation test confirming the UI constraints
-    // match the better-auth configuration (otpLength: 8)
-    const maxlength = 8
-    const pattern = '[0-9]{8}'
-    expect(maxlength).toBe(8)
-    expect(pattern).toContain('8')
-  })
-})
-
 describe('Recovery flow: /auth/complete bridge integration', () => {
   let db: EpdsDb
   let dbPath: string

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.1.3/schema.json",
+  "changelog": [
+    "@changesets/changelog-github",
+    { "repo": "hypercerts-org/ePDS" }
+  ],
+  "commit": false,
+  "fixed": [],
+  "linked": [],
+  "access": "restricted",
+  "privatePackages": { "version": true, "tag": true },
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": []
+}

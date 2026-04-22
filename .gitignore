@@ -17,6 +17,10 @@ data/
 # test coverage reports
 coverage/
 
+# E2E test artifacts
+reports/
+.e2e-dist/
+
 # beads runtime files (Dolt server state, not repo data)
 .beads/dolt-server.*
 .beads/dolt-monitor.pid
@@ -24,3 +28,9 @@ coverage/
 # bv (beads viewer) local config and caches
 .bv/
 tmp/
+
+# Claude Code per-user local permission overrides
+.claude/settings.local.json
+
+# Docker build artifact (version stamp)
+.epds-version

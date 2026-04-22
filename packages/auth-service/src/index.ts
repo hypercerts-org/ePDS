@@ -1,4 +1,4 @@
-import { createLogger } from '@certified-app/shared'
+import { createLogger, getEpdsVersion } from '@certified-app/shared'
 import express from 'express'
 import cookieParser from 'cookie-parser'
 import * as path from 'node:path'
@@ -10,12 +10,13 @@ import { createBetterAuth, runBetterAuthMigrations } from './better-auth.js'
 import { csrfProtection } from './middleware/csrf.js'
 import { requestRateLimit } from './middleware/rate-limit.js'
 import { createLoginPageRouter } from './routes/login-page.js'
-import { createConsentRouter } from './routes/consent.js'
 import { createRecoveryRouter } from './routes/recovery.js'
 import { createAccountLoginRouter } from './routes/account-login.js'
 import { createAccountSettingsRouter } from './routes/account-settings.js'
 import { createCompleteRouter } from './routes/complete.js'
 import { createChooseHandleRouter } from './routes/choose-handle.js'
+import { createPreviewRouter } from './routes/preview.js'
+import { resolveAuthPort } from './lib/resolve-port.js'
 
 const logger = createLogger('auth-service')
 
@@ -33,7 +34,12 @@ export function createAuthService(config: AuthServiceConfig): {
 
   // Mount better-auth BEFORE express.json() so it can parse its own request bodies.
   // All better-auth endpoints live under /api/auth/*.
-  const betterAuthInstance = createBetterAuth(ctx.emailSender, ctx.db)
+  const betterAuthInstance = createBetterAuth(
+    ctx.emailSender,
+    ctx.db,
+    config.otpLength,
+    config.otpCharset,
+  )
   app.all('/api/auth/*', toNodeHandler(betterAuthInstance))
 
   // Middleware
@@ -50,6 +56,28 @@ export function createAuthService(config: AuthServiceConfig): {
     res.setHeader('X-Frame-Options', 'DENY')
     res.setHeader('X-Content-Type-Options', 'nosniff')
     res.setHeader('Referrer-Policy', 'no-referrer')
+
+    // Build img-src dynamically: allow the client's origin if a client_id URL is present.
+    // Fall back to the stored clientId from the DB flow when client_id is absent from the
+    // query string (e.g. back-navigation from recovery via a bare request_uri link).
+    let imgSrc = "'self' data:"
+    let clientId = (req.query.client_id as string) || req.body?.client_id
+    if (!clientId && req.query.request_uri) {
+      clientId =
+        ctx.db.getAuthFlowByRequestUri(req.query.request_uri as string)
+          ?.clientId ?? undefined
+    }
+    if (clientId && typeof clientId === 'string') {
+      try {
+        const clientOrigin = new URL(clientId).origin
+        if (clientOrigin && clientOrigin !== 'null') {
+          imgSrc += ` ${clientOrigin}`
+        }
+      } catch {
+        /* not a valid URL, keep default */
+      }
+    }
+
     res.setHeader(
       'Content-Security-Policy',
       `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'`,
@@ -63,12 +91,12 @@ export function createAuthService(config: AuthServiceConfig): {
 
   // Routes
   app.use(createLoginPageRouter(ctx))
-  app.use(createConsentRouter(ctx))
   app.use(createRecoveryRouter(ctx, betterAuthInstance))
-  app.use(createAccountLoginRouter(betterAuthInstance))
+  app.use(createAccountLoginRouter(betterAuthInstance, ctx))
   app.use(createAccountSettingsRouter(ctx, betterAuthInstance))
   app.use(createCompleteRouter(ctx, betterAuthInstance))
   app.use(createChooseHandleRouter(ctx, betterAuthInstance))
+  app.use(createPreviewRouter(ctx))
 
   // Metrics endpoint (protect with admin auth in production)
   app.get('/metrics', (req, res) => {
@@ -94,7 +122,7 @@ export function createAuthService(config: AuthServiceConfig): {
   })
 
   app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', service: 'auth' })
+    res.json({ status: 'ok', service: 'auth', version: getEpdsVersion() })
   })
 
   return { app, ctx }
@@ -104,7 +132,7 @@ export function createAuthService(config: AuthServiceConfig): {
 async function main() {
   const config: AuthServiceConfig = {
     hostname: process.env.AUTH_HOSTNAME || 'auth.localhost',
-    port: parseInt(process.env.AUTH_PORT || '3001', 10),
+    port: resolveAuthPort(),
     sessionSecret:
       process.env.AUTH_SESSION_SECRET || 'dev-session-secret-change-me',
     csrfSecret: process.env.AUTH_CSRF_SECRET || 'dev-csrf-secret-change-me',
@@ -131,6 +159,14 @@ async function main() {
     panelColor: isValidHexColor(process.env.AUTH_PANEL_COLOR)
       ? process.env.AUTH_PANEL_COLOR
       : undefined,
+    otpLength: Number(process.env.OTP_LENGTH ?? '8'),
+    otpCharset: (process.env.OTP_CHARSET || 'numeric') as
+      | 'numeric'
+      | 'alphanumeric',
+    trustedClients: (process.env.PDS_OAUTH_TRUSTED_CLIENTS || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
   }
 
   if (
@@ -154,7 +190,34 @@ async function main() {
     logger.warn('AUTH_PANEL_COLOR rejected: must be a hex color (e.g. #3E7053)')
   }
 
-  await runBetterAuthMigrations(config.dbLocation, config.hostname)
+  logger.info(
+    { trustedClients: config.trustedClients },
+    'trusted clients configured',
+  )
+
+  if (
+    isNaN(config.otpLength) ||
+    config.otpLength < 4 ||
+    config.otpLength > 12
+  ) {
+    throw new Error(
+      `Invalid OTP_LENGTH: must be between 4 and 12, got "${process.env.OTP_LENGTH}"`,
+    )
+  }
+
+  const validCharsets = ['numeric', 'alphanumeric']
+  if (!validCharsets.includes(config.otpCharset)) {
+    throw new Error(
+      `Invalid OTP_CHARSET: must be 'numeric' or 'alphanumeric', got "${process.env.OTP_CHARSET}"`,
+    )
+  }
+
+  await runBetterAuthMigrations(
+    config.dbLocation,
+    config.hostname,
+    config.otpLength,
+    config.otpCharset,
+  )
 
   const { app, ctx } = createAuthService(config)
 

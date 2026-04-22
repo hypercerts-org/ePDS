@@ -13,16 +13,21 @@
  *   2. Look up auth_flow row → get request_uri, client_id
  *   3. Get better-auth session → extract verified email
  *   4. Check if this is a new user (no PDS account for email)
- *   5a. New user → redirect to /auth/choose-handle (auth_flow + cookie kept intact)
- *   5b. Existing user, needs consent → redirect to /auth/consent?flow_id=...
- *   5c. Existing user, no consent needed → build HMAC-signed redirect to pds-core /oauth/epds-callback
+ *   5a. New user, handle_mode='random' → HMAC-signed redirect to pds-core (random handle generated server-side)
+ *   5b. New user, handle_mode=null|'picker'|'picker-with-random' → redirect to /auth/choose-handle
+ *   5c. Existing user → build HMAC-signed redirect to pds-core /oauth/epds-callback
  *   6. Delete auth_flow row + clear cookie (only for 5c path)
+ *
+ * Note: consent is handled by the stock @atproto/oauth-provider middleware
+ * after pds-core's epds-callback redirects through /oauth/authorize.
  */
 import { Router, type Request, type Response } from 'express'
 import type { AuthServiceContext } from '../context.js'
 import { createLogger, signCallback } from '@certified-app/shared'
 import { fromNodeHeaders } from 'better-auth/node'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
+import { pingParRequest } from '../lib/ping-par-request.js'
+import { requireInternalEnv } from '../lib/require-internal-env.js'
 
 const logger = createLogger('auth:complete')
 
@@ -35,11 +40,7 @@ export function createCompleteRouter(
 ): Router {
   const router = Router()
 
-  const pdsUrl = process.env.PDS_INTERNAL_URL
-  const internalSecret = process.env.EPDS_INTERNAL_SECRET
-  if (!pdsUrl || !internalSecret) {
-    throw new Error('PDS_INTERNAL_URL and EPDS_INTERNAL_SECRET must be set')
-  }
+  const { pdsUrl, internalSecret } = requireInternalEnv()
 
   router.get('/auth/complete', async (req: Request, res: Response) => {
     // Step 1: Get flow_id from cookie
@@ -91,50 +92,83 @@ export function createCompleteRouter(
 
     const email = session.user.email.toLowerCase()
 
-    // Step 4: Check whether this is a new account.
-    // New accounts (no PDS account yet) are redirected to the handle picker.
-    // Existing accounts may need consent for first-time client logins.
+    // Step 4: Check whether this is a new user (no PDS account for email).
     const did = await getDidByEmail(email, pdsUrl, internalSecret)
     const isNewAccount = !did
 
-    const clientId = flow.clientId ?? ''
-    const needsConsent =
-      !isNewAccount && clientId && !ctx.db.hasClientLogin(email, clientId)
-
     if (isNewAccount) {
-      // Step 5a (new user): Redirect to handle picker.
+      if (flow.handleMode === 'random') {
+        // Step 5a (new user, random mode): Skip handle picker — let pds-core generate
+        // a random handle via generateRandomHandle().
+
+        // Ping the PAR to reset the inactivity timer before redirecting.
+        // Non-fatal: if the ping fails we log and proceed with the original
+        // request_uri — pds-core will surface the expiry if it has occurred.
+        const ping = await pingParRequest(
+          flow.requestUri,
+          pdsUrl,
+          internalSecret,
+        )
+        if (!ping.ok) {
+          logger.warn(
+            { status: ping.status, err: ping.err, requestUri: flow.requestUri },
+            'PAR ping returned non-OK on random mode complete — proceeding anyway',
+          )
+        }
+
+        /**  CONTRACT: `handle` is intentionally omitted from callbackParams here.
+         *  Absent `handle` in the signed payload (serialised as '' by signCallback's
+         *  `?? ''` sentinel) is the agreed signal to pds-core that it should call
+         *  generateRandomHandle() instead of using a caller-supplied value.
+         *
+         *  Both signCallback and verifyCallback use the same `params.handle ?? ''`
+         *
+         *  If you ever change this contract, update pds-core/src/index.ts
+         *  and the sentinel tests in packages/shared/src/__tests__/crypto.test.ts.
+         */
+        const callbackParams = {
+          request_uri: flow.requestUri,
+          email,
+          approved: '1',
+          new_account: '1',
+        }
+        const { sig, ts } = signCallback(
+          callbackParams,
+          ctx.config.epdsCallbackSecret,
+        )
+        const params = new URLSearchParams({ ...callbackParams, ts, sig })
+        logger.info(
+          { email, flowId },
+          'New user (random mode): skipping handle picker, redirecting to epds-callback',
+        )
+        res.redirect(
+          303,
+          `${ctx.config.pdsPublicUrl}/oauth/epds-callback?${params.toString()}`,
+        )
+        return
+      }
+
+      // Step 5b (new user, picker/picker-with-random/null mode): Redirect to handle picker.
+      // Default (null) preserves existing behavior — picker is always shown.
       // Do NOT delete auth_flow or clear cookie here — TTL cleanup handles expiry.
       // If pds-core redirects back with ?error=handle_taken, the user can retry.
-      logger.info({ email, flowId }, 'New user: redirecting to choose-handle')
+      logger.info(
+        { email, flowId, handleMode: flow.handleMode },
+        'New user: redirecting to choose-handle',
+      )
       res.redirect(303, '/auth/choose-handle')
       return
     }
 
-    if (needsConsent) {
-      // Step 5b: Redirect to consent screen, passing flow_id so consent can
-      // look up request_uri and perform cleanup itself.
-      // Do NOT delete auth_flow or clear cookie here — consent does it.
-      const consentUrl = new URL(
-        '/auth/consent',
-        `https://${ctx.config.hostname}`,
-      )
-      consentUrl.searchParams.set('flow_id', flowId)
-      consentUrl.searchParams.set('email', email)
-      consentUrl.searchParams.set('new', '0')
-      res.redirect(303, consentUrl.pathname + consentUrl.search)
-      return
-    }
-
-    // Step 5c: Record client login before redirecting (no consent needed, existing user)
-    if (clientId) {
-      ctx.db.recordClientLogin(email, clientId)
-    }
+    // Step 5c (existing user): Build HMAC-signed redirect to pds-core /oauth/epds-callback.
+    // Consent is handled by the stock @atproto/oauth-provider middleware —
+    // pds-core's epds-callback redirects through /oauth/authorize which shows
+    // the upstream consent UI with actual OAuth scopes if needed.
 
     // Cleanup: remove auth_flow row and cookie
     ctx.db.deleteAuthFlow(flowId)
     res.clearCookie(AUTH_FLOW_COOKIE)
 
-    // Step 5c (cont): Build HMAC-signed redirect to pds-core /oauth/epds-callback
     const callbackParams = {
       request_uri: flow.requestUri,
       email,

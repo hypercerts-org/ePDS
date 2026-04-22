@@ -21,11 +21,17 @@ Methods used:
 
 - `.get(requestUri, deviceId?)` — fetches a pending authorization request.
   Also has an **undocumented side effect** of resetting the `expiresAt`
-  sliding window (see item 7 below). Used in the `/oauth/epds-callback`
+  sliding window (see item 8 below). Used in the `/oauth/epds-callback`
   handler and the `/_internal/ping-request` keepalive.
 - `.setAuthorized(requestUri, client, account, deviceId, deviceMetadata)` —
-  marks a request as authorized and issues an authorization code. This is the
-  core of the ePDS callback mechanism.
+  marks a request as authorized and issues an authorization code. Used in the
+  consent-skip path.
+- `.store.readRequest(requestId)` / `.store.updateRequest(requestId, data)` —
+  direct store access to patch the PAR request's stored `parameters`. Used to
+  set `login_hint` for new accounts so the stock authorize UI auto-selects the
+  session and skips account selection. The provider already mutates parameters
+  during `validate()` (forcing `prompt: 'consent'` for unauthenticated clients),
+  so this is consistent with upstream behavior.
 
 **Breakage scenario:** Method renamed, signature changed, or `requestManager`
 made private. The entire authorization code issuance flow stops working.
@@ -85,9 +91,37 @@ stop working, serving stock metadata instead of pointing
 `authorization_endpoint` at the auth service subdomain. OAuth clients would
 be sent to the wrong URL.
 
+### 5. `sec-fetch-site` validation on `/oauth/authorize`
+
+**File:** `packages/pds-core/src/lib/sec-fetch-site-rewrite.ts`,
+`packages/pds-core/src/index.ts`
+
+The upstream `@atproto/oauth-provider` validates the `sec-fetch-site` request
+header on `GET /oauth/authorize` and allows `same-origin`, `cross-site`, and
+`none` — but rejects `same-site`. There is a
+[`@TODO`](https://github.com/bluesky-social/atproto/blob/2a9221d244a0821490458785d70d100a6943ea91/packages/oauth/oauth-provider/src/router/create-authorization-page-middleware.ts#L75-L77)
+in the upstream source acknowledging this gap.
+
+ePDS puts the auth service on a subdomain of the PDS (e.g.
+`auth.pds.example` / `pds.example`). When the browser follows the 303
+redirect chain from auth → PDS `/oauth/epds-callback` → PDS
+`/oauth/authorize`, it sends `sec-fetch-site: same-site` because the chain
+crosses origins within the same registrable domain.
+
+pds-core works around this by injecting middleware (via the same
+`_router.stack` manipulation as item 4) that rewrites `same-site` →
+`same-origin` before the request reaches the upstream validation.
+
+**Breakage scenario:** If the upstream validation logic moves to a different
+layer (e.g., a lower-level HTTP handler that runs before Express middleware),
+or if additional endpoints gain the same validation, the middleware workaround
+would need updating. Also at risk if the upstream `@TODO` is resolved by
+adding `same-site` to the allowed list — the middleware would become a no-op
+(harmless but unnecessary).
+
 ## High Risk (individual features break)
 
-### 5. `pds.ctx.accountManager` methods
+### 6. `pds.ctx.accountManager` methods
 
 **File:** `packages/pds-core/src/index.ts` (multiple internal endpoints)
 
@@ -103,7 +137,7 @@ Methods accessed on the PDS-level account manager:
 `provider.accountManager` (OAuth-provider-level, manages OAuth sessions).
 The code assumes these are kept in sync by the upstream PDS.
 
-### 6. `provider.deviceManager.load()`
+### 7. `provider.deviceManager.load()`
 
 **File:** `packages/pds-core/src/index.ts`
 
@@ -118,7 +152,7 @@ Assumes `deviceManager.load()` accepts raw Node.js request/response objects
 and returns `{ deviceId, deviceMetadata }`. The double cast
 (`as unknown as http.IncomingMessage`) strips Express-specific properties.
 
-### 7. PAR inactivity timeout assumption
+### 8. PAR inactivity timeout assumption
 
 **Files:** `packages/pds-core/src/index.ts`, `packages/auth-service/src/routes/choose-handle.ts`
 
@@ -135,16 +169,28 @@ more than the timeout duration.
 The right fix is to upstream a public keepalive/refresh API on
 `@atproto/oauth-provider`.
 
-### 8. OAuth consent tracking
+### 9. OAuth consent tracking (consent-skip path)
 
 **File:** `packages/pds-core/src/index.ts`
 
-- `provider.checkConsentRequired(parameters, clientData)` — assumed to
-  return a boolean
-- `provider.accountManager.setAuthorizedClient(account, client, { authorizedScopes })` —
-  assumed signature for recording consent
+When `PDS_SIGNUP_ALLOW_CONSENT_SKIP` is enabled, the consent-skip code path
+uses several provider internals to issue an authorization code directly:
 
-### 9. `provider.metadata`
+- `provider.clientManager.getClient(clientId)` — fetches the `Client` object.
+  The returned `client.info.isTrusted` boolean is used to gate consent-skip.
+  `clientManager` is a `public readonly` property but `ClientManager` and
+  `Client` are not re-exported.
+- `provider.requestManager.get(requestUri, deviceId)` — binds the device to
+  the PAR request (same as item 1 above).
+- `provider.requestManager.setAuthorized(requestUri, client, account, deviceId, deviceMetadata)` —
+  issues the authorization code (same as item 1 above).
+- `provider.accountManager.setAuthorizedClient(account, client, { authorizedScopes })` —
+  records the client as authorized so future logins can auto-approve.
+
+The normal (non-skip) consent path delegates to the stock `/oauth/authorize`
+endpoint and does not use these internals.
+
+### 10. `provider.metadata`
 
 **File:** `packages/pds-core/src/index.ts`
 
@@ -157,7 +203,7 @@ metadata fields.
 
 ## Moderate Risk (public APIs, less likely to break)
 
-### 10. `@atproto/syntax` exports
+### 11. `@atproto/syntax` exports
 
 **File:** `packages/shared/src/handle.ts`
 
@@ -172,7 +218,7 @@ These are public exports. Risk is mainly from validation rule changes in
 major version bumps (e.g., allowing/disallowing characters that ePDS's
 product constraints assume).
 
-### 11. `HandleUnavailableError`
+### 12. `HandleUnavailableError`
 
 **File:** `packages/pds-core/src/index.ts`
 
@@ -184,7 +230,7 @@ Public export, used in `catch` blocks to detect handle collisions. Could
 break if the error class is renamed or if `createAccount()` starts throwing
 a different error type.
 
-### 12. XRPC admin endpoints
+### 13. XRPC admin endpoints
 
 **File:** `packages/auth-service/src/routes/account-settings.ts`
 
@@ -194,7 +240,7 @@ endpoints with stable schemas, lowest risk of breakage.
 
 ## Dead Code / Contradictions
 
-### 13. `auto-provision.ts` — passwordless createAccount
+### 14. `auto-provision.ts` — passwordless createAccount
 
 **File:** `packages/auth-service/src/lib/auto-provision.ts`
 

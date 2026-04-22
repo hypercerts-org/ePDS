@@ -40,6 +40,11 @@ COPY --from=build /app/package.json ./
 COPY --from=build /app/pnpm-workspace.yaml ./
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Stamp the ePDS version into the image.
+ARG RAILWAY_GIT_COMMIT_SHA
+COPY .epds-version* ./
+COPY scripts/resolve-version.sh /tmp/
+RUN /tmp/resolve-version.sh && rm /tmp/resolve-version.sh
 ENV DB_LOCATION=/data/epds.sqlite
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "packages/auth-service/dist/index.js"]

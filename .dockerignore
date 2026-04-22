@@ -1,5 +1,6 @@
-node_modules
-dist
+**/node_modules
+**/dist
+**/tsconfig.tsbuildinfo
 data
 *.sqlite
 *.sqlite-wal
@@ -9,3 +10,4 @@ data
 .gitignore
 *.md
 scripts/
+!scripts/resolve-version.sh

@@ -1,4 +1,7 @@
 import type { Metadata } from 'next'
+import { getPageTheme } from '@/lib/theme'
+
+export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
   title: 'ePDS Demo',
@@ -10,6 +13,8 @@ export default function RootLayout({
 }: {
   children: React.ReactNode
 }) {
+  const t = getPageTheme()
+
   return (
     <html lang="en">
       <body
@@ -20,8 +25,8 @@ export default function RootLayout({
               '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
             WebkitFontSmoothing: 'antialiased',
             MozOsxFontSmoothing: 'grayscale',
-            background: '#f8f9fa',
-            color: '#1a1a2e',
+            background: t?.bg ?? '#f8f9fa',
+            color: t?.text ?? '#1a1a2e',
             minHeight: '100vh',
           } as React.CSSProperties
         }

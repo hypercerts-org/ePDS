@@ -1,5 +1,6 @@
 import eslint from '@eslint/js'
 import tseslint from 'typescript-eslint'
+import importPlugin from 'eslint-plugin-import'
 import prettier from 'eslint-config-prettier'
 
 export default tseslint.config(
@@ -14,6 +15,10 @@ export default tseslint.config(
       'eslint.config.js',
       '**/next-env.d.ts',
       '**/.next/',
+      // cucumber-js config requires `export default` — ignore rather than override the rule
+      'e2e/cucumber.mjs',
+      // Standalone Node scripts not tracked by any tsconfig
+      'scripts/**',
     ],
   },
 
@@ -25,6 +30,10 @@ export default tseslint.config(
 
   // TypeScript-specific overrides
   {
+    plugins: { import: importPlugin },
+    settings: {
+      'import/resolver': { typescript: true },
+    },
     languageOptions: {
       parserOptions: {
         projectService: true,
@@ -37,6 +46,9 @@ export default tseslint.config(
         'error',
         { prefer: 'type-imports', fixStyle: 'separate-type-imports' },
       ],
+
+      // Merge imports from the same module (understands import type vs import value)
+      'import/no-duplicates': ['error', { 'prefer-inline': false }],
 
       // Allow unused vars prefixed with _ (common pattern for intentional omission)
       '@typescript-eslint/no-unused-vars': [
@@ -77,6 +89,19 @@ export default tseslint.config(
     files: ['packages/demo/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-syntax': 'off',
+    },
+  },
+
+  // e2e TypeScript files use a standalone tsconfig not referenced by the root —
+  // disable projectService and point ESLint directly at e2e/tsconfig.e2e.json
+  {
+    files: ['e2e/**/*.ts'],
+    languageOptions: {
+      parserOptions: {
+        projectService: false,
+        project: 'e2e/tsconfig.e2e.json',
+        tsconfigRootDir: import.meta.dirname,
+      },
     },
   },
 

@@ -2,18 +2,111 @@
 
 ## Which flow should I use?
 
-**Flow 1** — your app has its own email input field. You pass the email to
-ePDS and the user lands straight on the OTP entry screen.
+| Flow | App provides            | User experience              | Implementation       |
+| ---- | ----------------------- | ---------------------------- | -------------------- |
+| 1    | Email address           | OTP screen immediately       | Hand-rolled PAR/DPoP |
+| 2    | Nothing, handle, or DID | Depends on input (see below) | `NodeOAuthClient`    |
 
-**Flow 2** — your app has a simple "Sign in" button with no email field. The
-ePDS auth page collects the email.
+**Flow 1** is the only flow that requires hand-rolled PAR and DPoP code.
+`@atproto/oauth-client-node`'s `authorize()` method explicitly omits
+`login_hint` from its options — the library resolves handles and DIDs
+itself and overrides the hint. Since Flow 1 needs to pass a raw email
+as `login_hint` on the auth redirect URL (not in the PAR body), it
+cannot use the library.
 
-Both flows end the same way: the user gets an 8-digit OTP by email, enters it,
-and your callback receives an authorization code to exchange for tokens.
+**Flow 2** should use `NodeOAuthClient`, which handles PAR, PKCE, DPoP,
+nonce retry, token exchange, and session management automatically. It
+covers three input variants — all use the same code path:
+
+- **No identifier** — pass the PDS URL; auth server shows its own email form
+- **Handle** — pass `alice.pds.example.com`; auth server resolves it, sends OTP directly
+- **DID** — pass `did:plc:abc123...`; same as handle
+
+Both flows end the same way: the user enters an OTP, ePDS redirects
+back to your app, and your callback receives an authorization code to
+exchange for tokens.
 
 ---
 
-## Flow 1 — App collects the email
+## Flow 2 — Using `NodeOAuthClient`
+
+### Setup
+
+See the [SKILL.md quick start](../SKILL.md) for `NodeOAuthClient`
+construction (client metadata, keyset, stores).
+
+### Login handler
+
+```typescript
+// No identifier — auth server shows email form
+const authUrl = await client.authorize('https://pds.example.com')
+
+// With a handle — auth server resolves and sends OTP
+const authUrl = await client.authorize('alice.pds.example.com')
+
+// With a DID — same behaviour as handle
+const authUrl = await client.authorize('did:plc:abc123...')
+```
+
+The `authorize()` method:
+
+1. Resolves the input (handle → DID → PDS endpoint, or uses the PDS URL directly)
+2. Sends a PAR request with PKCE and DPoP (including nonce retry)
+3. Stores the OAuth state in your `stateStore`
+4. Returns the authorization URL to redirect the user to
+
+Redirect the user's browser to the returned URL.
+
+### Callback handler
+
+```typescript
+// GET /api/oauth/callback?code=...&state=...&iss=...
+const { session, state } = await client.callback(
+  new URLSearchParams(callbackQueryString),
+)
+
+const userDid = session.did // e.g. "did:plc:abc123..."
+// session.fetchHandler() returns an authenticated fetch for AT Protocol API calls
+```
+
+The `callback()` method:
+
+1. Validates the state against your `stateStore`
+2. Exchanges the authorization code for tokens (with DPoP)
+3. Stores the session in your `sessionStore`
+4. Returns the `OAuthSession` and original state
+
+### Restoring a session
+
+```typescript
+const session = await client.restore(userDid)
+// Use session.fetchHandler() for API calls
+// session.signOut() to end the session
+```
+
+### Step-by-step (no identifier)
+
+1. User clicks "Sign in" in your app
+2. Your login handler calls `client.authorize('https://pds.example.com')`
+3. Library sends PAR request, gets `request_uri`, stores state
+4. Your app redirects browser to the returned auth URL
+5. Auth server shows email form
+6. User enters email, receives OTP, enters it
+7. **New users only**: ePDS shows a handle picker
+8. Auth server redirects to your `redirect_uri` with `?code=&state=&iss=`
+9. Your callback calls `client.callback(params)` — library handles token exchange
+10. User is logged in
+
+When passing a handle or DID instead of the PDS URL, the flow is
+identical except the user skips the email form (the auth server resolves
+the handle/DID to an email and sends the OTP directly).
+
+---
+
+## Flow 1 — Hand-rolled (email `login_hint`)
+
+Flow 1 requires hand-rolled PAR and token exchange because the library
+cannot pass a raw email as `login_hint`.
 
 ### Step-by-step
 
@@ -22,18 +115,20 @@ and your callback receives an authorization code to exchange for tokens.
 
    a. Generates a DPoP key pair and PKCE verifier (see [dpop-pkce.md](dpop-pkce.md))
 
-   b. POSTs to `/oauth/par`
+   b. POSTs to `/oauth/par` (with DPoP nonce retry)
 
    c. Stores DPoP private key, code verifier, and state in a signed session cookie
 
    d. Redirects the browser to `/oauth/authorize?...&login_hint=<email>`
 
-3. The auth server sees the email, immediately sends the OTP, and shows the user
-   the code entry screen (no email form shown)
+3. The auth server sees the email, immediately sends the OTP, and shows the
+   code entry screen (no email form shown)
 4. User reads OTP from email and submits it
-5. Auth server verifies the code and redirects to your `redirect_uri` with `?code=`
-6. Your callback handler exchanges the code for tokens (see code below)
-7. You get an access token and the user's DID — they're logged in
+5. Auth server verifies the code
+6. **New users only**: ePDS shows a handle picker
+7. ePDS redirects back to your app's callback URL
+8. Your callback handler exchanges the code for tokens (with DPoP nonce retry)
+9. User is logged in
 
 ### Login handler code
 
@@ -113,56 +208,7 @@ export async function handleLogin(email: string) {
 }
 ```
 
----
-
-## Flow 2 — Auth server collects the email
-
-### Step-by-step
-
-1. User clicks "Sign in" in your app (no email needed yet)
-2. Your login handler:
-   a. Generates a DPoP key pair and PKCE verifier
-   b. POSTs to `/oauth/par` (no `login_hint`)
-   c. Stores session data in cookie
-   d. Redirects browser to `/oauth/authorize?...`
-3. The auth server shows an email input form
-4. User enters their email and submits
-5. Auth server sends OTP and shows code entry screen
-6. User enters OTP
-7. Auth server redirects to your `redirect_uri` with `?code=`
-8. Your callback exchanges the code for tokens
-
-### Login handler code
-
-Same as Flow 1 except `login_hint` is not added to the redirect URL. Flow 1 sends `login_hint` only on the redirect URL (not in the PAR body); Flow 2 omits `login_hint` from both the PAR body and the redirect URL:
-
-```typescript
-const parBody = new URLSearchParams({
-  client_id: CLIENT_ID,
-  redirect_uri: REDIRECT_URI,
-  response_type: 'code',
-  scope: 'atproto transition:generic',
-  state,
-  code_challenge: codeChallenge,
-  code_challenge_method: 'S256',
-  // No login_hint
-})
-
-// ... same PAR request and retry logic as Flow 1 ...
-
-const authUrl = new URL(AUTH_ENDPOINT)
-authUrl.searchParams.set('client_id', CLIENT_ID)
-authUrl.searchParams.set('request_uri', request_uri)
-// No login_hint
-return redirect(authUrl.toString())
-```
-
----
-
-## Callback handler (both flows)
-
-After the user authenticates, ePDS redirects them to your `redirect_uri` with
-`?code=` and `?state=`. Verify the state, then exchange the code for tokens:
+### Callback handler code
 
 ```typescript
 import { restoreDpopKeyPair, createDpopProof } from './auth-helpers'
@@ -217,13 +263,12 @@ export async function handleCallback(params: { code: string; state: string }) {
 
   const { access_token, sub: userDid } = await tokenRes.json()
 
-  // userDid is e.g. "did:plc:abc123..." — resolve to a readable handle if needed:
+  // userDid is e.g. "did:plc:abc123..." — resolve to handle via PLC directory
   const plcRes = await fetch(`https://plc.directory/${userDid}`)
   const { alsoKnownAs } = await plcRes.json()
   const handle = alsoKnownAs
     ?.find((u: string) => u.startsWith('at://'))
     ?.replace('at://', '')
-  // e.g. "a3x9kf.pds.example.com"
 
   // Store access_token and userDid in your session — user is now logged in
 }
@@ -233,7 +278,7 @@ export async function handleCallback(params: { code: string; state: string }) {
 
 ## Sequence diagrams
 
-### Flow 1
+### Flow 1 — App passes email as `login_hint`
 
 ```mermaid
 sequenceDiagram
@@ -244,7 +289,7 @@ sequenceDiagram
     participant Inbox as User's Inbox
 
     User->>App: Enters email, clicks Sign in
-    App->>PDS: POST /oauth/par
+    App->>PDS: POST /oauth/par (DPoP + PKCE)
     PDS-->>App: { request_uri }
     App-->>User: Redirect to /oauth/authorize?...&login_hint=email
 
@@ -256,25 +301,28 @@ sequenceDiagram
     Auth-->>User: Redirect to your callback URL
 
     User->>App: GET /api/oauth/callback?code=...
-    App->>PDS: POST /oauth/token
+    App->>PDS: POST /oauth/token (DPoP + code_verifier)
     PDS-->>App: { access_token, user DID }
     App-->>User: Logged in
 ```
 
-### Flow 2
+### Flow 2 — No identifier (via `NodeOAuthClient`)
 
 ```mermaid
 sequenceDiagram
     actor User
     participant App as Your App
+    participant Lib as NodeOAuthClient
     participant PDS as ePDS
     participant Auth as Auth Server
     participant Inbox as User's Inbox
 
     User->>App: Clicks Sign in
-    App->>PDS: POST /oauth/par (no email)
-    PDS-->>App: { request_uri }
-    App-->>User: Redirect to /oauth/authorize?...
+    App->>Lib: authorize('https://pds.example.com')
+    Lib->>PDS: POST /oauth/par (auto DPoP + PKCE)
+    PDS-->>Lib: { request_uri }
+    Lib-->>App: auth URL
+    App-->>User: Redirect to auth URL
 
     User->>Auth: GET /oauth/authorize
     Auth-->>User: Shows email input form
@@ -284,10 +332,20 @@ sequenceDiagram
     Auth-->>User: Shows OTP entry screen
 
     User->>Auth: Submits OTP code
-    Auth-->>User: Redirect to your callback URL
+    Auth-->>User: Redirect to callback URL
 
-    User->>App: GET /api/oauth/callback?code=...
-    App->>PDS: POST /oauth/token
-    PDS-->>App: { access_token, user DID }
+    User->>App: GET /api/oauth/callback?code=...&state=...
+    App->>Lib: callback(params)
+    Lib->>PDS: POST /oauth/token (auto DPoP)
+    PDS-->>Lib: { tokens }
+    Lib-->>App: { session, state }
     App-->>User: Logged in
 ```
+
+### Flow 2 with handle or DID
+
+Same as the diagram above except:
+
+- `authorize('alice.pds.example.com')` or `authorize('did:plc:abc123...')`
+- Library resolves the identity to the user's PDS
+- Auth server skips the email form and sends OTP directly

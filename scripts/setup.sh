@@ -8,6 +8,10 @@ generate_secret() {
   openssl rand -hex 32
 }
 
+generate_es256_private_jwk() {
+  "$(dirname "$0")/generate-es256-jwk.cjs"
+}
+
 # Portable sed in-place (works on macOS and Linux)
 sed_inplace() {
   if sed --version 2>/dev/null | grep -q GNU; then
@@ -57,7 +61,7 @@ inject_shared_vars() {
   for var in PDS_HOSTNAME PDS_PUBLIC_URL AUTH_HOSTNAME \
              EPDS_CALLBACK_SECRET EPDS_INTERNAL_SECRET PDS_ADMIN_PASSWORD \
              PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX \
-             EPDS_INVITE_CODE \
+             EPDS_INVITE_CODE PDS_INTERNAL_URL \
              SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASS SMTP_FROM SMTP_FROM_NAME PDS_EMAIL_FROM_ADDRESS; do
     # Skip if the var isn't in the target AND isn't in the package's .env.example.
     # This avoids injecting vars a package doesn't use, while still handling
@@ -97,6 +101,22 @@ inject_derived_vars() {
   smtp_url=$(read_env_var PDS_EMAIL_SMTP_URL .env)
   if var_belongs PDS_EMAIL_SMTP_URL && [ -n "$smtp_url" ]; then
     set_env_var PDS_EMAIL_SMTP_URL "$smtp_url" "$target"
+  fi
+
+  # PORT — Railway uses this for healthchecks.  Derive from the service-
+  # specific port variable in the top-level .env so the per-package .env
+  # has the right value for Railway paste-in.
+  if var_belongs PORT; then
+    # pds-core uses PDS_PORT, auth-service uses AUTH_PORT
+    local port_val=""
+    if [[ "$target" == *pds-core* ]]; then
+      port_val=$(read_env_var PDS_PORT .env)
+    elif [[ "$target" == *auth-service* ]]; then
+      port_val=$(read_env_var AUTH_PORT .env)
+    fi
+    if [ -n "$port_val" ]; then
+      set_env_var PORT "$port_val" "$target"
+    fi
   fi
 }
 
@@ -193,8 +213,15 @@ prompt_smtp() {
 
   read -rep "SMTP username (blank for none): " -i "$existing_user" smtp_user
   if [ -n "$smtp_user" ]; then
-    read -rsp "SMTP password: " -i "$existing_pass" smtp_pass
+    local pass_prompt="SMTP password"
+    if [[ -n "$existing_pass" ]]; then
+      pass_prompt="SMTP password (press Enter to keep existing)"
+    fi
+    read -rsp "${pass_prompt}: " smtp_pass
     echo ""
+    if [[ -z "$smtp_pass" ]] && [[ -n "$existing_pass" ]]; then
+      smtp_pass="$existing_pass"
+    fi
   else
     smtp_pass=""
   fi
@@ -392,6 +419,22 @@ setup_package_envs() {
     sed_inplace "s|^# SESSION_SECRET=.*|SESSION_SECRET=${secret}|" packages/demo/.env
     echo "  Generated SESSION_SECRET"
   fi
+
+  # Generate an ES256 keypair for OAuth confidential-client authentication
+  # (private_key_jwt). Declared in client-metadata.json and used to sign
+  # client_assertion JWTs at the token endpoint. Without this, the upstream
+  # @atproto/oauth-provider classifies the client as public and forcibly
+  # re-prompts consent on every authorize request (see HYPER-270).
+  local existing_jwk
+  existing_jwk=$(read_env_var EPDS_CLIENT_PRIVATE_JWK packages/demo/.env)
+  if [ -z "$existing_jwk" ]; then
+    echo "Generating EPDS_CLIENT_PRIVATE_JWK (ES256 P-256 private JWK)..."
+    local jwk
+    jwk=$(generate_es256_private_jwk)
+    set_env_var EPDS_CLIENT_PRIVATE_JWK "$jwk" packages/demo/.env
+    echo "  Generated EPDS_CLIENT_PRIVATE_JWK"
+  fi
+
   prompt_demo
 
   echo ""
@@ -422,13 +465,50 @@ print_next_steps() {
   echo "  grep -v '^\s*#' packages/pds-core/.env | grep -v '^\s*$'"
   echo "  grep -v '^\s*#' packages/auth-service/.env | grep -v '^\s*$'"
   echo "  grep -v '^\s*#' packages/demo/.env | grep -v '^\s*$'"
+  echo ""
+  echo "  IMPORTANT: For Railway, change PDS_INTERNAL_URL in auth-service from"
+  echo "  the Docker value (http://core:3000) to the Railway internal URL:"
+  echo "    http://<pds-core-service>.railway.internal:3000"
+  echo "  The auth service will fail to start without a correct PDS_INTERNAL_URL."
+  echo ""
+  echo "  IMPORTANT: EPDS_CLIENT_PRIVATE_JWK must be DIFFERENT per demo service."
+  echo "  If you deploy more than one demo on Railway (e.g. a trusted demo and"
+  echo "  an untrusted demo to exercise the e2e consent scenarios), each service"
+  echo "  needs its own ES256 keypair — otherwise one demo could forge a client"
+  echo "  assertion claiming to be the other. The packages/demo/.env value above"
+  echo "  can be pasted into ONE demo service; generate a second keypair for"
+  echo "  any additional demo services with:"
+  echo ""
+  echo "    scripts/generate-es256-jwk.cjs"
+  echo ""
+  echo "  Paste the output as EPDS_CLIENT_PRIVATE_JWK on the second demo service."
 }
 
 # ── Main ──
 
-main() {
+print_intro() {
   echo "=== ePDS Setup ==="
   echo ""
+  echo "Run this once before first use. It creates .env files for all packages"
+  echo "and auto-generates secrets."
+  echo ""
+  echo "docker-compose / pnpm dev:"
+  echo "  The top-level .env is loaded by the core, auth, and caddy services."
+  echo "  packages/demo/.env is loaded by the demo service (docker-compose)"
+  echo "  and by Next.js when running pnpm dev:demo."
+  echo ""
+  echo "Railway:"
+  echo "  Each service reads only its own per-package .env — the top-level .env"
+  echo "  is not used. Run this script locally, then paste each per-package .env"
+  echo "  into the service's raw environment editor in the Railway dashboard."
+  echo ""
+  echo "Re-running is safe — existing secrets are preserved and prompts show"
+  echo "current values for editing."
+  echo ""
+}
+
+main() {
+  print_intro
   check_prerequisites
   warn_existing_env_files
   setup_toplevel_env

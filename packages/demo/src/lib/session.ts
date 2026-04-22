@@ -25,6 +25,13 @@ export interface OAuthSession {
   codeVerifier: string
   dpopPrivateJwk: crypto.JsonWebKey
   tokenEndpoint: string
+  /**
+   * Authorization server issuer identifier, used as the `aud` claim
+   * when signing client_assertion JWTs for confidential clients. Per
+   * RFC 7523 §3 item 3, the assertion's audience must be the AS
+   * identifier, not the specific token/PAR endpoint URL.
+   */
+  issuer: string
   email?: string
   expectedDid?: string
   expectedPdsUrl?: string

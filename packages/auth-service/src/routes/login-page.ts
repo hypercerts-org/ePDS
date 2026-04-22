@@ -26,19 +26,57 @@ import type { AuthServiceContext } from '../context.js'
 import {
   resolveClientMetadata,
   resolveClientName,
+  getClientCss,
   type ClientMetadata,
 } from '../lib/client-metadata.js'
-import { escapeHtml, createLogger } from '@certified-app/shared'
+import {
+  escapeHtml,
+  createLogger,
+  VALID_HANDLE_MODES,
+  type HandleMode,
+} from '@certified-app/shared'
 import { socialProviders } from '../better-auth.js'
+import { buildOtpInputProps } from '../otp-input.js'
 import {
   resolveLoginHint,
   fetchParLoginHint,
 } from '../lib/resolve-login-hint.js'
+import { ensurePdsUrl } from '../lib/pds-url.js'
+import { renderOptionalStyleTag } from '../lib/page-helpers.js'
 
 const logger = createLogger('auth:login-page')
 
 const AUTH_FLOW_COOKIE = 'epds_auth_flow'
 const AUTH_FLOW_TTL_MS = 10 * 60 * 1000 // 10 minutes
+
+export async function safeResolveClientMetadata(
+  clientId: string | undefined,
+): Promise<ClientMetadata> {
+  if (!clientId) return {}
+  try {
+    return await resolveClientMetadata(clientId)
+  } catch (err) {
+    // Degrade gracefully: no branding, handleMode falls back to null. user can still continue
+    logger.error({ err, clientId }, 'Failed to resolve client metadata')
+    return {}
+  }
+}
+
+export function resolveHandleMode(
+  queryParam: string | undefined,
+  clientMeta: ClientMetadata,
+): HandleMode {
+  for (const raw of [
+    queryParam,
+    clientMeta.epds_handle_mode,
+    process.env.EPDS_DEFAULT_HANDLE_MODE,
+  ]) {
+    if (raw && (VALID_HANDLE_MODES as readonly string[]).includes(raw)) {
+      return raw as HandleMode
+    }
+  }
+  return 'picker-with-random'
+}
 
 export function createLoginPageRouter(ctx: AuthServiceContext): Router {
   const router = Router()
@@ -47,7 +85,6 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     const requestUri = req.query.request_uri as string | undefined
     const clientId = req.query.client_id as string | undefined
     const loginHint = req.query.login_hint as string | undefined
-
     if (!requestUri) {
       res
         .status(400)
@@ -55,6 +92,21 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
         .send(renderError('Missing request_uri parameter'))
       return
     }
+
+    // Look up any existing flow for this request_uri early so we can fall back
+    // to its stored clientId when the query string omits client_id (e.g. when
+    // the user navigates back from the recovery page via a bare request_uri link).
+    // The persisted flow's clientId takes precedence over the query-string
+    // client_id — the flow was stored from a validated PAR request server-side,
+    // whereas client_id on the query string is user-controlled.
+    const existingFlow = ctx.db.getAuthFlowByRequestUri(requestUri)
+    const effectiveClientId = existingFlow?.clientId ?? clientId ?? undefined
+
+    const clientMeta = await safeResolveClientMetadata(effectiveClientId)
+    const handleMode = resolveHandleMode(
+      req.query.epds_handle_mode as string | undefined,
+      clientMeta,
+    )
 
     logger.debug(
       {
@@ -73,7 +125,6 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     // than creating a second row (and triggering a second OTP send). This protects
     // against duplicate GETs from browser extensions, prefetch, or StayFocusd.
     let flowId: string
-    const existingFlow = ctx.db.getAuthFlowByRequestUri(requestUri)
     if (existingFlow) {
       flowId = existingFlow.flowId
       logger.warn(
@@ -92,6 +143,7 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
           flowId,
           requestUri,
           clientId: clientId ?? null,
+          handleMode,
           expiresAt: Date.now() + AUTH_FLOW_TTL_MS,
         })
       } catch (err) {
@@ -112,21 +164,32 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
       maxAge: AUTH_FLOW_TTL_MS,
     })
 
-    // Resolve client branding
-    const clientMeta: ClientMetadata = clientId
-      ? await resolveClientMetadata(clientId)
-      : {}
     const clientName =
       clientMeta.client_name ??
-      (clientId ? await resolveClientName(clientId) : 'an application')
+      (effectiveClientId
+        ? await resolveClientName(effectiveClientId)
+        : 'an application')
 
-    // Pillar 1 — State Determination: decide which step to render.
-    // login_hint on the query string means our app explicitly passed an email
-    // → show the OTP flow. If absent (standard ATProto clients pass handle/DID
-    // in the PAR body, not on the redirect URL), show the email form with a
-    // "Sign in with password" link pointing to the PDS built-in OAuth page.
-    const pdsInternalUrl =
-      process.env.PDS_INTERNAL_URL || ctx.config.pdsPublicUrl
+    // CSS injection for trusted clients
+    const customCss = effectiveClientId
+      ? getClientCss(effectiveClientId, clientMeta, ctx.config.trustedClients)
+      : null
+    logger.debug(
+      { clientId: effectiveClientId, trusted: customCss !== null },
+      'client CSS trust check',
+    )
+
+    // Pillar 1 — State Determination: decide which step to render based on
+    // login_hint presence. No method-assuming side effects in the GET handler.
+    // The login_hint may be:
+    //   a) On the query string as an email (from our demo app)
+    //   b) On the query string as a handle/DID (unlikely but possible)
+    //   c) Only in the stored PAR request (third-party apps like sdsls.dev put
+    //      the handle in the PAR body but don't duplicate it on the redirect URL)
+    const pdsInternalUrl = ensurePdsUrl(
+      process.env.PDS_INTERNAL_URL,
+      ctx.config.pdsPublicUrl,
+    )
     const internalSecret = process.env.EPDS_INTERNAL_SECRET ?? ''
 
     // Three cases:
@@ -193,9 +256,10 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     res.type('html').send(
       renderLoginPage({
         flowId,
-        clientId: clientId ?? '',
+        clientId: effectiveClientId ?? '',
         clientName,
         branding: clientMeta,
+        customCss,
         loginHint: emailHint,
         initialStep,
         otpAlreadySent,
@@ -207,6 +271,8 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
         defaultBrandColor: ctx.config.brandColor,
         defaultBgColor: ctx.config.backgroundColor,
         defaultPanelColor: ctx.config.panelColor,
+        otpLength: ctx.config.otpLength,
+        otpCharset: ctx.config.otpCharset,
       }),
     )
   })
@@ -214,11 +280,12 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
   return router
 }
 
-function renderLoginPage(opts: {
+export function renderLoginPage(opts: {
   flowId: string
   clientId: string
   clientName: string
   branding: ClientMetadata
+  customCss: string | null
   loginHint: string
   initialStep: 'email' | 'otp'
   otpAlreadySent: boolean
@@ -231,6 +298,8 @@ function renderLoginPage(opts: {
   defaultBgColor?: string
   defaultPanelColor?: string
   pdsAuthorizeUrl: string
+  otpLength: number
+  otpCharset: 'numeric' | 'alphanumeric'
 }): string {
   const b = opts.branding
   const appName = b.client_name || opts.clientName || 'Certified'
@@ -269,6 +338,8 @@ function renderLoginPage(opts: {
   const bgColorStyle = bgColor
     ? `\n  <style>body { background: ${escapeHtml(bgColor)} !important; }</style>`
     : ''
+
+  const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
 
   const hasGoogle = 'google' in socialProviders
   const hasGithub = 'github' in socialProviders
@@ -801,7 +872,7 @@ function renderLoginPage(opts: {
     .step-email.hidden { display: none; }
 
 
-  </style>${bgColorStyle}
+  </style>${bgColorStyle}${renderOptionalStyleTag(opts.customCss)}
 </head>
 <body>
   <div class="layout">
@@ -884,9 +955,12 @@ function renderLoginPage(opts: {
                     <path fill-rule="evenodd" clip-rule="evenodd" d="M4 5.5a.5.5 0 0 0-.5.5v2.535a.5.5 0 0 0 .25.433A3.498 3.498 0 0 1 5.5 12a3.498 3.498 0 0 1-1.75 3.032.5.5 0 0 0-.25.433V18a.5.5 0 0 0 .5.5h16a.5.5 0 0 0 .5-.5v-2.535a.5.5 0 0 0-.25-.433A3.498 3.498 0 0 1 18.5 12a3.5 3.5 0 0 1 1.75-3.032.5.5 0 0 0 .25-.433V6a.5.5 0 0 0-.5-.5H4ZM2.5 6A1.5 1.5 0 0 1 4 4.5h16A1.5 1.5 0 0 1 21.5 6v3.17a.5.5 0 0 1-.333.472 2.501 2.501 0 0 0 0 4.716.5.5 0 0 1 .333.471V18a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 18v-3.17a.5.5 0 0 1 .333-.472 2.501 2.501 0 0 0 0-4.716.5.5 0 0 1-.333-.471V6Zm12 2a.5.5 0 1 1 1 0 .5.5 0 0 1-1 0Zm0 4a.5.5 0 1 1 1 0 .5.5 0 0 1-1 0Zm0 4a.5.5 0 1 1 1 0 .5.5 0 0 1-1 0Z"/>
                   </svg>
                 </span>
-                <input type="text" id="code" name="code" class="input-field otp-input" required
-                       maxlength="8" pattern="[0-9]{8}" inputmode="numeric"
-                       autocomplete="one-time-code" placeholder="00000000">
+                <input type="text" id="code" name="code" required
+                 maxlength="${opts.otpLength}" pattern="${inputProps.pattern}" inputmode="${inputProps.inputmode}"
+                 autocomplete="one-time-code" placeholder="${inputProps.placeholder}" class="otp-input input-field"
+                 autocapitalize="${inputProps.autocapitalize}"
+                  oninput="this.value=this.value.replace(/[\\s-]/g,'')"
+                 style="letter-spacing: ${Math.max(2, Math.round(32 / opts.otpLength))}px">
               </div>
             </div>
           </div>
@@ -948,11 +1022,13 @@ function renderLoginPage(opts: {
         errorEl.removeAttribute('role');
       }
 
+      var otpLength = ${opts.otpLength};
+      var otpCharset = ${JSON.stringify(opts.otpCharset)};
       function showOtpStep(email) {
         currentEmail = email;
         otpEmailInput.value = email;
         var masked = email.replace(/(.{2})[^@]*(@.*)/, '$1***$2');
-        otpSubtitle.textContent = 'We sent an 8-digit code to ' + masked;
+        otpSubtitle.textContent = 'We sent a ' + otpLength + (otpCharset === 'alphanumeric' ? '-character' : '-digit') + ' code to ' + masked;
         stepEmail.classList.add('hidden');
         stepOtp.classList.add('active');
         var socialSection = document.getElementById('social-section');
@@ -1085,7 +1161,7 @@ function renderLoginPage(opts: {
             if (result.error) {
               showError(result.error);
             } else {
-              otpSubtitle.textContent = 'We sent an 8-digit code to ' + masked;
+              otpSubtitle.textContent = 'We sent a ' + otpLength + (otpCharset === 'alphanumeric' ? '-character' : '-digit') + ' code to ' + masked;
             }
           });
         }

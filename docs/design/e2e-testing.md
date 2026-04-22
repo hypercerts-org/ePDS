@@ -3,6 +3,10 @@
 End-to-end testing of the full ePDS stack (PDS, auth service, demo frontend)
 via Playwright running a headless browser on the same machine.
 
+**See also:** [`testing-gaps.md`](testing-gaps.md) — documents per-package
+unit test coverage, hard-to-test areas, and which gaps specifically require
+e2e tests (route handlers, pds-core, better-auth wiring).
+
 ## Goal
 
 Automate the complete login flow: demo frontend -> PDS (PAR) -> auth service

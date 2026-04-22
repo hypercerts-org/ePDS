@@ -16,8 +16,10 @@
  */
 import { Router, type Request, type Response } from 'express'
 import type { AuthServiceContext } from '../context.js'
-import { createLogger } from '@certified-app/shared'
-import { escapeHtml, maskEmail } from '@certified-app/shared'
+import { createLogger, escapeHtml, maskEmail } from '@certified-app/shared'
+import { buildOtpInputProps } from '../otp-input.js'
+import { resolveClientBranding } from '../lib/client-metadata.js'
+import { renderOptionalStyleTag } from '../lib/page-helpers.js'
 
 const logger = createLogger('auth:recovery')
 
@@ -29,14 +31,36 @@ export function createRecoveryRouter(
   auth: any,
 ): Router {
   const router = Router()
+  const otpLength = ctx.config.otpLength
+  const otpCharset = ctx.config.otpCharset
 
-  router.get('/auth/recover', (req: Request, res: Response) => {
+  /** Look up clientId and requestUri from the epds_auth_flow cookie. */
+  async function getFlowCss(req: Request): Promise<{
+    clientId: string | null
+    backUri: string | null
+    customCss: string | null
+  }> {
+    const flowId = req.cookies[AUTH_FLOW_COOKIE] as string | undefined
+    const flow = flowId ? ctx.db.getAuthFlow(flowId) : undefined
+    const clientId = flow?.clientId ?? null
+    const backUri = flow?.requestUri ?? null
+    if (!clientId) return { clientId: null, backUri, customCss: null }
+    const { customCss } = await resolveClientBranding(
+      clientId,
+      ctx.config.trustedClients,
+    )
+    return { clientId, backUri, customCss }
+  }
+
+  router.get('/auth/recover', async (req: Request, res: Response) => {
     const requestUri = req.query.request_uri as string | undefined
 
     if (!requestUri) {
       res.status(400).send(renderError('Missing request_uri parameter', ctx))
       return
     }
+
+    const { customCss, backUri } = await getFlowCss(req)
 
     res.type('html').send(
       renderRecoveryForm({
@@ -45,6 +69,8 @@ export function createRecoveryRouter(
         brandColor: ctx.config.brandColor,
         backgroundColor: ctx.config.backgroundColor,
         panelColor: ctx.config.panelColor,
+        customCss,
+        backUri,
       }),
     )
   })
@@ -52,6 +78,8 @@ export function createRecoveryRouter(
   router.post('/auth/recover', async (req: Request, res: Response) => {
     const email = ((req.body.email as string) || '').trim().toLowerCase()
     const requestUri = req.body.request_uri as string
+
+    const { customCss, backUri } = await getFlowCss(req)
 
     if (!email || !requestUri) {
       res.status(400).send(
@@ -62,6 +90,8 @@ export function createRecoveryRouter(
           brandColor: ctx.config.brandColor,
           backgroundColor: ctx.config.backgroundColor,
           panelColor: ctx.config.panelColor,
+          customCss,
+          backUri,
         }),
       )
       return
@@ -76,6 +106,8 @@ export function createRecoveryRouter(
           brandColor: ctx.config.brandColor,
           backgroundColor: ctx.config.backgroundColor,
           panelColor: ctx.config.panelColor,
+          customCss,
+          backUri,
         }),
       )
       return
@@ -89,13 +121,18 @@ export function createRecoveryRouter(
         // Ensure the auth_flow cookie is set so /auth/complete can thread the request_uri.
         // If one already exists from a previous step, we keep it; otherwise create a new one.
         let flowId = req.cookies[AUTH_FLOW_COOKIE] as string | undefined
-        if (!flowId || !ctx.db.getAuthFlow(flowId)) {
+        const existingFlow = flowId ? ctx.db.getAuthFlow(flowId) : undefined
+        if (!flowId || !existingFlow) {
           const { randomBytes } = await import('node:crypto')
           flowId = randomBytes(16).toString('hex')
           ctx.db.createAuthFlow({
             flowId,
             requestUri,
+            // Recovery flows always start with null clientId — the prior OAuth
+            // flow's clientId is not recoverable here since getAuthFlow filters
+            // expired rows and we have no peek accessor.
             clientId: null,
+            // handleMode omitted — recovery flows don't go through handle assignment
             expiresAt: Date.now() + 10 * 60 * 1000,
           })
           res.cookie(AUTH_FLOW_COOKIE, flowId, {
@@ -113,19 +150,23 @@ export function createRecoveryRouter(
 
         logger.info({ email }, 'Recovery OTP sent via better-auth')
         res.send(
-          renderOtpForm({
+          renderRecoveryOtpForm({
             email,
             csrfToken: res.locals.csrfToken,
             requestUri,
             brandColor: ctx.config.brandColor,
             backgroundColor: ctx.config.backgroundColor,
             panelColor: ctx.config.panelColor,
+            otpLength,
+            otpCharset,
+            customCss,
+            backUri,
           }),
         )
       } catch (err) {
         logger.error({ err }, 'Failed to send recovery OTP')
         res.status(500).send(
-          renderOtpForm({
+          renderRecoveryOtpForm({
             email,
             csrfToken: res.locals.csrfToken,
             requestUri,
@@ -133,19 +174,27 @@ export function createRecoveryRouter(
             brandColor: ctx.config.brandColor,
             backgroundColor: ctx.config.backgroundColor,
             panelColor: ctx.config.panelColor,
+            otpLength,
+            otpCharset,
+            customCss,
+            backUri,
           }),
         )
       }
     } else {
       // No backup email found, but show OTP form anyway (anti-enumeration)
       res.send(
-        renderOtpForm({
+        renderRecoveryOtpForm({
           email,
           csrfToken: res.locals.csrfToken,
           requestUri,
           brandColor: ctx.config.brandColor,
           backgroundColor: ctx.config.backgroundColor,
           panelColor: ctx.config.panelColor,
+          otpLength,
+          otpCharset,
+          customCss,
+          backUri,
         }),
       )
     }
@@ -165,7 +214,7 @@ export function createRecoveryRouter(
     try {
       // Verify OTP via better-auth — this creates/updates a session
       const response = await auth.api.signInEmailOTP({
-        body: { email, otp: code },
+        body: { email, otp: code.toUpperCase() },
         asResponse: true,
       })
 
@@ -194,8 +243,9 @@ export function createRecoveryRouter(
         (err.message.includes('invalid') || err.message.includes('expired'))
           ? 'Invalid or expired code. Please try again.'
           : 'Verification failed. Please try again.'
+      const { customCss, backUri } = await getFlowCss(req)
       res.send(
-        renderOtpForm({
+        renderRecoveryOtpForm({
           email,
           csrfToken: res.locals.csrfToken,
           requestUri,
@@ -203,6 +253,10 @@ export function createRecoveryRouter(
           brandColor: ctx.config.brandColor,
           backgroundColor: ctx.config.backgroundColor,
           panelColor: ctx.config.panelColor,
+          otpLength,
+          otpCharset,
+          customCss,
+          backUri,
         }),
       )
     }
@@ -231,15 +285,20 @@ function buildBrandingStyles(opts: {
   return { rootStyle, bgColorStyle }
 }
 
-function renderRecoveryForm(opts: {
+export function renderRecoveryForm(opts: {
   requestUri: string
   csrfToken: string
   error?: string
   brandColor?: string
   backgroundColor?: string
   panelColor?: string
+  customCss?: string | null
+  backUri?: string | null
 }): string {
-  const encodedUri = encodeURIComponent(opts.requestUri)
+  const requestUriForBack = opts.backUri ?? opts.requestUri
+  const backHref = requestUriForBack
+    ? `/oauth/authorize?request_uri=${encodeURIComponent(requestUriForBack)}`
+    : '/oauth/authorize'
   const { rootStyle, bgColorStyle } = buildBrandingStyles(opts)
 
   return `<!DOCTYPE html>
@@ -248,7 +307,7 @@ function renderRecoveryForm(opts: {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Account Recovery</title>
-  <style>${CSS}</style>${bgColorStyle}
+  <style>${CSS}</style>${bgColorStyle}${renderOptionalStyleTag(opts.customCss)}
 </head>
 <body>
   <div class="layout">
@@ -297,7 +356,7 @@ function renderRecoveryForm(opts: {
         <div class="otp-actions">
           <button type="submit" class="btn-primary">Send Recovery Code</button>
           <div class="otp-links">
-            <a href="/oauth/authorize?request_uri=${encodedUri}" class="link-btn">Back to Sign In</a>
+            <a href="${backHref}"class="link-btn">Back to Sign In</a>
           </div>
         </div>
       </form>
@@ -307,17 +366,25 @@ function renderRecoveryForm(opts: {
 </html>`
 }
 
-function renderOtpForm(opts: {
+export function renderRecoveryOtpForm(opts: {
   email: string
   csrfToken: string
   requestUri: string
+  otpLength: number
+  otpCharset: 'numeric' | 'alphanumeric'
   error?: string
   brandColor?: string
   backgroundColor?: string
   panelColor?: string
+  customCss?: string | null
+  backUri?: string | null
 }): string {
   const maskedEmail = maskEmail(opts.email)
-  const encodedUri = encodeURIComponent(opts.requestUri)
+  const requestUriForBack = opts.backUri ?? opts.requestUri
+  const backHref = requestUriForBack
+    ? `/oauth/authorize?request_uri=${encodeURIComponent(requestUriForBack)}`
+    : '/oauth/authorize'
+  const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
   const { rootStyle, bgColorStyle } = buildBrandingStyles(opts)
 
   return `<!DOCTYPE html>
@@ -326,7 +393,7 @@ function renderOtpForm(opts: {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Enter recovery code</title>
-  <style>${CSS}</style>${bgColorStyle}
+  <style>${CSS}</style>${bgColorStyle}${renderOptionalStyleTag(opts.customCss)}
 </head>
 <body>
   <div class="layout">
@@ -355,7 +422,7 @@ function renderOtpForm(opts: {
       </div>`
           : ''
       }
-      <p class="otp-subtitle">If a backup email matches, we sent an 8-digit code to <strong>${escapeHtml(maskedEmail)}</strong></p>
+      <p id="code-help" class="otp-subtitle">If a backup email matches, we sent a ${opts.otpLength}-${opts.otpCharset === 'alphanumeric' ? 'character' : 'digit'} code to <strong>${escapeHtml(maskedEmail)}</strong></p>
       <form method="POST" action="/auth/recover/verify" id="form-verify" class="form-group">
         <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
         <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
@@ -381,7 +448,7 @@ function renderOtpForm(opts: {
             Sign In with Certified
           </button>
           <div class="otp-links">
-            <a href="/oauth/authorize?request_uri=${encodedUri}" class="link-btn">Back to Sign In</a>
+            <a href="${backHref}" class="link-btn">Back to Sign In</a>
             <div class="otp-links-right">
               <button type="submit" form="form-resend" class="link-btn">Resend Code</button>
             </div>

@@ -1,108 +1,63 @@
 /**
- * Resolves OAuth client metadata from client_id URLs.
- * In ATProto, client_id is typically a URL pointing to a JSON metadata document.
- * Caches results for 10 minutes to avoid repeated fetches.
+ * Re-exports client metadata utilities from @certified-app/shared.
+ *
+ * The implementation was moved to the shared package so that pds-core can
+ * also resolve custom ePDS metadata fields (e.g. epds_skip_consent_on_signup).
+ * Auth-service imports are preserved for backwards compatibility.
  */
+import {
+  resolveClientMetadata,
+  resolveClientName,
+  getClientCss,
+  createLogger,
+} from '@certified-app/shared'
+import type { ClientMetadata } from '@certified-app/shared'
 
-export interface ClientMetadata {
-  client_name?: string
-  client_uri?: string
-  logo_uri?: string
-  tos_uri?: string
-  policy_uri?: string
-  email_template_uri?: string
-  email_subject_template?: string
-  brand_color?: string
-  background_color?: string
-}
+export {
+  resolveClientMetadata,
+  resolveClientName,
+  escapeCss,
+  getClientCss,
+  clearClientMetadataCache,
+} from '@certified-app/shared'
+export type { ClientMetadata, ClientBranding } from '@certified-app/shared'
 
-interface CacheEntry {
-  metadata: ClientMetadata
-  expiresAt: number
-}
+const logger = createLogger('auth:client-metadata')
 
-const CACHE_TTL_MS = 10 * 60 * 1000 // 10 minutes
-const FETCH_TIMEOUT_MS = 5000
-
-const cache = new Map<string, CacheEntry>()
-
-export async function resolveClientName(clientId: string): Promise<string> {
-  const metadata = await resolveClientMetadata(clientId)
-  return metadata.client_name || extractDomain(clientId) || 'an application'
-}
-
-export async function resolveClientMetadata(
+/**
+ * Best-effort branding resolution. Returns safe defaults on any error so that
+ * a transient metadata fetch failure never breaks a page render.
+ *
+ * In practice resolveClientMetadata/resolveClientName never throw (they catch
+ * internally), but this wrapper makes that resilience explicit at the call site
+ * and guards against future regressions.
+ *
+ * The catch branch is intentional belt-and-suspenders — it is not currently
+ * reachable in normal operation.
+ */
+export async function resolveClientBranding(
   clientId: string,
-): Promise<ClientMetadata> {
-  // Only fetch if client_id looks like a URL
-  if (!clientId.startsWith('http://') && !clientId.startsWith('https://')) {
-    return { client_name: clientId }
-  }
-
-  // Check cache
-  const cached = cache.get(clientId)
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.metadata
-  }
-
+  trustedClients: string[],
+): Promise<{
+  clientMeta: ClientMetadata
+  clientName: string
+  customCss: string | null
+}> {
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => {
-      controller.abort()
-    }, FETCH_TIMEOUT_MS)
-
-    const res = await fetch(clientId, {
-      signal: controller.signal,
-      headers: { Accept: 'application/json' },
-    })
-
-    clearTimeout(timeout)
-
-    if (!res.ok) {
-      return fallback(clientId)
-    }
-
-    const metadata = (await res.json()) as ClientMetadata
-
-    // Cache the result
-    cache.set(clientId, {
-      metadata,
-      expiresAt: Date.now() + CACHE_TTL_MS,
-    })
-
-    return metadata
-  } catch {
-    return fallback(clientId)
+    const clientMeta = await resolveClientMetadata(clientId)
+    const clientName =
+      clientMeta.client_name || (await resolveClientName(clientId))
+    const customCss = getClientCss(clientId, clientMeta, trustedClients)
+    logger.debug(
+      { clientId, trusted: customCss !== null },
+      'client CSS trust check',
+    )
+    return { clientMeta, clientName, customCss }
+  } catch (err) {
+    logger.warn(
+      { err, clientId },
+      'Failed to resolve client branding, using defaults',
+    )
+    return { clientMeta: {}, clientName: 'the application', customCss: null }
   }
 }
-
-function fallback(clientId: string): ClientMetadata {
-  const name = extractDomain(clientId)
-  const metadata = { client_name: name || undefined }
-  // Cache failures briefly (1 minute) to avoid hammering
-  cache.set(clientId, {
-    metadata,
-    expiresAt: Date.now() + 60_000,
-  })
-  return metadata
-}
-
-function extractDomain(urlStr: string): string | null {
-  try {
-    const url = new URL(urlStr)
-    return url.hostname
-  } catch {
-    return null
-  }
-}
-
-// Cleanup expired cache entries periodically
-setInterval(
-  () => {
-    const now = Date.now()
-    for (const [key, entry] of cache) {
-      if (entry.expiresAt <= now) cache.delete(key)
-    }
-  },
-  5 * 60 * 1000,
-).unref()

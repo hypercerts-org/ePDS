@@ -1,5 +1,11 @@
 # PKCE and DPoP Helper Implementations
 
+> **Flow 2 does not need these helpers.** If your app uses
+> `@atproto/oauth-client-node` (recommended for any flow that does not pass
+> a raw email as `login_hint`), the library handles PKCE, DPoP, and nonce
+> retry internally. These helpers are only needed for **Flow 1** (hand-rolled
+> PAR/DPoP with email `login_hint`).
+
 Copy these into your project. They have no dependencies beyond Node's built-in
 `node:crypto` module.
 
@@ -134,11 +140,12 @@ function derToRaw(der: Buffer): Buffer {
 }
 ```
 
-## Nonce retry pattern
+## Nonce retry pattern (Flow 1 only)
 
 ePDS always rejects the first DPoP proof with a `400` and a `dpop-nonce`
-header. This is standard behaviour — wrap every PAR and token request in
-this retry loop:
+header. This is standard behaviour. For Flow 1 (hand-rolled), wrap every
+PAR and token request in this retry loop. Flow 2 does not need this —
+`NodeOAuthClient` handles nonce retry internally.
 
 ```typescript
 async function fetchWithDpopRetry(

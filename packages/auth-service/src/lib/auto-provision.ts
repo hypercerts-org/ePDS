@@ -1,5 +1,6 @@
 import type { AuthServiceContext } from '../context.js'
 import { createLogger, generateRandomHandle } from '@certified-app/shared'
+import { ensurePdsUrl } from './pds-url.js'
 
 const logger = createLogger('auth:auto-provision')
 
@@ -15,7 +16,10 @@ export async function autoProvisionAccount(
   email: string,
 ): Promise<string | null> {
   // Use internal Docker URL to avoid going through Caddy
-  const pdsUrl = process.env.PDS_INTERNAL_URL || ctx.config.pdsPublicUrl
+  const pdsUrl = ensurePdsUrl(
+    process.env.PDS_INTERNAL_URL,
+    ctx.config.pdsPublicUrl,
+  )
 
   const handle = generateRandomHandle(ctx.config.pdsHostname)
 

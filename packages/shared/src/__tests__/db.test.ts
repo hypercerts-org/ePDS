@@ -213,3 +213,23 @@ describe('Auth Flow Operations', () => {
     expect(db.getAuthFlow('flow-cleanup')).toBeUndefined()
   })
 })
+
+describe('Migration: v9 is a no-op (client_logins preserved)', () => {
+  it('client_logins table still exists after all migrations', () => {
+    // v9 was originally a DROP but changed to a no-op. The table is no
+    // longer used by current code but kept to avoid breaking rollbacks.
+    const tables = db['db']
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='client_logins'`,
+      )
+      .all()
+    expect(tables).toHaveLength(1)
+  })
+
+  it('schema version is at least 9 after migration', () => {
+    const row = db['db']
+      .prepare('SELECT version FROM schema_version')
+      .get() as { version: number }
+    expect(row.version).toBeGreaterThanOrEqual(9)
+  })
+})

@@ -20,14 +20,21 @@ Point the following records at your server:
 
 ### Configuration
 
-Copy `.env.example` to `.env` and fill in your values.
-See [configuration.md](configuration.md) for a full reference.
+Run the setup script to generate `.env` and `packages/demo/.env` with all
+secrets auto-generated:
+
+```bash
+./scripts/setup.sh
+```
+
+See [configuration.md](configuration.md) for how env vars work across
+deployment contexts and a full variable reference.
 
 ### Build and Start
 
 ```bash
-# Build images (always use --no-cache — cache busting is broken)
-docker compose build --no-cache
+# Build images (stamps the ePDS version automatically)
+pnpm docker:build
 
 # Start services
 docker compose up -d
@@ -41,7 +48,7 @@ Caddy handles TLS automatically via ACME/Let's Encrypt.
 ### Updating
 
 ```bash
-docker compose build --no-cache
+pnpm docker:build
 docker compose up -d
 ```
 
@@ -115,15 +122,25 @@ grep -v '^\s*#' packages/auth-service/.env | grep -v '^\s*$'
 grep -v '^\s*#' packages/demo/.env | grep -v '^\s*$'
 ```
 
-**Important**: Set `PDS_INTERNAL_URL` on the auth-service to the pds-core
-Railway internal URL (e.g. `http://pds-core.railway.internal:3000`). Without
-this, internal API calls from auth-service to pds-core will fail.
-
-Alternatively, use the Railway CLI:
+**Important**: The setup script sets `PDS_INTERNAL_URL=http://core:3000` (the
+Docker Compose service name). For Railway, you **must** update this in the
+auth-service to the pds-core service's Railway internal URL. Find it via:
 
 ```bash
-cd packages/pds-core && railway variables set KEY=VALUE ...
+railway link -s '@certified-app/pds-core'
+railway variables --json | python3 -c "import sys,json; print(json.load(sys.stdin)['RAILWAY_PRIVATE_DOMAIN'])"
 ```
+
+Then update it on the auth-service:
+
+```bash
+railway link -s '@certified-app/auth-service'
+railway variables set PDS_INTERNAL_URL=http://<private-domain>:3000
+```
+
+Without a correct `PDS_INTERNAL_URL`, the auth service will **crash at startup**
+if the value is missing, or log warnings and fail on auth→PDS calls at runtime
+if it points to the wrong host.
 
 ### DNS Setup
 
@@ -204,12 +221,9 @@ Once the PDS is running, generate a high-`useCount` invite code via the admin
 API and set it as `EPDS_INVITE_CODE` on the pds-core service:
 
 ```bash
-# Encode credentials (portable across GNU/Linux and macOS)
-AUTH=$(printf 'admin:<PDS_ADMIN_PASSWORD>' | base64 | tr -d '\n')
-
-curl -X POST https://<pds-hostname>/xrpc/com.atproto.server.createInviteCode \
+curl -X POST https://$PDS_HOSTNAME/xrpc/com.atproto.server.createInviteCode \
   -H "Content-Type: application/json" \
-  -H "Authorization: Basic $AUTH" \
+  -u "admin:$PDS_ADMIN_PASSWORD" \
   -d '{"useCount": 9999999}'
 ```
 

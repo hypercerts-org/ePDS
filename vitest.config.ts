@@ -14,13 +14,19 @@ export default defineConfig({
       reporter: ['text', 'html', 'lcov'],
       reportsDirectory: './coverage',
       include: ['packages/*/src/**/*.ts'],
-      exclude: ['packages/*/src/__tests__/**', '**/*.test.ts', '**/*.d.ts'],
-      // Baseline thresholds — ratchet these up as coverage improves
+      exclude: [
+        'packages/*/src/__tests__/**',
+        '**/*.test.ts',
+        '**/*.d.ts',
+        'packages/shared/src/version.ts',
+      ],
+      // Ratchet thresholds — update these whenever coverage increases.
+      // See AGENTS.md for the ratcheting policy.
       thresholds: {
-        statements: 20,
-        branches: 13,
-        functions: 34,
-        lines: 20,
+        statements: 37,
+        branches: 33,
+        functions: 54,
+        lines: 36,
       },
     },
   },

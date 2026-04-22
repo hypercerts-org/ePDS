@@ -21,9 +21,14 @@ import {
   escapeHtml,
   signCallback,
   validateLocalPart,
+  type HandleMode,
 } from '@certified-app/shared'
 import { fromNodeHeaders } from 'better-auth/node'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
+import { pingParRequest } from '../lib/ping-par-request.js'
+import { requireInternalEnv } from '../lib/require-internal-env.js'
+import { resolveClientBranding } from '../lib/client-metadata.js'
+import { renderOptionalStyleTag } from '../lib/page-helpers.js'
 
 const logger = createLogger('auth:choose-handle')
 
@@ -36,11 +41,7 @@ export function createChooseHandleRouter(
 ): Router {
   const router = Router()
 
-  const pdsUrl = process.env.PDS_INTERNAL_URL
-  const internalSecret = process.env.EPDS_INTERNAL_SECRET
-  if (!pdsUrl || !internalSecret) {
-    throw new Error('PDS_INTERNAL_URL and EPDS_INTERNAL_SECRET must be set')
-  }
+  const { pdsUrl, internalSecret } = requireInternalEnv()
   const handleDomain = ctx.config.pdsHostname
 
   /**
@@ -52,7 +53,11 @@ export function createChooseHandleRouter(
     res: Response,
   ): Promise<{
     flowId: string
-    flow: { requestUri: string }
+    flow: {
+      requestUri: string
+      handleMode: HandleMode | null
+      clientId: string | null
+    }
     email: string
   } | null> {
     // Guard 1: auth_flow cookie
@@ -116,7 +121,17 @@ export function createChooseHandleRouter(
     const result = await getFlowAndSession(req, res)
     if (!result) return
 
-    const { email } = result
+    const { email, flowId } = result
+
+    // Guard: reject flows with handleMode='random' — they should skip the picker entirely
+    if (result.flow.handleMode === 'random') {
+      logger.info(
+        { email, flowId, handleMode: 'random' },
+        'Random flow reached choose-handle — redirecting to /auth/complete',
+      )
+      res.redirect(303, '/auth/complete')
+      return
+    }
 
     // Guard: if PDS account already exists for this email, redirect to /auth/complete
     const did = await getDidByEmail(email, pdsUrl, internalSecret)
@@ -133,27 +148,20 @@ export function createChooseHandleRouter(
     // user is on this page. atproto's AUTHORIZATION_INACTIVITY_TIMEOUT is 5 min
     // — without this ping, users who take >5 min to pick a handle would hit
     // "This request has expired" inside epds-callback after account creation.
-    try {
-      const pingRes = await fetch(
-        `${pdsUrl}/_internal/ping-request?request_uri=${encodeURIComponent(result.flow.requestUri)}`,
+    const ping = await pingParRequest(
+      result.flow.requestUri,
+      pdsUrl,
+      internalSecret,
+    )
+    if (!ping.ok) {
+      logger.warn(
         {
-          headers: { 'x-internal-secret': internalSecret },
-          signal: AbortSignal.timeout(3000),
+          status: ping.status,
+          err: ping.err,
+          requestUri: result.flow.requestUri,
         },
+        'Failed to extend request_uri on choose-handle',
       )
-      if (!pingRes.ok) {
-        logger.warn(
-          { status: pingRes.status, requestUri: result.flow.requestUri },
-          'Failed to extend request_uri on choose-handle',
-        )
-        res
-          .status(400)
-          .type('html')
-          .send(renderError('Session expired, please start over'))
-        return
-      }
-    } catch (err) {
-      logger.warn({ err }, 'Failed to ping request_uri on choose-handle')
       res
         .status(400)
         .type('html')
@@ -161,7 +169,22 @@ export function createChooseHandleRouter(
       return
     }
 
-    const error = req.query.error as string | undefined
+    const KNOWN_ERROR_MESSAGES: Record<string, string> = {
+      handle_taken: 'That handle was just taken — please choose another.',
+    }
+    const rawError = req.query.error as string | undefined
+    const error = rawError
+      ? (KNOWN_ERROR_MESSAGES[rawError] ?? rawError)
+      : undefined
+    const showRandomButton = result.flow.handleMode === 'picker-with-random'
+
+    // CSS injection for trusted clients — clientId is already in the flow row
+    const clientId = result.flow.clientId
+    const customCss = clientId
+      ? (await resolveClientBranding(clientId, ctx.config.trustedClients))
+          .customCss
+      : null
+
     res
       .type('html')
       .send(
@@ -169,9 +192,11 @@ export function createChooseHandleRouter(
           handleDomain,
           error,
           res.locals.csrfToken,
-          ctx.config.brandColor,
+           ctx.config.brandColor,
           ctx.config.backgroundColor,
           ctx.config.panelColor,
+          showRandomButton,
+          customCss,
         ),
       )
   })
@@ -184,6 +209,24 @@ export function createChooseHandleRouter(
     if (!result) return
 
     const { flowId, flow, email } = result
+
+    // Guard: reject flows with handleMode='random' — they should skip the picker entirely
+    if (flow.handleMode === 'random') {
+      logger.info(
+        { email, flowId, handleMode: 'random' },
+        'Random flow reached POST choose-handle — redirecting to /auth/complete',
+      )
+      res.redirect(303, '/auth/complete')
+      return
+    }
+
+    const showRandomButton = flow.handleMode === 'picker-with-random'
+
+    // CSS injection for trusted clients
+    const customCss = flow.clientId
+      ? (await resolveClientBranding(flow.clientId, ctx.config.trustedClients))
+          .customCss
+      : null
 
     // Guard: if PDS account already exists, bounce back to /auth/complete
     // (mirrors the same check in the GET handler — prevents signing a
@@ -201,27 +244,12 @@ export function createChooseHandleRouter(
     // Re-ping the PAR request to ensure it hasn't expired while the user was
     // on the handle picker page. Without this, a user who took >5 min would
     // get "This request has expired" inside epds-callback after account creation.
-    try {
-      const pingRes = await fetch(
-        `${pdsUrl}/_internal/ping-request?request_uri=${encodeURIComponent(flow.requestUri)}`,
-        {
-          headers: { 'x-internal-secret': internalSecret },
-          signal: AbortSignal.timeout(3000),
-        },
+    const ping = await pingParRequest(flow.requestUri, pdsUrl, internalSecret)
+    if (!ping.ok) {
+      logger.warn(
+        { status: ping.status, err: ping.err, requestUri: flow.requestUri },
+        'Failed to extend request_uri on POST choose-handle',
       )
-      if (!pingRes.ok) {
-        logger.warn(
-          { status: pingRes.status, requestUri: flow.requestUri },
-          'Failed to extend request_uri on POST choose-handle',
-        )
-        res
-          .status(400)
-          .type('html')
-          .send(renderError('Session expired, please start over'))
-        return
-      }
-    } catch (err) {
-      logger.warn({ err }, 'Failed to ping request_uri on POST choose-handle')
       res
         .status(400)
         .type('html')
@@ -246,6 +274,8 @@ export function createChooseHandleRouter(
             ctx.config.brandColor,
             ctx.config.backgroundColor,
             ctx.config.panelColor,
+            showRandomButton,
+            customCss,
           ),
         )
       return
@@ -280,6 +310,8 @@ export function createChooseHandleRouter(
               ctx.config.brandColor,
               ctx.config.backgroundColor,
               ctx.config.panelColor,
+              showRandomButton,
+              customCss,
             ),
           )
         return
@@ -296,6 +328,8 @@ export function createChooseHandleRouter(
             ctx.config.brandColor,
             ctx.config.backgroundColor,
             ctx.config.panelColor,
+            showRandomButton,
+            customCss,
           ),
         )
       return
@@ -312,6 +346,8 @@ export function createChooseHandleRouter(
             ctx.config.brandColor,
             ctx.config.backgroundColor,
             ctx.config.panelColor,
+            showRandomButton,
+            customCss,
           ),
         )
       return
@@ -414,13 +450,15 @@ export function createChooseHandleRouter(
 // Template
 // ---------------------------------------------------------------------------
 
-function renderChooseHandlePage(
+export function renderChooseHandlePage(
   handleDomain: string,
   error?: string,
   csrfToken?: string,
   brandColor?: string,
   backgroundColor?: string,
   panelColor?: string,
+  showRandomButton?: boolean,
+  customCss?: string | null,
 ): string {
   let rootStyleProps = ''
   if (brandColor && brandColor !== '#8338ec') {
@@ -880,7 +918,10 @@ function renderChooseHandlePage(
     }
 
     .admonition-icon { flex-shrink: 0; margin-top: 1px; }
-  </style>${bgColorStyle}
+    .btn-secondary { width: 100%; padding: 10px; background: white; color: #0f1828; border: 1px solid #0f1828; border-radius: 8px; font-size: 15px; font-weight: 500; cursor: pointer; margin-top: 8px; }
+    .btn-secondary:hover:not(:disabled) { background: #f0f2f5; }
+    .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+  </style>${bgColorStyle}${renderOptionalStyleTag(customCss)}
 </head>
 <body>
   <div class="layout">
@@ -951,7 +992,8 @@ function renderChooseHandlePage(
         </div>
 
         <div class="form-actions">
-          <button type="submit" id="submit-btn" class="btn-primary" disabled>Continue</button>
+          ${showRandomButton ? `<button type="button" id="random-btn" class="btn-secondary">Generate random handle</button>` : ''}
+      <button type="submit" id="submit-btn" class="btn-primary" disabled>Continue</button>
         </div>
       </form>
     </main>
@@ -1033,7 +1075,7 @@ function renderChooseHandlePage(
         setStatus('Checking\u2026', 'checking');
 
         fetch('/api/check-handle?handle=' + encodeURIComponent(value), {
-          signal: currentAbort.signal,
+          signal: AbortSignal.any([currentAbort.signal, AbortSignal.timeout(5000)]),
         })
           .then(function(r) { return r.json(); })
           .then(function(data) {
@@ -1096,12 +1138,83 @@ function renderChooseHandlePage(
         }, 500);
       });
 
-      // Disable button for the duration of the POST to prevent double-submit
+      // Random handle button: generate a base36 local part client-side (mirrors
+      // generateRandomHandle() in shared/src/crypto.ts — duplicated here because
+      // this script is inlined in a template literal and cannot import server-side
+      // modules) and confirm availability via /api/check-handle, retrying up to
+      // 3 times on collision.
+      var randomBtn = document.getElementById('random-btn');
+      if (randomBtn) {
+        function randomLocalPart() {
+          var arr = new Uint8Array(4);
+          crypto.getRandomValues(arr);
+          // Reconstruct as unsigned 32-bit big-endian int (matches readUInt32BE)
+          var num = ((arr[0] << 24) | (arr[1] << 16) | (arr[2] << 8) | arr[3]) >>> 0;
+          return num.toString(36).padStart(6, '0').slice(0, 6);
+        }
+
+        function tryRandomHandle(attemptsLeft) {
+          if (attemptsLeft <= 0) {
+            setStatus('Could not find a free handle. Try again.', 'format-error');
+            randomBtn.disabled = false;
+            return;
+          }
+          var local = randomLocalPart();
+          input.value = local;
+          isAvailable = null;
+          updateSubmit();
+          setStatus('Checking\u2026', 'checking');
+
+          // Cancel any in-flight random handle check from a previous click
+          if (currentAbort) currentAbort.abort();
+          currentAbort = new AbortController();
+
+          fetch('/api/check-handle?handle=' + encodeURIComponent(local), {
+            signal: AbortSignal.any([currentAbort.signal, AbortSignal.timeout(5000)]),
+          })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+              currentAbort = null;
+              if (data.available) {
+                isAvailable = true;
+                setStatus('\u2713 Available!', 'available');
+                updateSubmit();
+                randomBtn.disabled = false;
+              } else if (data.error) {
+                // Service error — don't retry, surface the problem
+                setStatus('Could not check availability.', 'format-error');
+                randomBtn.disabled = false;
+              } else {
+                // Genuinely taken — retry with a new random value
+                tryRandomHandle(attemptsLeft - 1);
+              }
+            })
+            .catch(function(err) {
+              if (err.name === 'AbortError') {
+                randomBtn.disabled = false;
+                return; // silently ignore cancelled requests
+              }
+              currentAbort = null;
+              setStatus('Could not check availability.', 'format-error');
+              randomBtn.disabled = false;
+            });
+        }
+
+        randomBtn.addEventListener('click', function() {
+          clearTimeout(debounceTimer);
+          if (currentAbort) { currentAbort.abort(); currentAbort = null; }
+          randomBtn.disabled = true;
+          tryRandomHandle(3);
+        });
+      }
+
+      // Disable buttons for the duration of the POST to prevent double-submit
       var form = document.getElementById('handle-form');
       if (form) {
         form.addEventListener('submit', function() {
           submitBtn.disabled = true;
           submitBtn.textContent = 'Creating\u2026';
+        if (randomBtn) { randomBtn.disabled = true; }
         });
       }
 

@@ -16,11 +16,16 @@
 import { Router, type Request, type Response } from 'express'
 import { escapeHtml, maskEmail, createLogger } from '@certified-app/shared'
 import { fromNodeHeaders } from 'better-auth/node'
+import type { AuthServiceContext } from '../context.js'
+import { buildOtpInputProps } from '../otp-input.js'
+import type { BetterAuthInstance } from '../better-auth.js'
 
 const logger = createLogger('auth:account-login')
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth instance has no exported type
-export function createAccountLoginRouter(auth: any): Router {
+export function createAccountLoginRouter(
+  auth: BetterAuthInstance,
+  ctx: AuthServiceContext,
+): Router {
   const router = Router()
 
   // GET /account/login - show email form (or redirect if already logged in)
@@ -29,7 +34,7 @@ export function createAccountLoginRouter(auth: any): Router {
       const session = await auth.api.getSession({
         headers: fromNodeHeaders(req.headers),
       })
-      if (session?.user?.email) {
+      if (session?.user.email) {
         res.redirect(303, '/account')
         return
       }
@@ -64,9 +69,14 @@ export function createAccountLoginRouter(auth: any): Router {
       // Anti-enumeration: show OTP form even on failure
     }
 
-    res
-      .type('html')
-      .send(renderOtpForm({ email, csrfToken: res.locals.csrfToken }))
+    res.type('html').send(
+      renderOtpForm({
+        email,
+        csrfToken: res.locals.csrfToken,
+        otpLength: ctx.config.otpLength,
+        otpCharset: ctx.config.otpCharset,
+      }),
+    )
   })
 
   // POST /account/verify-otp - verify OTP via better-auth, redirect to /account
@@ -79,6 +89,8 @@ export function createAccountLoginRouter(auth: any): Router {
         renderOtpForm({
           email,
           csrfToken: res.locals.csrfToken,
+          otpLength: ctx.config.otpLength,
+          otpCharset: ctx.config.otpCharset,
           error: 'Email and code are required.',
         }),
       )
@@ -88,27 +100,19 @@ export function createAccountLoginRouter(auth: any): Router {
     try {
       // Call better-auth's sign-in endpoint — it sets the session cookie and returns JSON
       const response = await auth.api.signInEmailOTP({
-        body: { email, otp },
+        body: { email, otp: otp.toUpperCase() },
         // We don't pass headers here since we want better-auth to create a new session
         // The session cookie will be set on the response
         asResponse: true,
       })
 
-      if (
-        response instanceof Response ||
-        (response && typeof response.headers?.get === 'function')
-      ) {
-        // Forward the Set-Cookie header from better-auth's response
-        const setCookie = response.headers.get('set-cookie')
-        if (setCookie) {
-          res.setHeader('Set-Cookie', setCookie)
-        }
-        res.redirect(303, '/account')
-        return
+      // Forward the Set-Cookie header from better-auth's response
+      const setCookie = response.headers.get('set-cookie')
+      if (setCookie) {
+        res.setHeader('Set-Cookie', setCookie)
       }
-
-      // If not a Response object, assume success
       res.redirect(303, '/account')
+      return
     } catch (err: unknown) {
       logger.warn({ err, email }, 'OTP verification failed')
       const errMsg =
@@ -119,6 +123,8 @@ export function createAccountLoginRouter(auth: any): Router {
         renderOtpForm({
           email,
           csrfToken: res.locals.csrfToken,
+          otpLength: ctx.config.otpLength,
+          otpCharset: ctx.config.otpCharset,
           error: errMsg,
         }),
       )
@@ -159,9 +165,12 @@ function renderLoginForm(opts: { csrfToken: string; error?: string }): string {
 function renderOtpForm(opts: {
   email: string
   csrfToken: string
+  otpLength: number
+  otpCharset: 'numeric' | 'alphanumeric'
   error?: string
 }): string {
   const maskedEmail = maskEmail(opts.email)
+  const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -174,15 +183,23 @@ function renderOtpForm(opts: {
 <body>
   <div class="container">
     <h1>Enter your code</h1>
-    <p class="subtitle">We sent an 8-digit code to <strong>${escapeHtml(maskedEmail)}</strong></p>
+    <p id="otp-help" class="subtitle">We sent a ${opts.otpLength}-${opts.otpCharset === 'alphanumeric' ? 'character' : 'digit'} code to <strong>${escapeHtml(maskedEmail)}</strong></p>
     ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
     <form method="POST" action="/account/verify-otp">
       <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
       <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
       <div class="field">
         <input type="text" id="otp" name="otp" required autofocus
-               maxlength="8" pattern="[0-9]{8}" inputmode="numeric" autocomplete="one-time-code"
-               placeholder="00000000" class="otp-input">
+               aria-label="One-time code"
+               aria-describedby="otp-help"
+               maxlength="${opts.otpLength}"
+               pattern="${inputProps.pattern}"
+               inputmode="${inputProps.inputmode}"
+               autocomplete="one-time-code"
+               autocapitalize="${inputProps.autocapitalize}"
+               placeholder="${inputProps.placeholder}"
+               class="otp-input"
+               style="letter-spacing: ${Math.max(2, Math.round(32 / opts.otpLength))}px">
       </div>
       <button type="submit" class="btn-primary">Verify</button>
     </form>
@@ -206,7 +223,7 @@ const CSS = `
   .field label { display: block; font-size: 14px; font-weight: 500; color: #333; margin-bottom: 6px; }
   .field input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; outline: none; }
   .field input:focus { border-color: #0f1828; }
-  .otp-input { font-size: 28px !important; text-align: center; letter-spacing: 8px; font-family: 'SF Mono', Menlo, Consolas, monospace !important; padding: 14px !important; }
+  .otp-input { font-size: 28px !important; text-align: center; font-family: 'SF Mono', Menlo, Consolas, monospace !important; padding: 14px !important; }
   .btn-primary { width: 100%; padding: 12px; background: #0f1828; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; }
   .btn-primary:hover { background: #1a2a40; }
   .btn-secondary { display: inline-block; color: #0f1828; background: none; border: none; font-size: 14px; cursor: pointer; text-decoration: underline; }

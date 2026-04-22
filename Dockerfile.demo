@@ -25,7 +25,14 @@ RUN pnpm install --frozen-lockfile
 FROM deps AS build
 COPY packages/demo/ packages/demo/
 COPY tsconfig.json ./
-RUN pnpm --filter @certified-app/demo build
+# Stamp the ePDS version so Next.js inlines NEXT_PUBLIC_EPDS_VERSION.
+ARG RAILWAY_GIT_COMMIT_SHA
+COPY .epds-version* ./
+COPY scripts/resolve-version.sh /tmp/
+RUN /tmp/resolve-version.sh && \
+    export NEXT_PUBLIC_EPDS_VERSION="$(cat .epds-version)" && \
+    rm /tmp/resolve-version.sh && \
+    pnpm --filter @certified-app/demo build
 
 # -- Production --
 FROM node:20-alpine

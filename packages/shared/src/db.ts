@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import * as path from 'node:path'
 import * as fs from 'node:fs'
+import type { HandleMode } from './handle.js'
 
 export interface VerificationTokenRow {
   tokenHash: string
@@ -36,6 +37,7 @@ export interface AuthFlowRow {
   requestUri: string
   clientId: string | null
   email: string | null
+  handleMode: HandleMode | null
   createdAt: number
   expiresAt: number
 }
@@ -175,6 +177,16 @@ export class EpdsDb {
       () => {
         this.db.exec(`DROP TABLE IF EXISTS account_session;`)
       },
+
+      // v8: Add handle_mode column to auth_flow for per-flow handle assignment strategy
+      () => {
+        this.db.exec(`ALTER TABLE auth_flow ADD COLUMN handle_mode TEXT;`)
+      },
+
+      // v9: no-op. PR #21 originally dropped client_logins here, but
+      // changed to a no-op since the table is harmless to keep and dropping
+      // it prevents rollback. The table is no longer used by current code.
+      () => {},
     ]
 
     for (let i = currentVersion; i < migrations.length; i++) {
@@ -402,17 +414,19 @@ export class EpdsDb {
     flowId: string
     requestUri: string
     clientId: string | null
+    handleMode?: HandleMode | null
     expiresAt: number
   }): void {
     this.db
       .prepare(
-        `INSERT INTO auth_flow (flow_id, request_uri, client_id, created_at, expires_at)
-       VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO auth_flow (flow_id, request_uri, client_id, handle_mode, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
       )
       .run(
         data.flowId,
         data.requestUri,
         data.clientId,
+        data.handleMode ?? null,
         Date.now(),
         data.expiresAt,
       )
@@ -422,7 +436,7 @@ export class EpdsDb {
     return this.db
       .prepare(
         `SELECT flow_id as flowId, request_uri as requestUri, client_id as clientId,
-       email, created_at as createdAt, expires_at as expiresAt
+       email, handle_mode as handleMode, created_at as createdAt, expires_at as expiresAt
        FROM auth_flow WHERE flow_id = ? AND expires_at > ?`,
       )
       .get(flowId, Date.now()) as AuthFlowRow | undefined
@@ -433,7 +447,7 @@ export class EpdsDb {
     return this.db
       .prepare(
         `SELECT flow_id as flowId, request_uri as requestUri, client_id as clientId,
-       email, created_at as createdAt, expires_at as expiresAt
+       email, handle_mode as handleMode, created_at as createdAt, expires_at as expiresAt
        FROM auth_flow WHERE request_uri = ? AND expires_at > ?
        ORDER BY created_at DESC LIMIT 1`,
       )
@@ -477,23 +491,6 @@ export class EpdsDb {
       }
     ).c
     return { pendingTokens, backupEmails, rateLimitEntries }
-  }
-
-  // ── Per-Client Login Tracking ──
-
-  hasClientLogin(email: string, clientId: string): boolean {
-    const row = this.db
-      .prepare(`SELECT 1 FROM client_logins WHERE email = ? AND client_id = ?`)
-      .get(email.toLowerCase(), clientId)
-    return !!row
-  }
-
-  recordClientLogin(email: string, clientId: string): void {
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO client_logins (email, client_id, first_login_at) VALUES (?, ?, ?)`,
-      )
-      .run(email.toLowerCase(), clientId, Date.now())
   }
 
   close(): void {
