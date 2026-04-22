@@ -186,6 +186,10 @@ When(
     const message = await waitForEmail(`to:${email}`)
     const otp = await extractOtp(message.ID)
     await page.fill('#code', otp)
+    // New users must accept ToS before the client-side submit guard lets the
+    // sign-in proceed. Wait for #tos-field to be revealed by checkIsNewUser.
+    await expect(page.locator('#tos-field')).toBeVisible({ timeout: 10_000 })
+    await page.check('#tos-accept')
     await page.click('#form-verify-otp .btn-primary')
 
     // Wait for the choose-handle page — don't submit the handle form
