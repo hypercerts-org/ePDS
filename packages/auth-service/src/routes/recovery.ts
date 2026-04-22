@@ -197,6 +197,29 @@ export function createRecoveryRouter(
       return
     }
 
+    // Gate the ToS bypass on the submitted email actually being a verified
+    // backup email for some PDS account. Without this check, a fresh
+    // attacker could request an OTP via /sign-in/email-otp for any email,
+    // then POST it here and bypass the enforceTosAcceptance hook — creating
+    // an account without ever ticking the ToS box.
+    const recoveryDid = ctx.db.getDidByBackupEmail(email)
+    if (!recoveryDid) {
+      const { customCss, backUri } = await getFlowCss(req)
+      res.send(
+        renderRecoveryOtpForm({
+          email,
+          csrfToken: res.locals.csrfToken,
+          requestUri,
+          error: 'Invalid or expired code. Please try again.',
+          otpLength,
+          otpCharset,
+          customCss,
+          backUri,
+        }),
+      )
+      return
+    }
+
     try {
       // Verify OTP via better-auth — this creates/updates a session.
       //
