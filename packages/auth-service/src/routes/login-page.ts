@@ -22,6 +22,9 @@
  */
 import { Router, type Request, type Response } from 'express'
 import { randomBytes } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { AuthServiceContext } from '../context.js'
 import {
   resolveClientMetadata,
@@ -45,6 +48,25 @@ const logger = createLogger('auth:login-page')
 
 const AUTH_FLOW_COOKIE = 'epds_auth_flow'
 const AUTH_FLOW_TTL_MS = 10 * 60 * 1000 // 10 minutes
+
+// Inline the Certified wordmark so CSS `color` can tint it via `currentColor`.
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const CERTIFIED_MARK_SVG = readFileSync(
+  path.resolve(
+    __dirname,
+    '..',
+    '..',
+    'public',
+    'certified-text-monochrome.svg',
+  ),
+  'utf8',
+)
+  .replace(/fill="#726A60"/g, 'fill="currentColor"')
+  .replace(/\s(width|height)="[^"]*"/g, '')
+  .replace(
+    '<svg ',
+    '<svg class="certified-mark" aria-label="Certified" role="img" ',
+  )
 
 export function createLoginPageRouter(ctx: AuthServiceContext): Router {
   const router = Router()
@@ -220,10 +242,10 @@ function renderLoginPage(opts: {
   const b = opts.branding
   const appName = b.client_name || opts.clientName || 'Certified'
   const brandColor = b.brand_color || '#1A130F'
-  const bgColor = b.background_color || '#F2EBE4'
+  const bgColor = b.background_color || '#F5F5F5'
   const logoHtml = b.logo_uri
     ? `<img src="${escapeHtml(b.logo_uri)}" alt="${escapeHtml(appName)}" class="client-logo">`
-    : ''
+    : `<img src="/static/certified-brandmark.svg" alt="Certified" class="client-logo">`
 
   const otp = otpHtmlAttrs()
   const otpDesc = otpDescriptionText()
@@ -275,31 +297,33 @@ function renderLoginPage(opts: {
   <title>Sign in to ${escapeHtml(appName)}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: ${escapeHtml(bgColor)}; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-    .container { background: transparent; padding: 40px; max-width: 420px; width: 100%; text-align: center; }
-    .client-logo { height: 80px; margin-bottom: 24px; display: block; margin-left: auto; margin-right: auto; }
-    h1 { font-size: 24px; margin-bottom: 8px; color: #1A130F; }
-    .subtitle { color: #555; margin-bottom: 24px; font-size: 15px; line-height: 1.5; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: ${escapeHtml(bgColor)}; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; color: #1A130F; }
+    .container { background: #ffffff; padding: 48px 40px 32px; max-width: 440px; width: 100%; text-align: center; border-radius: 20px; box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.04); }
+    .client-logo { max-height: 56px; max-width: 200px; margin: 0 auto 32px; display: block; }
+    h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; color: #1A130F; letter-spacing: -0.01em; }
+    .subtitle { color: #6b6b6b; margin-bottom: 28px; font-size: 15px; line-height: 1.5; }
     .field { margin-bottom: 16px; text-align: left; }
     .field label { display: block; font-size: 14px; font-weight: 500; color: #333; margin-bottom: 6px; }
-    .field input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; outline: none; background: white; }
+    .field input { width: 100%; padding: 12px 14px; border: 1px solid #e5e5e5; border-radius: 10px; font-size: 16px; outline: none; background: white; transition: border-color 0.15s; }
     .field input:focus { border-color: ${escapeHtml(brandColor)}; }
-    .otp-input { font-size: 28px !important; text-align: center; letter-spacing: 8px; font-family: 'SF Mono', Menlo, Consolas, monospace !important; padding: 14px !important; }
+    .otp-input { font-size: 28px !important; text-align: center; letter-spacing: 8px; font-family: 'SF Mono', Menlo, Consolas, monospace !important; padding: 16px !important; }
     .otp-input:focus { border-color: ${escapeHtml(brandColor)} !important; }
-    .btn-primary { width: 100%; padding: 12px; background: ${escapeHtml(brandColor)}; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; }
+    .btn-primary { width: 100%; padding: 13px; background: ${escapeHtml(brandColor)}; color: white; border: none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
     .btn-primary:hover { opacity: 0.9; }
     .btn-primary:disabled { opacity: 0.7; cursor: not-allowed; }
-    .btn-secondary { display: inline-block; margin-top: 12px; color: #555; background: none; border: none; font-size: 14px; cursor: pointer; text-decoration: underline; }
-    .btn-social { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 10px 16px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; font-weight: 500; cursor: pointer; text-decoration: none; background: white; color: #333; margin-bottom: 8px; }
-    .btn-social:hover { background: #f5f5f5; }
-    .divider { display: flex; align-items: center; gap: 12px; margin: 16px 0; color: #888; font-size: 13px; }
-    .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #ddd; }
-    .error { color: #dc3545; background: #fdf0f0; padding: 12px; border-radius: 8px; margin: 12px 0; font-size: 14px; }
+    .btn-secondary { display: inline-block; margin-top: 12px; color: #6b6b6b; background: none; border: none; font-size: 14px; cursor: pointer; text-decoration: underline; }
+    .btn-social { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 11px 16px; border: 1px solid #e5e5e5; border-radius: 10px; font-size: 15px; font-weight: 500; cursor: pointer; text-decoration: none; background: white; color: #333; margin-bottom: 8px; transition: background 0.15s; }
+    .btn-social:hover { background: #fafafa; }
+    .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: #999; font-size: 13px; }
+    .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #ececec; }
+    .error { color: #dc3545; background: #fdf0f0; padding: 12px; border-radius: 10px; margin: 12px 0; font-size: 14px; text-align: left; }
     .step-otp { display: none; }
     .step-otp.active { display: block; }
     .step-email.hidden { display: none; }
-    .recovery-link { display: block; margin-top: 16px; color: #888; font-size: 13px; text-decoration: none; }
+    .recovery-link { display: block; margin-top: 16px; color: #999; font-size: 13px; text-decoration: none; }
     .recovery-link:hover { color: #555; }
+    .powered-by { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 32px; padding-top: 20px; border-top: 1px solid #f0f0f0; color: #999; font-size: 13px; }
+    .powered-by .certified-mark { height: 14px; width: auto; display: block; }
   </style>${opts.customCss ? `\n  <style>${opts.customCss}</style>` : ''}
 </head>
 <body>
@@ -349,6 +373,11 @@ function renderLoginPage(opts: {
        class="recovery-link" id="recovery-link" style="display:${opts.initialStep === 'otp' ? 'block' : 'none'};">
       Recover with backup email
     </a>
+
+    <div class="powered-by">
+      <span>Powered by</span>
+      ${CERTIFIED_MARK_SVG}
+    </div>
   </div>
 
   <script>
