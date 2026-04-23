@@ -192,7 +192,7 @@ export function createChooseHandleRouter(
           handleDomain,
           error,
           res.locals.csrfToken,
-           ctx.config.brandColor,
+          ctx.config.brandColor,
           ctx.config.backgroundColor,
           ctx.config.panelColor,
           showRandomButton,
@@ -866,6 +866,7 @@ export function renderChooseHandlePage(
     .form-actions {
       display: flex;
       flex-direction: column;
+      gap: 8px;
       margin-top: 8px;
     }
 
@@ -918,7 +919,7 @@ export function renderChooseHandlePage(
     }
 
     .admonition-icon { flex-shrink: 0; margin-top: 1px; }
-    .btn-secondary { width: 100%; padding: 10px; background: white; color: #0f1828; border: 1px solid #0f1828; border-radius: 8px; font-size: 15px; font-weight: 500; cursor: pointer; margin-top: 8px; }
+    .btn-secondary { width: 100%; padding: 10px; background: white; color: #0f1828; border: 1px solid #0f1828; border-radius: 8px; font-size: 15px; font-weight: 500; cursor: pointer; }
     .btn-secondary:hover:not(:disabled) { background: #f0f2f5; }
     .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
   </style>${bgColorStyle}${renderOptionalStyleTag(customCss)}
