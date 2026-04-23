@@ -30,6 +30,7 @@ import {
   validateClientMetadataForPreview,
   type ClientMetadata,
 } from '@certified-app/shared'
+import { buildPdsAuthorizeUrl } from '../lib/page-helpers.js'
 import { renderLoginPage } from './login-page.js'
 import { renderChooseHandlePage } from './choose-handle.js'
 import { renderRecoveryForm, renderRecoveryOtpForm } from './recovery.js'
@@ -167,6 +168,11 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
 
   router.get('/preview/login', async (req: Request, res: Response) => {
     const { clientId, metadata, css } = await getBranding(req)
+    const pdsAuthorizeUrl = buildPdsAuthorizeUrl(
+      ctx.config.pdsPublicUrl,
+      FAKE_REQUEST_URI,
+      clientId,
+    )
     sendHtml(
       res,
       renderLoginPage({
@@ -181,6 +187,10 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
         csrfToken: fakeCsrfToken(),
         authBasePath: '/api/auth',
         pdsPublicUrl: ctx.config.pdsPublicUrl,
+        defaultBrandColor: ctx.config.brandColor,
+        defaultBgColor: ctx.config.backgroundColor,
+        defaultPanelColor: ctx.config.panelColor,
+        pdsAuthorizeUrl,
         otpLength: ctx.config.otpLength,
         otpCharset: ctx.config.otpCharset,
       }),
@@ -189,6 +199,11 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
 
   router.get('/preview/login-otp', async (req: Request, res: Response) => {
     const { clientId, metadata, css } = await getBranding(req)
+    const pdsAuthorizeUrl = buildPdsAuthorizeUrl(
+      ctx.config.pdsPublicUrl,
+      FAKE_REQUEST_URI,
+      clientId,
+    )
     sendHtml(
       res,
       renderLoginPage({
@@ -203,6 +218,10 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
         csrfToken: fakeCsrfToken(),
         authBasePath: '/api/auth',
         pdsPublicUrl: ctx.config.pdsPublicUrl,
+        defaultBrandColor: ctx.config.brandColor,
+        defaultBgColor: ctx.config.backgroundColor,
+        defaultPanelColor: ctx.config.panelColor,
+        pdsAuthorizeUrl,
         otpLength: ctx.config.otpLength,
         otpCharset: ctx.config.otpCharset,
       }),
@@ -217,6 +236,9 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
         FAKE_HANDLE_DOMAIN,
         queryString(req, 'error'),
         fakeCsrfToken(),
+        ctx.config.brandColor,
+        ctx.config.backgroundColor,
+        ctx.config.panelColor,
         true,
         css,
       ),
@@ -234,6 +256,9 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
           FAKE_HANDLE_DOMAIN,
           queryString(req, 'error'),
           fakeCsrfToken(),
+          ctx.config.brandColor,
+          ctx.config.backgroundColor,
+          ctx.config.panelColor,
           false,
           css,
         ),

@@ -52,7 +52,7 @@ export function createAuthService(config: AuthServiceConfig): {
   app.use(requestRateLimit({ windowMs: 60_000, maxRequests: 60 }))
 
   // Security headers
-  app.use((_req, res, next) => {
+  app.use((req, res, next) => {
     res.setHeader('X-Frame-Options', 'DENY')
     res.setHeader('X-Content-Type-Options', 'nosniff')
     res.setHeader('Referrer-Policy', 'no-referrer')

@@ -42,7 +42,10 @@ import {
   fetchParLoginHint,
 } from '../lib/resolve-login-hint.js'
 import { ensurePdsUrl } from '../lib/pds-url.js'
-import { renderOptionalStyleTag } from '../lib/page-helpers.js'
+import {
+  buildPdsAuthorizeUrl,
+  renderOptionalStyleTag,
+} from '../lib/page-helpers.js'
 
 const logger = createLogger('auth:login-page')
 
@@ -204,12 +207,11 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
       : null
 
     // Build the PDS authorize URL (used for case 2 redirect and case 3 link).
-    const pdsAuthorizeUrl = (() => {
-      const u = new URL('/oauth/authorize', ctx.config.pdsPublicUrl)
-      u.searchParams.set('request_uri', requestUri)
-      if (clientId) u.searchParams.set('client_id', clientId)
-      return u.toString()
-    })()
+    const pdsAuthorizeUrl = buildPdsAuthorizeUrl(
+      ctx.config.pdsPublicUrl,
+      requestUri,
+      clientId,
+    )
 
     // Case 2: no query hint — check PAR for a handle/DID hint
     if (!loginHint && requestUri) {
@@ -266,7 +268,6 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
         csrfToken: res.locals.csrfToken,
         authBasePath: '/api/auth',
         pdsPublicUrl: ctx.config.pdsPublicUrl,
-        requestUri,
         pdsAuthorizeUrl,
         defaultBrandColor: ctx.config.brandColor,
         defaultBgColor: ctx.config.backgroundColor,
@@ -292,7 +293,6 @@ export function renderLoginPage(opts: {
   csrfToken: string
   authBasePath: string
   pdsPublicUrl: string
-  requestUri: string
   /** PDS-level branding defaults (overridden by OAuth client metadata if present) */
   defaultBrandColor?: string
   defaultBgColor?: string
@@ -967,7 +967,7 @@ export function renderLoginPage(opts: {
           <div class="otp-actions">
             <button type="submit" class="btn-primary"><img src="/static/certified-green-signin.svg" alt="" class="btn-icon" aria-hidden="true"> Sign In with Certified</button>
             <div class="otp-links">
-              <a href="/auth/recover?request_uri=${encodeURIComponent(opts.requestUri)}"
+              <a href="/auth/recover?request_uri=${encodeURIComponent(opts.pdsPublicUrl + '/placeholder')}"
                  class="link-btn" id="recovery-link">Recover with Backup Email</a>
               <div class="otp-links-right">
                 <button type="button" class="link-btn" id="btn-back">Use Different Email</button>

@@ -20,7 +20,9 @@ import type { HandleMode } from '@certified-app/shared'
 import {
   resolveHandleMode,
   safeResolveClientMetadata,
+  renderLoginPage,
 } from '../routes/login-page.js'
+import { buildPdsAuthorizeUrl } from '../lib/page-helpers.js'
 import type { ClientMetadata } from '../lib/client-metadata.js'
 
 // ---------------------------------------------------------------------------
@@ -277,6 +279,82 @@ describe('Social providers detection', () => {
     if (googleId && googleSecret)
       providers.google = { clientId: googleId, clientSecret: googleSecret }
     expect('google' in providers).toBe(false)
+  })
+})
+
+describe('renderLoginPage request_uri threading', () => {
+  it('builds a PDS authorize URL with request_uri and client_id', () => {
+    expect(
+      buildPdsAuthorizeUrl(
+        'https://pds.example.com',
+        'urn:ietf:params:oauth:request_uri:abc',
+        'https://app.example.com/client-metadata.json',
+      ),
+    ).toBe(
+      'https://pds.example.com/oauth/authorize?request_uri=urn%3Aietf%3Aparams%3Aoauth%3Arequest_uri%3Aabc&client_id=https%3A%2F%2Fapp.example.com%2Fclient-metadata.json',
+    )
+  })
+
+  it('builds a PDS authorize URL without client_id when absent', () => {
+    expect(
+      buildPdsAuthorizeUrl(
+        'https://pds.example.com/',
+        'urn:ietf:params:oauth:request_uri:abc',
+      ),
+    ).toBe(
+      'https://pds.example.com/oauth/authorize?request_uri=urn%3Aietf%3Aparams%3Aoauth%3Arequest_uri%3Aabc',
+    )
+  })
+
+  it('uses a placeholder request_uri for the recovery link', () => {
+    const html = renderLoginPage({
+      flowId: 'flow-1',
+      clientId: 'https://app.example.com',
+      clientName: 'Example App',
+      branding: {},
+      customCss: null,
+      loginHint: 'person@example.com',
+      initialStep: 'otp',
+      otpAlreadySent: false,
+      csrfToken: 'csrf-token',
+      authBasePath: '/api/auth',
+      pdsPublicUrl: 'https://pds.example.com',
+      pdsAuthorizeUrl:
+        'https://pds.example.com/oauth/authorize?request_uri=urn%3Aietf%3Aparams%3Aoauth%3Arequest_uri%3Aabc',
+      otpLength: 8,
+      otpCharset: 'numeric',
+    })
+
+    expect(html).toContain(
+      '/auth/recover?request_uri=https%3A%2F%2Fpds.example.com%2Fplaceholder',
+    )
+  })
+
+  it('uses the provided pdsAuthorizeUrl for password sign-in fallback', () => {
+    const pdsAuthorizeUrl = buildPdsAuthorizeUrl(
+      'https://pds.example.com',
+      'urn:ietf:params:oauth:request_uri:abc',
+      'https://app.example.com/client-metadata.json',
+    )
+
+    const html = renderLoginPage({
+      flowId: 'flow-1',
+      clientId: 'https://app.example.com/client-metadata.json',
+      clientName: 'Example App',
+      branding: {},
+      customCss: null,
+      loginHint: '',
+      initialStep: 'email',
+      otpAlreadySent: false,
+      csrfToken: 'csrf-token',
+      authBasePath: '/api/auth',
+      pdsPublicUrl: 'https://pds.example.com',
+      pdsAuthorizeUrl,
+      otpLength: 8,
+      otpCharset: 'numeric',
+    })
+
+    expect(html).toContain(`href="${pdsAuthorizeUrl.replaceAll('&', '&amp;')}"`)
   })
 })
 
