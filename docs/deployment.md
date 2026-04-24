@@ -33,8 +33,8 @@ deployment contexts and a full variable reference.
 ### Build and Start
 
 ```bash
-# Build images (stamps the ePDS version automatically)
-pnpm docker:build
+# Build images
+docker compose build
 
 # Start services
 docker compose up -d
@@ -48,12 +48,20 @@ Caddy handles TLS automatically via ACME/Let's Encrypt.
 ### Updating
 
 ```bash
-pnpm docker:build
+docker compose build
 docker compose up -d
 ```
 
 Note: `docker compose restart` does **not** pick up `.env` changes.
 Always use `docker compose up -d` to recreate containers after changing environment variables.
+
+If you want the built image version to include a commit suffix outside Railway, pass `EPDS_GIT_SHA` at build time:
+
+```bash
+EPDS_GIT_SHA=$(git rev-parse HEAD) docker compose build
+```
+
+If you have Node and pnpm installed on the host, `pnpm docker:build` remains available as a convenience wrapper that pre-stamps `.epds-version` before calling `docker compose build`.
 
 ## Railway Deployment
 

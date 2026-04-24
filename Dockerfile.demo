@@ -27,6 +27,7 @@ COPY packages/demo/ packages/demo/
 COPY tsconfig.json ./
 # Stamp the ePDS version so Next.js inlines NEXT_PUBLIC_EPDS_VERSION.
 ARG RAILWAY_GIT_COMMIT_SHA
+ARG EPDS_GIT_SHA
 COPY .epds-version* ./
 COPY scripts/resolve-version.sh /tmp/
 RUN /tmp/resolve-version.sh && \

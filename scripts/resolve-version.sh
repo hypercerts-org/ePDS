@@ -4,22 +4,27 @@
 #
 # Sources (first non-empty wins):
 #   1. RAILWAY_GIT_COMMIT_SHA env var (injected by Railway at build time)
-#   2. .epds-version file already present (written by stamp-version.sh)
-#   3. Fails with an actionable error
+#   2. EPDS_GIT_SHA env var / build arg (optional for non-Railway builds)
+#   3. .epds-version file already present (written by stamp-version.sh)
+#   4. version field from the root package.json
 set -e
 
+base_version() {
+  node -p "require('./package.json').version"
+}
+
+short_sha() {
+  printf '%s' "$1" | cut -c1-8
+}
+
 if [ -n "$RAILWAY_GIT_COMMIT_SHA" ]; then
-  VERSION=$(node -p "require('./package.json').version")
-  echo "$VERSION+$(echo "$RAILWAY_GIT_COMMIT_SHA" | cut -c1-8)" > .epds-version
-  exit 0
+  VERSION="$(base_version)+$(short_sha "$RAILWAY_GIT_COMMIT_SHA")"
+elif [ -n "$EPDS_GIT_SHA" ]; then
+  VERSION="$(base_version)+$(short_sha "$EPDS_GIT_SHA")"
+elif [ -f .epds-version ] && [ -s .epds-version ]; then
+  VERSION=$(cat .epds-version)
+else
+  VERSION=$(base_version)
 fi
 
-if [ ! -f .epds-version ]; then
-  echo "ERROR: .epds-version not found. Run ./scripts/stamp-version.sh before building." >&2
-  exit 1
-fi
-
-if [ ! -s .epds-version ]; then
-  echo "ERROR: .epds-version exists but is empty. Re-run ./scripts/stamp-version.sh." >&2
-  exit 1
-fi
+printf '%s\n' "$VERSION" > .epds-version
