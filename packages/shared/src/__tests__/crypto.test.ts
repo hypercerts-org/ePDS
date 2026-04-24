@@ -8,7 +8,6 @@ import {
   signCallback,
   verifyCallback,
   type CallbackParams,
-  type VerifyCallbackResult,
 } from '../crypto.js'
 
 describe('generateVerificationToken', () => {
@@ -233,10 +232,10 @@ describe('signCallback / verifyCallback with handle', () => {
     const { sig, ts } = signCallback(baseParams, secret)
     // Verifying with explicit `handle: undefined` must produce the same result
     // as verifying with the field absent entirely.
-    expect(verifyCallback(withUndefined, ts, sig, secret)).toBe(true)
+    expect(verifyCallback(withUndefined, ts, sig, secret).valid).toBe(true)
     // And the reverse: a sig produced with handle:undefined verifies without the field.
     const { sig: sig2, ts: ts2 } = signCallback(withUndefined, secret)
-    expect(verifyCallback(baseParams, ts2, sig2, secret)).toBe(true)
+    expect(verifyCallback(baseParams, ts2, sig2, secret).valid).toBe(true)
   })
 
   it('rejects tampered handle', () => {

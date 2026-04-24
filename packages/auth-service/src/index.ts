@@ -17,6 +17,7 @@ import { createCompleteRouter } from './routes/complete.js'
 import { createChooseHandleRouter } from './routes/choose-handle.js'
 import { createPreviewRouter } from './routes/preview.js'
 import { resolveAuthPort } from './lib/resolve-port.js'
+import { createSecurityHeadersMiddleware } from './lib/security-headers.js'
 
 const logger = createLogger('auth-service')
 
@@ -34,6 +35,7 @@ export function createAuthService(config: AuthServiceConfig): {
 
   // Mount better-auth BEFORE express.json() so it can parse its own request bodies.
   // All better-auth endpoints live under /api/auth/*.
+
   const betterAuthInstance = createBetterAuth(
     ctx.emailSender,
     ctx.db,
@@ -51,43 +53,12 @@ export function createAuthService(config: AuthServiceConfig): {
   app.use(csrfProtection(config.csrfSecret))
   app.use(requestRateLimit({ windowMs: 60_000, maxRequests: 60 }))
 
-  // Security headers
-  app.use((req, res, next) => {
-    res.setHeader('X-Frame-Options', 'DENY')
-    res.setHeader('X-Content-Type-Options', 'nosniff')
-    res.setHeader('Referrer-Policy', 'no-referrer')
-
-    // Build img-src dynamically: allow the client's origin if a client_id URL is present.
-    // Fall back to the stored clientId from the DB flow when client_id is absent from the
-    // query string (e.g. back-navigation from recovery via a bare request_uri link).
-    let imgSrc = "'self' data:"
-    let clientId = (req.query.client_id as string) || req.body?.client_id
-    if (!clientId && req.query.request_uri) {
-      clientId =
-        ctx.db.getAuthFlowByRequestUri(req.query.request_uri as string)
-          ?.clientId ?? undefined
-    }
-    if (clientId && typeof clientId === 'string') {
-      try {
-        const clientOrigin = new URL(clientId).origin
-        if (clientOrigin && clientOrigin !== 'null') {
-          imgSrc += ` ${clientOrigin}`
-        }
-      } catch {
-        /* not a valid URL, keep default */
-      }
-    }
-
-    res.setHeader(
-      'Content-Security-Policy',
-      `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'`,
-    )
-    res.setHeader(
-      'Strict-Transport-Security',
-      'max-age=63072000; includeSubDomains; preload',
-    )
-    next()
-  })
+  app.use(
+    createSecurityHeadersMiddleware({
+      authFlowLookup: (requestUri) =>
+        ctx.db.getAuthFlowByRequestUri(requestUri)?.clientId ?? null,
+    }),
+  )
 
   // Routes
   app.use(createLoginPageRouter(ctx))
