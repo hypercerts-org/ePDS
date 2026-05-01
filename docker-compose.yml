@@ -8,6 +8,14 @@ services:
     env_file: .env
     environment:
       - PDS_PORT=3000
+      # Optional /_internal/test/* hooks used by the e2e suite (e.g.
+      # backdating account_device.updatedAt past upstream's 7-day
+      # authenticationMaxAge so checkLoginRequired returns true).
+      # Defaults OFF so the local docker-compose stack matches a
+      # production deployment by default; opt in for e2e runs by setting
+      # EPDS_TEST_HOOKS=1 in your .env or shell. The router additionally
+      # throws at startup if NODE_ENV=production, regardless of this var.
+      - EPDS_TEST_HOOKS=${EPDS_TEST_HOOKS:-0}
     volumes:
       - pds-data:/data
     restart: unless-stopped
@@ -27,6 +35,12 @@ services:
     env_file: .env
     environment:
       - AUTH_PORT=3001
+      # Optional /_internal/test/* hooks used by the e2e suite (e.g. forcing
+      # OTP expiry without a 10-minute wait). Defaults OFF — opt in for e2e
+      # runs by setting EPDS_TEST_HOOKS=1 in your .env or shell. The router
+      # additionally throws at startup if NODE_ENV=production, regardless
+      # of this var.
+      - EPDS_TEST_HOOKS=${EPDS_TEST_HOOKS:-0}
     volumes:
       - auth-data:/data
     restart: unless-stopped

@@ -446,7 +446,7 @@ The auto-skip predicate is, with all conditions required:
 1. `client_id` is on `PDS_OAUTH_TRUSTED_CLIENTS`.
 2. Client metadata advertises `epds_skip_chooser_on_match: true`
    (per-client opt-in; default off).
-3. The welcome-page-guard's existing checks pass:
+3. The auth-ui-guard's existing checks pass:
    - `dev-id`/`ses-id` cookies parse and ses-id matches the device
      row's active sessionId.
    - `accountManager.listDeviceAccounts(deviceId)` returns at least

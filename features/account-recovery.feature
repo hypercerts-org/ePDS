@@ -30,7 +30,7 @@ Feature: Account recovery via backup emails
     And the user enters the backup email on the recovery page
     Then an OTP email arrives in the mail trap for the backup email
     When the user enters the recovery OTP
-    Then the browser is redirected back to the demo client with a valid session
+    Then the demo client's welcome page confirms the user is signed in
 
   Scenario: Recovery with non-existent email shows same UI (anti-enumeration)
     Given the demo client initiates OAuth with the test email as login_hint

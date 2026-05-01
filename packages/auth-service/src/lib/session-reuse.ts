@@ -10,6 +10,7 @@
  * then either auto-selects a matching session (flow 1 with login_hint)
  * or renders the account chooser (flow 2).
  */
+import { promptHasLogin } from '@certified-app/shared'
 
 /** Shape of the request data the helpers consume. Intentionally narrow
  *  so we can unit-test without an Express instance. Mirrors the fields
@@ -117,10 +118,15 @@ export function hasOrphanDeviceCookie(req: SessionReuseRequest): {
  *  #AuthRequest): "The Authorization Server SHOULD prompt the End-User
  *  for reauthentication". The capture-phase rebind of upstream's
  *  "Another account" button injected into the chooser in pds-core uses
- *  this to opt out of session reuse. */
+ *  this to opt out of session reuse.
+ *
+ *  Delegates to the shared `promptHasLogin` so this check matches
+ *  pds-core's auth-ui-guard exactly: both the space-delimited token
+ *  case (`prompt=login consent`) and the array-of-strings case that
+ *  Express produces from repeated query keys (`?prompt=login&prompt=consent`)
+ *  are honoured. */
 export function isForceLoginPrompt(req: SessionReuseRequest): boolean {
-  const p = req.query.prompt
-  return typeof p === 'string' && p === 'login'
+  return promptHasLogin(req.query.prompt)
 }
 
 /** Optional context for the hint-vs-bindings check that gates Flow 1

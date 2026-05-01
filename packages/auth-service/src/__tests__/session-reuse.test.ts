@@ -180,10 +180,39 @@ describe('isForceLoginPrompt (HYPER-268)', () => {
     expect(isForceLoginPrompt(makeReq())).toBe(false)
   })
 
-  it('returns false when prompt is an array', () => {
+  // OIDC Core 1.0 §3.1.2.1: `prompt` is a space-delimited list. The
+  // single-token cases above must continue to work, AND multi-token /
+  // repeated-key forms that include `login` must also be honoured —
+  // otherwise a client passing `prompt=login consent` (or two `prompt=`
+  // query keys) would re-trigger #138 even after the per-step gate
+  // landed.
+  it('returns true when prompt is a space-delimited list containing login', () => {
+    expect(
+      isForceLoginPrompt(makeReq({ query: { prompt: 'login consent' } })),
+    ).toBe(true)
+    expect(
+      isForceLoginPrompt(makeReq({ query: { prompt: 'consent login' } })),
+    ).toBe(true)
+  })
+
+  it('returns true when prompt is an array containing login', () => {
+    // Express's req.query parser surfaces repeated query keys as arrays:
+    // `?prompt=login&prompt=consent` becomes `['login', 'consent']`.
     expect(isForceLoginPrompt(makeReq({ query: { prompt: ['login'] } }))).toBe(
-      false,
+      true,
     )
+    expect(
+      isForceLoginPrompt(makeReq({ query: { prompt: ['consent', 'login'] } })),
+    ).toBe(true)
+  })
+
+  it('returns false when prompt is a list of other tokens', () => {
+    expect(
+      isForceLoginPrompt(makeReq({ query: { prompt: 'consent none' } })),
+    ).toBe(false)
+    expect(
+      isForceLoginPrompt(makeReq({ query: { prompt: ['consent', 'none'] } })),
+    ).toBe(false)
   })
 })
 

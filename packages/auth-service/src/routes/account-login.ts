@@ -19,6 +19,7 @@ import { fromNodeHeaders } from 'better-auth/node'
 import type { AuthServiceContext } from '../context.js'
 import { buildOtpInputProps } from '../otp-input.js'
 import type { BetterAuthInstance } from '../better-auth.js'
+import { POWERED_BY_CSS, POWERED_BY_HTML } from '../lib/page-helpers.js'
 
 const logger = createLogger('auth:account-login')
 
@@ -146,19 +147,22 @@ function renderLoginForm(opts: { csrfToken: string; error?: string }): string {
   <style>${CSS}</style>
 </head>
 <body>
-  <div class="container">
-    <h1>Account Settings</h1>
-    <p class="subtitle">Sign in to manage your account</p>
-    ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
-    <form method="POST" action="/account/send-otp">
-      <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
-      <div class="field">
-        <label for="email">Email address</label>
-        <input type="email" id="email" name="email" required autofocus
-               placeholder="you@example.com">
-      </div>
-      <button type="submit" class="btn-primary">Continue with email</button>
-    </form>
+  <div class="page-wrap">
+    <div class="container">
+      <h1>Account Settings</h1>
+      <p class="subtitle">Sign in to manage your account</p>
+      ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
+      <form method="POST" action="/account/send-otp">
+        <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
+        <div class="field">
+          <label for="email">Email address</label>
+          <input type="email" id="email" name="email" required autofocus
+                 placeholder="you@example.com">
+        </div>
+        <button type="submit" class="btn-primary">Continue with email</button>
+      </form>
+    </div>
+    ${POWERED_BY_HTML}
   </div>
 </body>
 </html>`
@@ -185,33 +189,36 @@ function renderOtpForm(opts: {
   <style>${CSS}</style>
 </head>
 <body>
-  <div class="container">
-    <h1>Enter your code</h1>
-    <p id="otp-help" class="subtitle">We sent a ${opts.otpLength}-${opts.otpCharset === 'alphanumeric' ? 'character' : 'digit'} code to <strong>${escapeHtml(maskedEmail)}</strong></p>
-    ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
-    <form method="POST" action="/account/verify-otp">
-      <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
-      <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
-      <div class="field">
-        <input type="text" id="otp" name="otp" required autofocus
-               aria-label="One-time code"
-               aria-describedby="otp-help"
-               maxlength="${opts.otpLength}"
-               pattern="${inputProps.pattern}"
-               inputmode="${inputProps.inputmode}"
-               autocomplete="one-time-code"
-               autocapitalize="${inputProps.autocapitalize}"
-               placeholder="${inputProps.placeholder}"
-               class="otp-input"
-               style="letter-spacing: ${Math.max(2, Math.round(32 / opts.otpLength))}px">
-      </div>
-      <button type="submit" class="btn-primary">Verify</button>
-    </form>
-    <form method="POST" action="/account/send-otp" style="margin-top: 12px;">
-      <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
-      <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
-      <button type="submit" class="btn-secondary">Resend code</button>
-    </form>
+  <div class="page-wrap">
+    <div class="container">
+      <h1>Enter your code</h1>
+      <p id="otp-help" class="subtitle">We sent a ${opts.otpLength}-${opts.otpCharset === 'alphanumeric' ? 'character' : 'digit'} code to <strong>${escapeHtml(maskedEmail)}</strong></p>
+      ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
+      <form method="POST" action="/account/verify-otp">
+        <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
+        <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
+        <div class="field">
+          <input type="text" id="otp" name="otp" required autofocus
+                 aria-label="One-time code"
+                 aria-describedby="otp-help"
+                 maxlength="${opts.otpLength}"
+                 pattern="${inputProps.pattern}"
+                 inputmode="${inputProps.inputmode}"
+                 autocomplete="one-time-code"
+                 autocapitalize="${inputProps.autocapitalize}"
+                 placeholder="${inputProps.placeholder}"
+                 class="otp-input"
+                 style="letter-spacing: ${Math.max(2, Math.round(32 / opts.otpLength))}px">
+        </div>
+        <button type="submit" class="btn-primary">Verify</button>
+      </form>
+      <form method="POST" action="/account/send-otp" style="margin-top: 12px;">
+        <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
+        <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
+        <button type="submit" class="btn-secondary">Resend code</button>
+      </form>
+    </div>
+    ${POWERED_BY_HTML}
   </div>
 </body>
 </html>`
@@ -219,8 +226,10 @@ function renderOtpForm(opts: {
 
 const CSS = `
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-  .container { background: white; border-radius: 12px; padding: 40px; max-width: 420px; width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: center; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .page-wrap { display: flex; flex-direction: column; align-items: stretch; max-width: 420px; width: 100%; }
+  ${POWERED_BY_CSS}
+  .container { background: white; border-radius: 12px; padding: 40px; width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: center; }
   h1 { font-size: 24px; margin-bottom: 8px; color: #111; }
   .subtitle { color: #666; margin-bottom: 20px; font-size: 15px; line-height: 1.5; }
   .field { margin-bottom: 20px; text-align: left; }

@@ -109,6 +109,14 @@ export function buildChooserEnrichmentScript(): string {
   // request_uri / client_id / scope etc. so the OAuth flow resumes
   // after the new account signs in.
   //
+  // Adds epds_skip_par_hint=1 — an ePDS-private signal that tells
+  // auth-service "ignore the login_hint stored in the PAR for this
+  // request" (issue #138). The user clicked "Another account", so
+  // they're overriding any hint the RP supplied at OAuth init: with
+  // no hint resolved, the spec-correct rendering decision is the
+  // email form. URL login_hint is also dropped; the PAR-body hint
+  // can't be mutated from here, hence the explicit skip flag.
+  //
   // Returns '' when there is no request_uri in the current URL
   // (standalone /account navigation, bookmark, direct URL) — auth-service
   // rejects /oauth/authorize without request_uri with a 400, so letting
@@ -118,6 +126,8 @@ export function buildChooserEnrichmentScript(): string {
     var params = new URLSearchParams(window.location.search || '');
     if (!params.has('request_uri')) return '';
     params.set('prompt', 'login');
+    params.set('epds_skip_par_hint', '1');
+    params.delete('login_hint');
     return authOrigin + '/oauth/authorize?' + params.toString();
   }
 

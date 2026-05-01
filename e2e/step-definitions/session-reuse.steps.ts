@@ -419,6 +419,25 @@ Then(
 )
 
 /**
+ * Strict-form assertions used by the "Another account + login_hint" repro
+ * for issue #138: the email form must not carry the previous account's
+ * email pre-fill, and the OTP step must not be the active step (the
+ * regression rendered the page with both #email and #step-otp.active).
+ */
+Then('the email input is empty', async function (this: EpdsWorld) {
+  const page = getPage(this)
+  await expect(page.locator('#email')).toHaveValue('')
+})
+
+Then(
+  'the OTP verification step is not active',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    await expect(page.locator('#step-otp.active')).toBeHidden()
+  },
+)
+
+/**
  * Negative assertion for the auto-approve path: the second OAuth flow
  * must complete without the consent screen ever appearing. Checked by
  * looking for the Authorize button on the current page — by the time

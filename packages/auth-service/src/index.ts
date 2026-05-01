@@ -18,6 +18,7 @@ import { createChooseHandleRouter } from './routes/choose-handle.js'
 import { createPreviewRouter } from './routes/preview.js'
 import { createPreviewEmailsRouter } from './routes/preview-emails.js'
 import { createRootRouter } from './routes/root.js'
+import { createTestHooksRouter } from './routes/test-hooks.js'
 import { resolveAuthPort } from './lib/resolve-port.js'
 import { createSecurityHeadersMiddleware } from './lib/security-headers.js'
 import {
@@ -55,6 +56,17 @@ export function createAuthService(config: AuthServiceConfig): {
     res.sendFile(path.join(publicDir, 'favicon.svg'))
   })
   app.use('/static', express.static(publicDir))
+
+  // Test-only hooks for the e2e suite. Only mounted when EPDS_TEST_HOOKS=1.
+  // The router constructor throws if NODE_ENV=production, so a misconfigured
+  // prod deployment fails to boot rather than silently exposing the endpoint.
+  // Mounted BEFORE csrfProtection because the routes are called by a
+  // non-browser test runner and authenticate via x-internal-secret instead;
+  // CSRF tokens are not applicable.
+  if (process.env.EPDS_TEST_HOOKS === '1') {
+    app.use(createTestHooksRouter(config.dbLocation))
+  }
+
   app.use(csrfProtection(config.csrfSecret))
   app.use(requestRateLimit({ windowMs: 60_000, maxRequests: 60 }))
 

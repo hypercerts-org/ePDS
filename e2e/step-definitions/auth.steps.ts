@@ -9,7 +9,7 @@ import {
 } from '../support/utils.js'
 import { createAccountViaOAuth, pickHandle } from '../support/flows.js'
 import { sharedBrowser } from '../support/hooks.js'
-import { clearMailpit } from '../support/mailpit.js'
+import { clearMailpit, extractOtp, waitForEmail } from '../support/mailpit.js'
 import { fillOtp } from '../support/otp.js'
 
 function getOtpAlphabet(otpCharset: 'numeric' | 'alphanumeric'): string {
@@ -233,7 +233,7 @@ Then(
 )
 
 Then(
-  'the browser is redirected back to the demo client with a valid session',
+  "the demo client's welcome page confirms the user is signed in",
   async function (this: EpdsWorld) {
     await assertDemoClientSession(this)
   },
@@ -362,6 +362,136 @@ Then('the user must request a new OTP', async function (this: EpdsWorld) {
 })
 
 // ---------------------------------------------------------------------------
+// OTP expiry scenario
+// ---------------------------------------------------------------------------
+//
+// Simulates the user taking longer than 10 minutes between requesting
+// the OTP and entering it. To reproduce the real-world failure mode
+// faithfully (auth-service issue: even after Resend, /auth/complete
+// returns "Authentication session expired") we have to age out THREE
+// things in lockstep, all of which expire after 10 minutes in
+// production:
+//
+//   1. The better-auth verification row (the OTP itself) — backdated
+//      via POST /_internal/test/expire-otp.
+//   2. The auth_flow row in the auth-service SQLite — backdated via
+//      POST /_internal/test/expire-auth-flow.
+//   3. The epds_auth_flow cookie in the browser — Playwright doesn't
+//      let us forge an expiry timestamp on an existing cookie, so we
+//      delete it outright. Functionally equivalent for the bug we're
+//      reproducing: the browser presents no auth_flow cookie to
+//      /auth/complete.
+//
+// Both /_internal/test/* hooks are gated by EPDS_TEST_HOOKS=1 on the
+// server and authenticated with EPDS_INTERNAL_SECRET on the client.
+
+async function callExpiryHook(
+  hookPath: string,
+  email: string,
+  body: Record<string, unknown>,
+): Promise<{ updated: number }> {
+  const url = `${testEnv.authUrl}${hookPath}`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-internal-secret': testEnv.internalSecret,
+    },
+    body: JSON.stringify({ email, ...body }),
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '')
+    throw new Error(
+      `${hookPath} hook failed: ${res.status} ${res.statusText}: ${errBody}`,
+    )
+  }
+  const data = (await res.json().catch(() => ({}))) as { updated?: number }
+  return { updated: data.updated ?? 0 }
+}
+
+When(
+  'more than 10 minutes pass before the user enters the OTP',
+  async function (this: EpdsWorld) {
+    if (!testEnv.mailpitPass) return 'pending'
+    if (!testEnv.internalSecret) return 'pending'
+    if (!this.testEmail) {
+      throw new Error(
+        'No test email set — the email-submit step must run first',
+      )
+    }
+
+    // Expire only the better-auth OTP row. The auth_flow row + cookie
+    // both have a 60-minute TTL (see lib/auth-flow.ts) and so MUST still
+    // be alive at the 10-minute mark — that is the fix this scenario is
+    // regression-testing. Aging them out here would falsify the
+    // post-fix scenario: after Resend the new OTP completes, and
+    // /auth/complete must still find the original auth_flow.
+    const otpResult = await callExpiryHook(
+      '/_internal/test/expire-otp',
+      this.testEmail,
+      { type: 'sign-in' },
+    )
+    if (otpResult.updated < 1) {
+      throw new Error(
+        `expire-otp hook reported no rows updated for ${this.testEmail} — was an OTP actually sent first?`,
+      )
+    }
+  },
+)
+
+Then(
+  'the verification form shows an {string} error',
+  async function (this: EpdsWorld, expected: string) {
+    const page = getPage(this)
+    await expect(page.locator('#error-msg')).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('#error-msg')).toHaveText(expected, {
+      timeout: 10_000,
+    })
+  },
+)
+
+When(
+  'the user requests a new OTP via the resend button',
+  async function (this: EpdsWorld) {
+    if (!testEnv.mailpitPass) return 'pending'
+    if (!this.testEmail) {
+      throw new Error(
+        'No test email set — the email-submit step must run first',
+      )
+    }
+    const page = getPage(this)
+    // Clear the inbox so the next "OTP arrived" wait pulls the fresh
+    // resend rather than the original (now-expired) message.
+    await clearMailpit(this.testEmail)
+    // Forget the stale code so a misuse before the new email arrives
+    // surfaces as a clear "no OTP available" error rather than
+    // re-submitting the expired one.
+    this.otpCode = undefined
+    await page.click('#btn-resend')
+  },
+)
+
+Then(
+  'a fresh OTP email arrives in the mail trap for the test email',
+  async function (this: EpdsWorld) {
+    // Distinct phrasing from the existing "an OTP email arrives ..."
+    // step in email.steps.ts so cucumber doesn't see a duplicate
+    // definition. The wait itself is the same — pull the next OTP
+    // from mailpit and stash it on the world for later submission.
+    if (!testEnv.mailpitPass) return 'pending'
+    if (!this.testEmail) {
+      throw new Error(
+        'No test email set — the email-submit step must run first',
+      )
+    }
+    const message = await waitForEmail(`to:${this.testEmail}`)
+    this.lastEmailSubject = message.Subject
+    this.otpCode = await extractOtp(message.ID)
+  },
+)
+
+// ---------------------------------------------------------------------------
 // Refresh / idempotency scenario
 // ---------------------------------------------------------------------------
 
@@ -387,3 +517,122 @@ Then('the login page renders normally', async function (this: EpdsWorld) {
 Then('the OTP flow still works to completion', function (this: EpdsWorld) {
   return this.skipIfNoMailpit()
 })
+
+// ---------------------------------------------------------------------------
+// PAR (request_uri) expiry scenario
+// ---------------------------------------------------------------------------
+//
+// The PAR record lives in pds-core's @atproto/oauth-provider store
+// (authorization_request table) and is independent of the auth-service
+// auth_flow row. Upstream hardcodes PAR_EXPIRES_IN = 5 min, so a user
+// who takes >5 min between requesting and submitting the OTP (slow
+// inbox, switching tabs, multiple Resend cycles) trips
+// "AccessDeniedError: This request has expired" inside
+// /oauth/epds-callback even though all auth-service-side state is
+// healthy. PAR expiry is genuine: once expired, the row cannot be
+// revived — RequestManager.get() throws AND deletes the row in the
+// same call, so any "ping" mechanism is too late.
+//
+// The fix is to honour RFC 6749 §4.1.2.1 and surface the failure as
+// a redirect back to the client's redirect_uri with error,
+// error_description, iss, and state query params. To reproduce
+// without a 5-minute wall-clock wait, a pds-core test-only hook
+// (mounted iff EPDS_TEST_HOOKS=1, double-gated by
+// EPDS_INTERNAL_SECRET and a NODE_ENV=production refusal) deletes
+// the PAR row directly:
+//
+//   POST /_internal/test/delete-par   { request_uri }
+
+async function callPdsExpiryHook(
+  hookPath: string,
+  requestUri: string,
+): Promise<void> {
+  const url = `${testEnv.pdsUrl}${hookPath}`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-internal-secret': testEnv.internalSecret,
+    },
+    body: JSON.stringify({ request_uri: requestUri }),
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '')
+    throw new Error(
+      `${hookPath} hook failed: ${res.status} ${res.statusText}: ${errBody}`,
+    )
+  }
+}
+
+/**
+ * Read the PAR request_uri from the current auth-service login page
+ * URL and stash it on the world for subsequent expiry hooks. The URL
+ * is `https://<auth>/oauth/authorize?request_uri=urn:...&...` while the
+ * user is on the login/OTP form. Throws if the URL doesn't carry it,
+ * which means the surrounding scenario is mis-ordered (the page must
+ * be on the auth-service side before this step runs).
+ */
+function captureRequestUriFromPage(world: EpdsWorld): string {
+  const page = getPage(world)
+  const requestUri = new URL(page.url()).searchParams.get('request_uri')
+  if (!requestUri) {
+    throw new Error(
+      `Expected request_uri in page URL but found none: ${page.url()}`,
+    )
+  }
+  world.lastRequestUri = requestUri
+  return requestUri
+}
+
+When(
+  'the PAR request_uri has expired before the bridge fires',
+  async function (this: EpdsWorld) {
+    if (!testEnv.mailpitPass) return 'pending'
+    if (!testEnv.internalSecret) return 'pending'
+    const requestUri = captureRequestUriFromPage(this)
+    await callPdsExpiryHook('/_internal/test/delete-par', requestUri)
+  },
+)
+
+Then('the response body is not raw JSON', async function (this: EpdsWorld) {
+  const page = getPage(this)
+  // The OTP form's submit is JS-driven and async, and Playwright's
+  // fill() returns before the bridge redirects. Wait for the
+  // browser to actually leave the auth-service host and arrive at
+  // pds-core's epds-callback (where, in this scenario, the
+  // catch-block renders the error page). Without this wait we'd
+  // read the still-rendering OTP form's body.
+  const pdsHost = new URL(testEnv.pdsUrl).host
+  await page.waitForURL(
+    (url) => url.host === pdsHost && url.pathname.includes('epds-callback'),
+    { timeout: 30_000 },
+  )
+  const body = await page.locator('body').innerText()
+  // The pre-fix behaviour returned a body that started with
+  // {"error": "Authentication failed"}. A graceful HTML page won't —
+  // its <h1>/<p> text isn't valid JSON. The regex catches any
+  // {"error": ...} shape so a future leak of a different JSON
+  // payload is still caught.
+  if (/^\s*\{\s*"error"/.test(body)) {
+    throw new Error(
+      `pds-core leaked raw JSON to the browser: ${body.slice(0, 200)}`,
+    )
+  }
+})
+
+Then(
+  'the response body explains that sign-in timed out',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    const body = await page.locator('body').innerText()
+    // Don't pin exact wording — just require something that mentions
+    // the timeout / expiry so a human reading it understands why
+    // their sign-in failed.
+    if (!/expir|timed? ?out|too long/i.test(body)) {
+      throw new Error(
+        `Error page should mention the timeout but said: "${body.slice(0, 500)}"`,
+      )
+    }
+  },
+)

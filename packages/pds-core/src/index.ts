@@ -23,7 +23,7 @@ import { applyPdsPortFallback } from './lib/resolve-port.js'
 applyPdsPortFallback()
 
 import type * as http from 'node:http'
-import { randomBytes, timingSafeEqual, createHash } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import * as path from 'node:path'
 import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
 import { readFileSync } from 'node:fs'
@@ -36,12 +36,13 @@ import {
   generateRandomHandle,
   createLogger,
   verifyCallback,
-  escapeHtml,
+  verifyInternalSecret,
   validateLocalPart,
   resolveClientMetadata,
   getClientCss,
   getClientMetadataCacheStatus,
   getEpdsVersion,
+  renderError,
   validateClientMetadataForPreview,
 } from '@certified-app/shared'
 import { shouldRewriteSecFetchSite } from './lib/sec-fetch-site-rewrite.js'
@@ -61,8 +62,10 @@ import {
 } from './cookie-domain.js'
 import { createChooserEnrichmentMiddleware } from './chooser-enrichment.js'
 import { createUpstreamFaviconMiddleware } from './upstream-favicon.js'
-import { createWelcomePageGuard } from './welcome-page-guard.js'
+import { createAuthUiGuard, parsePromptTokens } from './auth-ui-guard.js'
 import { loadDeviceAccountEmails } from './lib/device-accounts.js'
+import { handleCallbackError } from './lib/epds-callback-error.js'
+import { installTestHooks } from './lib/test-hooks.js'
 
 const logger = createLogger('pds-core')
 
@@ -252,6 +255,18 @@ async function main() {
       return
     }
 
+    // Captured from Step 2's requestManager.get() — used by the catch
+    // block to redirect any later failure back to the client per RFC
+    // 6749 §4.1.2.1, even when the PAR row has since been deleted (in
+    // particular: RequestManager.get() deletes any expired row in the
+    // same call that throws AccessDeniedError, so by the time the
+    // catch block runs there's nothing left to re-read). Empty when
+    // Step 2 itself threw — i.e. the PAR was already dead on entry,
+    // the case the @par-callback-error scenario covers — and the
+    // catch falls through to a styled HTML page in that branch.
+    let capturedRedirectUri: string | undefined
+    let capturedState: string | undefined
+
     try {
       // Step 1: Load or create device session
       const deviceInfo = await provider.deviceManager.load(
@@ -292,6 +307,12 @@ async function main() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
       const requestData = await (provider.requestManager as any).get(requestUri)
       const { clientId } = requestData
+      // Stash redirect_uri/state now while the PAR is alive — if a later
+      // step throws and the row has since been deleted (e.g. flushed
+      // post-success or the test-only delete-par hook), the catch block
+      // can still mount an RFC 6749 redirect to the client.
+      capturedRedirectUri = requestData?.parameters?.redirect_uri
+      capturedState = requestData?.parameters?.state
 
       // Step 3: Resolve or create the account.
       // Use the PDS accountManager directly — account.sqlite is the single source of truth.
@@ -512,13 +533,25 @@ async function main() {
         }
       }
 
-      // Step 6: Set login_hint in the stored PAR parameters so the stock
-      // authorize UI auto-selects this account's session and skips account
-      // selection (going straight to consent or auto-approve).
-      // The oauth-provider UI checks `selected` which is true when
-      // login_hint matches the account AND prompt !== 'select_account'.
-      // prompt is already 'consent' (forced by the provider for
-      // unauthenticated clients).
+      // Step 6: Mutate the stored PAR parameters before redirecting to the
+      // stock /oauth/authorize endpoint:
+      //
+      //   - Set `login_hint` to the freshly-authenticated DID so the stock
+      //     authorize UI auto-selects this account's session and skips
+      //     account selection. The oauth-provider UI checks `selected`,
+      //     which is true when login_hint matches the account AND
+      //     prompt !== 'select_account'. (prompt is already 'consent',
+      //     forced by the provider for unauthenticated clients.)
+      //
+      //   - Strip the `login` token from `prompt` if present. The
+      //     auth-ui-guard at /oauth/authorize bounces requests whose
+      //     stored PAR carries prompt=login, so leaving it set after a
+      //     successful OTP cycle would loop forever: authenticate →
+      //     bounce → authenticate → bounce. By the time this hop fires,
+      //     the user IS freshly authenticated; the forced-login
+      //     contract is satisfied. Other prompt tokens ('consent',
+      //     'select_account', etc.) stay untouched — only 'login' is
+      //     loop-forming.
       if (did) {
         const REQUEST_URI_PREFIX = 'urn:ietf:params:oauth:request_uri:'
         const requestId = decodeURIComponent(
@@ -528,9 +561,26 @@ async function main() {
         const store = (provider.requestManager as any).store
         const storedRequest = await store.readRequest(requestId)
         if (storedRequest?.parameters) {
-          await store.updateRequest(requestId, {
-            parameters: { ...storedRequest.parameters, login_hint: did },
-          })
+          const nextParams: Record<string, unknown> = {
+            ...storedRequest.parameters,
+            login_hint: did,
+          }
+          // Strip the 'login' token from the prompt parameter, leaving any
+          // other tokens (e.g. 'consent') intact. Per OIDC Core §3.1.2.1
+          // prompt is space-delimited; a third-party client could send
+          // 'login consent', and an exact-string strip would miss 'login'
+          // in that case and re-trigger the guard's bounce after every
+          // OTP cycle.
+          if (typeof nextParams.prompt === 'string') {
+            const remaining = parsePromptTokens(nextParams.prompt)
+            remaining.delete('login')
+            if (remaining.size === 0) {
+              delete nextParams.prompt
+            } else {
+              nextParams.prompt = [...remaining].join(' ')
+            }
+          }
+          await store.updateRequest(requestId, { parameters: nextParams })
         }
       }
 
@@ -552,36 +602,15 @@ async function main() {
         'ePDS callback: redirecting to stock /oauth/authorize for consent/approval',
       )
     } catch (err) {
-      logger.error({ err }, 'ePDS callback error')
-
-      // Try to redirect error back to client
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
-        const requestData = await (provider.requestManager as any).get(
-          requestUri,
-        )
-        const redirectUri = requestData?.parameters?.redirect_uri
-        if (redirectUri) {
-          const errorUrl = new URL(redirectUri)
-          errorUrl.searchParams.set('error', 'server_error')
-          errorUrl.searchParams.set(
-            'error_description',
-            'Authentication failed',
-          )
-          errorUrl.searchParams.set('iss', pdsUrl)
-          if (requestData.parameters.state) {
-            errorUrl.searchParams.set('state', requestData.parameters.state)
-          }
-          res.redirect(303, errorUrl.toString())
-          return
-        }
-      } catch {
-        // Fall through
-      }
-
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Authentication failed' })
-      }
+      handleCallbackError({
+        res,
+        err,
+        capturedRedirectUri,
+        capturedState,
+        pdsUrl,
+        logger,
+        renderError,
+      })
     }
   })
 
@@ -672,44 +701,52 @@ async function main() {
   }
 
   // =========================================================================
-  // Welcome-page guard: never let upstream render the three-button page
+  // Auth-UI guard: never let upstream render the welcome page or sign-in-view
   // =========================================================================
   //
-  // The stock @atproto/oauth-provider welcome page (Authenticate / Create
-  // new account / Sign in / Cancel) appears whenever upstream ends up with
-  // a device that has zero bound accounts — due to partial cookie pairs,
-  // stale pairs, fixation-race device deletions, or the migration-005 1h
-  // TTL purge of remember=0 bindings. ePDS must never surface that page;
-  // users should always land on the email/OTP form or the enriched
+  // The stock @atproto/oauth-provider has two authentication UIs that ePDS
+  // must never surface:
+  //
+  //   1. Welcome page (Authenticate / Create new account / Sign in / Cancel) —
+  //      rendered when upstream ends up with a device that has zero bound
+  //      accounts (partial cookie pairs, stale pairs, fixation-race device
+  //      deletions, or the migration-005 1h TTL purge of remember=0 bindings).
+  //
+  //   2. Sign-in-view (handle + password form) — rendered when bindings exist
+  //      but every binding upstream considers has loginRequired: true (forced
+  //      `prompt=login`, all bindings older than authenticationMaxAge, or
+  //      login_hint pre-selecting an individually stale binding).
+  //
+  // ePDS users should always land on the email/OTP form or the enriched
   // account picker. See docs/design/session-reuse-bugs.md.
   //
   // The guard intercepts /oauth/authorize and /account* before upstream's
-  // own middleware, checks for a valid cookie pair and non-empty bindings,
-  // and bounces to auth-service with stale cookies cleared when either
-  // check fails. All other requests pass through unchanged.
+  // own middleware and bounces to auth-service with stale cookies cleared
+  // whenever upstream would render either UI. All other requests pass
+  // through unchanged.
 
-  const welcomePageGuardMiddleware = createWelcomePageGuard({
+  const authUiGuardMiddleware = createAuthUiGuard({
     authHostname,
     provider: provider ?? null,
     cookieDomain,
     logger,
   })
-  pds.app.use(welcomePageGuardMiddleware)
+  pds.app.use(authUiGuardMiddleware)
   // Fail closed: the guard has to run BEFORE upstream's OAuth / account
-  // middleware, otherwise it can never intercept the stock welcome
-  // page. If the Express `_router.stack` we rely on isn't exposed
-  // (Express 5, future pds-core swap), refuse to start rather than
-  // silently run the service with the guard defeated — the whole
-  // security value of this PR depends on the splice succeeding.
+  // middleware, otherwise it can never intercept the stock UIs. If the
+  // Express `_router.stack` we rely on isn't exposed (Express 5, future
+  // pds-core swap), refuse to start rather than silently run the service
+  // with the guard defeated — the whole security value of this guard
+  // depends on the splice succeeding.
   if (!stack) {
     throw new Error(
-      'Welcome-page guard install failed: Express _router.stack is unavailable — refusing to start pds-core with an inert guard',
+      'Auth-UI guard install failed: Express _router.stack is unavailable — refusing to start pds-core with an inert guard',
     )
   }
   const guardLayer = stack.pop()
   if (!guardLayer) {
     throw new Error(
-      'Welcome-page guard install failed: middleware layer missing from stack after pop',
+      'Auth-UI guard install failed: middleware layer missing from stack after pop',
     )
   }
   let guardIdx = 0
@@ -720,7 +757,7 @@ async function main() {
     }
   }
   stack.splice(guardIdx, 0, guardLayer)
-  logger.info('Welcome-page guard installed')
+  logger.info('Auth-UI guard installed')
 
   // =========================================================================
   // CSS injection for trusted OAuth clients
@@ -922,20 +959,6 @@ async function main() {
   // Internal endpoints
   // =========================================================================
 
-  /** Timing-safe check of the x-internal-secret header. Returns false if the
-   *  env var is unset or the header is missing/mismatched.
-   *  Both values are hashed to SHA-256 so timingSafeEqual always receives
-   *  equal-length buffers, avoiding length-leak timing side-channels and
-   *  ERR_INVALID_ARG_VALUE throws from multibyte string length mismatches. */
-  function verifyInternalSecret(
-    header: string | string[] | undefined,
-  ): boolean {
-    const secret = process.env.EPDS_INTERNAL_SECRET
-    if (!secret || typeof header !== 'string') return false
-    const hash = (v: string) => createHash('sha256').update(v).digest()
-    return timingSafeEqual(hash(header), hash(secret))
-  }
-
   // Protected internal endpoint for auth service to look up an account by email.
   // Replaces the old unauthenticated /_magic/check-email to prevent email enumeration.
   // Queries account.sqlite directly via the PDS accountManager — no mirror table needed.
@@ -1101,6 +1124,8 @@ async function main() {
     res.json({ emails })
   })
 
+  installTestHooks({ pds, app: pds.app, logger })
+
   // =========================================================================
   // TLS check - used by Caddy on-demand TLS to verify handle ownership
   // =========================================================================
@@ -1172,14 +1197,6 @@ async function checkHandleRoute(
       .status(500)
       .json({ error: 'InternalServerError', message: 'Internal Server Error' })
   }
-}
-
-function renderError(message: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><link rel="icon" href="/static/favicon.svg" media="(prefers-color-scheme: light)" type="image/svg+xml"><link rel="icon" href="/static/favicon-dark.svg" media="(prefers-color-scheme: dark)" type="image/svg+xml"><title>Error</title></head>
-<body><p style="color:red;padding:20px">${escapeHtml(message)}</p></body>
-</html>`
 }
 
 main().catch((err: unknown) => {

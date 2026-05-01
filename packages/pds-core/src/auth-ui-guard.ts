@@ -1,27 +1,39 @@
 /**
  * Pre-route middleware that short-circuits any request which would cause
- * upstream @atproto/oauth-provider to render its three-button welcome page
- * ("Authenticate / Create new account / Sign in / Cancel").
+ * upstream @atproto/oauth-provider to render either of its two stock
+ * authentication UIs:
  *
- * That page is unreachable from ePDS by design — every entry point should
- * either show the enriched chooser (when the device has bound accounts)
- * or fall back to auth-service's email/OTP form. So whenever the current
- * request resolves to a device with zero bound accounts (partial cookie
- * pair, stale pair, migration-005 TTL purge, fixation race, etc.), we
- * respond with a 303 redirect to auth-service and clear the stale
- * device-session cookies.
+ *   1. The three-button welcome page ("Authenticate / Create new account /
+ *      Sign in / Cancel") — rendered when the device has zero bound
+ *      accounts (partial cookie
+ *      pair, stale pair, migration-005 TTL purge, fixation race, etc.).
+ *
+ *   2. The sign-in-view (handle + password form) — rendered when bindings
+ *      exist but every binding upstream considers has loginRequired: true.
+ *      Three triggers: the stored PAR has prompt=login; every binding's
+ *      auth age exceeds authenticationMaxAge (default 7d); a login_hint
+ *      pre-selects an individually stale binding among otherwise-fresh
+ *      bindings on the same device.
+ *
+ * Both UIs are unreachable from ePDS by design — every entry point should
+ * either show the enriched chooser (when the device has fresh bound
+ * accounts) or fall back to auth-service's email/OTP form. ePDS accounts
+ * are passwordless, so the password form in particular is a contract
+ * violation: the user gets a form they cannot submit.
  *
  * Upstream's DeviceManager.hasSession/getCookies has a side effect — it
  * deletes the device row on a partial cookie pair — so we re-parse the
  * cookies ourselves using the exported Zod schemas rather than calling
  * upstream. We then query account bindings via the public
- * accountManager.listDeviceAccounts API. If bindings exist, we call
- * next() and let upstream proceed; if not, we bounce.
+ * accountManager.listDeviceAccounts API. If bindings exist we additionally
+ * mirror upstream's matchesHint + checkLoginRequired logic to detect the
+ * sign-in-view path; on any bounce condition we 303 to auth-service and
+ * clear stale device-session cookies, otherwise we let upstream proceed.
  *
  * See docs/design/session-reuse-bugs.md for the full failure-mode taxonomy.
  */
 import type { NextFunction, Request, Response } from 'express'
-import type { OAuthProvider } from '@atproto/oauth-provider'
+import type { DeviceAccount, OAuthProvider } from '@atproto/oauth-provider'
 import {
   DEVICE_ID_BYTES_LENGTH,
   DEVICE_ID_PREFIX,
@@ -29,7 +41,24 @@ import {
   SESSION_ID_PREFIX,
 } from '@atproto/oauth-provider'
 import type { Logger } from 'pino'
-import { loadDeviceAccountEmails } from './lib/device-accounts.js'
+import {
+  parsePromptTokens as parsePromptTokensShared,
+  promptHasLogin as promptHasLoginShared,
+} from '@certified-app/shared'
+import { loadDeviceBindings } from './lib/device-accounts.js'
+
+/** Re-export of the shared implementation. The canonical home is
+ *  `@certified-app/shared`; this re-export exists so internal callers
+ *  in pds-core (and the existing `auth-ui-guard.test.ts` import site)
+ *  don't have to be touched on every refactor. New callers should
+ *  import from `@certified-app/shared` directly. */
+export const parsePromptTokens = parsePromptTokensShared
+/** Re-export of the shared implementation. The canonical home is
+ *  `@certified-app/shared`; this re-export exists so internal callers
+ *  in pds-core (and the existing `auth-ui-guard.test.ts` import site)
+ *  don't have to be touched on every refactor. New callers should
+ *  import from `@certified-app/shared` directly. */
+export const promptHasLogin = promptHasLoginShared
 
 const DEVICE_ID_RE = new RegExp(
   `^${DEVICE_ID_PREFIX}[0-9a-f]{${DEVICE_ID_BYTES_LENGTH * 2}}$`,
@@ -175,14 +204,14 @@ export function appendCookieClearHeaders(
 /** Create the Express middleware. `cookieDomain` may be null when the
  *  auth-service and pds-core don't share a common parent domain — in
  *  that case there's no domain-scoped cookie to clear. */
-export function createWelcomePageGuard(opts: {
+export function createAuthUiGuard(opts: {
   authHostname: string
   provider: OAuthProvider | null
   cookieDomain: string | null
   logger?: Partial<Pick<Logger, 'error' | 'debug'>>
 }) {
   const { authHostname, provider, cookieDomain, logger } = opts
-  return async function welcomePageGuard(
+  return async function authUiGuard(
     req: Request,
     res: Response,
     next: NextFunction,
@@ -229,18 +258,130 @@ export function createWelcomePageGuard(opts: {
     // etc.), or a device with zero bound accounts (migration-005 1h
     // TTL purge for remember=0 rows), would otherwise sail past and
     // let upstream render its stock welcome page. Both cases come
-    // back as `null` or `[]` from the shared helper — bounce on
-    // either.
-    const emails = await loadDeviceAccountEmails({
+    // back as `null` or `[]` from the helper — bounce on either.
+    const bindings = await loadDeviceBindings({
       provider,
       deviceId: parsed.deviceId,
       sessionId: parsed.sessionId,
+      logCtx: 'guard',
       logger,
     })
-    if (!emails || emails.length === 0) {
+    if (!bindings || bindings.length === 0) {
+      bounceOrPass()
+      return
+    }
+
+    // At this point bindings exist, so upstream won't render the welcome
+    // page. But it may still render its sign-in-view (handle + password
+    // form) when every binding it would consider has loginRequired: true
+    // — see oauth-provider.ts:622-624. ePDS accounts are passwordless,
+    // so any path into that form is unusable. Three independent triggers
+    // force upstream into that state:
+    //
+    //   - stored PAR `parameters.prompt === 'login'` (forces every
+    //     session loginRequired regardless of auth age)
+    //   - every binding's auth age exceeds upstream's
+    //     authenticationMaxAge (default 7d, applied per-binding)
+    //   - login_hint matches one binding which is itself stale, even
+    //     when other bindings on the device are fresh (upstream
+    //     pre-selects the hinted account; clicking falls through to
+    //     sign-in-view)
+    //
+    // Read the stored PAR parameters and compute upstream's
+    // candidate-binding set; bounce when every candidate would be
+    // loginRequired. See features/session-reuse-bugs.feature for the
+    // externally-reproducible scenarios under "Sign-in-view leaks".
+    const params = await loadStoredPar({
+      provider,
+      requestUrl: req.url,
+      logger,
+    })
+    if (promptHasLogin(params?.prompt)) {
+      bounceOrPass()
+      return
+    }
+    const candidates = filterCandidateBindings(bindings, params?.login_hint)
+    if (candidates.every((b) => provider.checkLoginRequired(b))) {
       bounceOrPass()
       return
     }
     next()
   }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers used only by the guard middleware. The cookie-pair-validating
+// `loadDeviceBindings` lives in `lib/device-accounts.ts` so this file and
+// the /_internal/device-accounts endpoint share the same miss semantics.
+// What's left here is the stored-PAR / login_hint logic that's unique to
+// the guard.
+// ---------------------------------------------------------------------------
+
+type StoredPar = {
+  prompt?: string
+  login_hint?: string
+}
+
+// Local alias so the helpers' signatures read clearly. Upstream's
+// DeviceAccount has the fields we need (`account` for the hint match,
+// `updatedAt` for checkLoginRequired).
+type Binding = DeviceAccount
+
+/** Read the stored PAR parameters for the request_uri on the current URL.
+ *  Returns null when the URL has no request_uri, when the lookup fails, or
+ *  when stored data is shaped unexpectedly. Used to read `prompt` and
+ *  `login_hint` for the bounce decisions on flows where the stored PAR
+ *  forces re-authentication or hints at a stale binding. */
+async function loadStoredPar(opts: {
+  provider: OAuthProvider
+  requestUrl: string
+  logger?: Partial<Pick<Logger, 'error' | 'debug'>>
+}): Promise<StoredPar | null> {
+  const { provider, requestUrl, logger } = opts
+  let requestUri: string | null
+  try {
+    requestUri = new URL(requestUrl, 'https://placeholder').searchParams.get(
+      'request_uri',
+    )
+  } catch {
+    return null
+  }
+  if (!requestUri) return null
+  const REQUEST_URI_PREFIX = 'urn:ietf:params:oauth:request_uri:'
+  if (!requestUri.startsWith(REQUEST_URI_PREFIX)) return null
+  const requestId = decodeURIComponent(
+    requestUri.slice(REQUEST_URI_PREFIX.length),
+  )
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- requestManager.store not in upstream types
+    const store = (provider.requestManager as any).store
+    const stored = await store.readRequest(requestId)
+    const params = stored?.parameters
+    if (!params || typeof params !== 'object') return null
+    return {
+      prompt: typeof params.prompt === 'string' ? params.prompt : undefined,
+      login_hint:
+        typeof params.login_hint === 'string' ? params.login_hint : undefined,
+    }
+  } catch (err) {
+    logger?.error?.({ err, requestId }, 'guard: store.readRequest failed')
+    return null
+  }
+}
+
+/** Apply upstream's `matchesHint` semantics to narrow the binding list to
+ *  the candidates upstream would consider. When no hint is set OR the hint
+ *  matches no binding, all bindings are candidates (chooser-like). When the
+ *  hint matches exactly one binding (sub or preferred_username), that's the
+ *  only candidate. Mirrors oauth-provider.ts:1100-1108. */
+function filterCandidateBindings(
+  bindings: Binding[],
+  loginHint: string | undefined,
+): Binding[] {
+  if (!loginHint) return bindings
+  const matched = bindings.filter(
+    ({ account }) =>
+      account.sub === loginHint || account.preferred_username === loginHint,
+  )
+  return matched.length === 1 ? matched : bindings
 }

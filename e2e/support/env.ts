@@ -35,4 +35,8 @@ export const testEnv = {
     | 'numeric'
     | 'alphanumeric',
   headless: process.env.E2E_HEADLESS === 'true',
+  // Must match the deployment's EPDS_INTERNAL_SECRET. Required only by
+  // scenarios tagged @otp-expiry that call /_internal/test/* hooks;
+  // steps return 'pending' if unset.
+  internalSecret: process.env.E2E_INTERNAL_SECRET ?? '',
 }

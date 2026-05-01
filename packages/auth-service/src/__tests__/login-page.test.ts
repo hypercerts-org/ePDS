@@ -289,13 +289,14 @@ describe('Login page redirect requirements', () => {
     expect(hasError).toBe(true)
   })
 
-  it('flow_id cookie expires in 10 minutes', () => {
-    const AUTH_FLOW_TTL_MS = 10 * 60 * 1000
+  it('flow_id cookie expires in 60 minutes (decoupled from OTP TTL)', () => {
+    const AUTH_FLOW_TTL_MS = 60 * 60 * 1000
     const nowish = Date.now()
     const expiresAt = nowish + AUTH_FLOW_TTL_MS
 
-    // Should be approximately 10 min from now
-    expect(expiresAt - nowish).toBe(600_000)
+    // 60 min lets a user who hits OTP expiry (10 min) and resends still
+    // have a live auth_flow + cookie to land on /auth/complete.
+    expect(expiresAt - nowish).toBe(3_600_000)
   })
 })
 
@@ -482,5 +483,94 @@ describe('renderLoginPage handle login button', () => {
       epds_handle_login_url: 'file:///etc/passwd',
     })
     expect(html).not.toContain(BUTTON_HTML)
+  })
+})
+
+// Regression: the segmented OTP input auto-submits the verify form when the
+// last digit lands (paste handler at the same site). If a second submit
+// fires while the first is in flight — Enter after typing, OTP autofill
+// dispatching input on every box, paste+input pair on some browsers — the
+// second call hits /sign-in/email-otp with a now-consumed code, the
+// response is "Invalid OTP", and that error renders briefly before the
+// success-path redirect to /auth/complete unloads the page. The visible
+// symptom is a red "Invalid OTP" flash followed by a successful login.
+//
+// The fix is an in-flight latch in the verify-form submit handler. These
+// tests pin its structure so accidental refactors (removing the guard,
+// moving it after the fetch, resetting the flag unconditionally on
+// success) fail loudly.
+function renderDefault(): string {
+  return renderLoginPage({
+    flowId: 'flow-1',
+    clientId: 'https://example.com/client-metadata.json',
+    clientName: 'Example',
+    branding: {},
+    customCss: null,
+    customFaviconUrl: null,
+    customFaviconUrlDark: null,
+    loginHint: '',
+    initialStep: 'email',
+    otpAlreadySent: false,
+    csrfToken: 'csrf',
+    authBasePath: '/api/auth',
+    pdsPublicUrl: 'https://pds.example.com',
+    otpLength: 6,
+    otpCharset: 'numeric',
+  })
+}
+
+describe('renderLoginPage OTP verify-form double-submit latch (regression)', () => {
+  it('declares the verifying flag at IIFE scope so input/paste/submit handlers share it', () => {
+    const html = renderDefault()
+    expect(html).toContain('var verifying = false;')
+    // Exactly one declaration — a second one would shadow the shared flag.
+    expect(html.match(/var verifying =/g)).toHaveLength(1)
+  })
+
+  it('guards the verify-form submit handler before any in-flight state is touched', () => {
+    const html = renderDefault()
+    // Order matters: the guard must short-circuit BEFORE we set
+    // verifying=true and BEFORE the verifyOtp() call. A guard placed
+    // after the fetch would not prevent a second request.
+    const guardIdx = html.indexOf('if (verifying) return;')
+    const setTrueIdx = html.indexOf('verifying = true;')
+    const verifyCallIdx = html.indexOf('await verifyOtp(currentEmail, otp)')
+    expect(guardIdx).toBeGreaterThan(0)
+    expect(setTrueIdx).toBeGreaterThan(guardIdx)
+    expect(verifyCallIdx).toBeGreaterThan(setTrueIdx)
+  })
+
+  it('resets the latch only on the error path, not on success', () => {
+    const html = renderDefault()
+    // The reset is wrapped in `if (!result || result.error) { ... }`. An
+    // unconditional reset would re-open the form during the post-success
+    // navigation and let a late input/Enter event fire a second verify
+    // on the consumed OTP — exactly the bug being prevented.
+    expect(html).toMatch(
+      /if \(!result \|\| result\.error\)\s*\{\s*verifying = false;/,
+    )
+    // And there is exactly one place that sets the flag back to false (in
+    // the error branch). A second `verifying = false` somewhere else
+    // would defeat the latch.
+    const resetCount = html.split('verifying = false;').length - 1
+    expect(resetCount).toBe(2) // initial declaration + single reset
+  })
+
+  it('clears the OTP boxes on verify error so re-entry does not auto-spam', () => {
+    const html = renderDefault()
+    // Without clearing, the boxes stay full at length 6 after an invalid
+    // code. The auto-submit handler fires whenever total length === 6, so
+    // the next keystroke (replacing one wrong digit) would immediately
+    // trigger another verify, again with a still-wrong code, on every
+    // edit — easily tripping the per-IP rate limiter.
+    const branchStart = html.indexOf('if (result && result.error) {')
+    expect(branchStart).toBeGreaterThan(0)
+    // The next `verifying = false;` (in the `finally` block) bounds the
+    // error branch — bounded slice, no unbounded regex backtracking.
+    const branchEnd = html.indexOf('verifying = false;', branchStart)
+    expect(branchEnd).toBeGreaterThan(branchStart)
+    const branch = html.slice(branchStart, branchEnd)
+    expect(branch).toContain('showError(result.error);')
+    expect(branch).toContain('clearOtpBoxes();')
   })
 })

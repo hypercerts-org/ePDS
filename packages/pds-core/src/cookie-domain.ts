@@ -64,7 +64,7 @@ export const DEVICE_COOKIE_NAMES = new Set<string>([
  * - Returns the input unchanged if it is a clearing cookie (`Max-Age=0`
  *   or a past `Expires`). Browsers only clear a host-only cookie if the
  *   clearing Set-Cookie itself carries no `Domain=`; auto-scoping a
- *   clear would silently neuter callers (e.g. welcome-page-guard) that
+ *   clear would silently neuter callers (e.g. auth-ui-guard) that
  *   intentionally emit BOTH a host-only clear and a Domain-scoped clear
  *   to evict cookies in both scopes. Without this guard the host-only
  *   variant of a stale device cookie can never be removed once the
@@ -93,7 +93,7 @@ export function rewriteSetCookie(value: string, domain: string): string {
  *  than or equal to zero (0), let expiry-time be the earliest
  *  representable date") or a past `Expires=` date. Numeric `Max-Age`
  *  is the canonical form upstream uses for host-only/Domain-scoped
- *  clears in welcome-page-guard.
+ *  clears in auth-ui-guard.
  */
 function isClearingCookie(value: string): boolean {
   if (/;\s*Max-Age\s*=\s*-?0+\b/i.test(value)) return true

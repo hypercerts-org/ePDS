@@ -62,11 +62,9 @@ import {
   shouldReuseSession,
 } from '../lib/session-reuse.js'
 import { fetchDeviceAccountEmails } from '../lib/fetch-device-accounts.js'
+import { AUTH_FLOW_COOKIE, AUTH_FLOW_TTL_MS } from '../lib/auth-flow.js'
 
 const logger = createLogger('auth:login-page')
-
-const AUTH_FLOW_COOKIE = 'epds_auth_flow'
-const AUTH_FLOW_TTL_MS = 10 * 60 * 1000 // 10 minutes
 
 // Inline the Certified wordmark so CSS `color` can tint it via `currentColor`.
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -177,6 +175,16 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     // Resolve the login_hint up-front so we can decide whether the
     // device session is a match before redirecting to pds-core. The
     // resolution result is also reused below for the email/OTP form.
+    //
+    // pds-core's "Another account" rebind sets epds_skip_par_hint=1
+    // (issue #138) — the user clicked an opt-out, so any login_hint
+    // stored in the PAR by the RP at OAuth init must be ignored. The
+    // rebind also strips URL login_hint, so on that path effectiveLoginHint
+    // ends up null and the spec-correct decision below renders the email
+    // form. This skip flag does NOT affect prompt=login alone: pds-core's
+    // sign-in-view bounce also sets prompt=login (without the skip flag)
+    // and expects the hint to resolve normally so the OTP step renders.
+    const skipParHint = req.query.epds_skip_par_hint === '1'
     const pdsInternalUrl = ensurePdsUrl(
       process.env.PDS_INTERNAL_URL,
       ctx.config.pdsPublicUrl,
@@ -184,7 +192,7 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     const internalSecret = process.env.EPDS_INTERNAL_SECRET ?? ''
 
     let effectiveLoginHint = loginHint ?? null
-    if (!effectiveLoginHint && requestUri) {
+    if (!skipParHint && !effectiveLoginHint && requestUri) {
       effectiveLoginHint = await fetchParLoginHint(
         pdsInternalUrl,
         requestUri,
@@ -237,7 +245,7 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     // DeviceManager cannot hydrate from. Emit Max-Age=0 clears for both
     // cookies in both host-only and shared-parent-domain scopes so the
     // next OAuth flow gets a clean slate — otherwise the orphan half
-    // keeps bouncing through pds-core's welcome-page-guard every time.
+    // keeps bouncing through pds-core's auth-ui-guard every time.
     const orphan = hasOrphanDeviceCookie(sessionReuseReq)
     if (orphan.isOrphan) {
       const cookieDomain = deriveSharedCookieDomain(
@@ -370,7 +378,10 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     //   c) Only in the stored PAR request (third-party apps that put the
     //      handle in the PAR body but don't duplicate it on the redirect URL)
     // The hint was already resolved above for the session-reuse decision; we
-    // reuse `resolvedEmail` here rather than re-fetching.
+    // reuse `resolvedEmail` here rather than re-fetching. On the "Another
+    // account" rebind path (issue #138) `epds_skip_par_hint=1` upstream
+    // suppresses both URL and PAR hint resolution, so resolvedEmail is null
+    // and the email step falls out without a special case here.
     const hasLoginHint = !!resolvedEmail
     const initialStep = hasLoginHint ? 'otp' : 'email'
 
@@ -494,9 +505,9 @@ export function renderLoginPage(opts: {
         opts.initialStep === 'otp' ? 'none' : 'block'
       };">By signing in, you agree to ${termsLead} <a href="${escapeHtml(
         opts.termsOfServiceUrl as string,
-      )}" class="terms-link">Terms of Use</a> and <a href="${escapeHtml(
+      )}" class="terms-link" target="_blank" rel="noopener noreferrer">Terms of Use</a> and <a href="${escapeHtml(
         opts.privacyPolicyUrl as string,
-      )}" class="terms-link">Privacy Policy</a>.</div>`
+      )}" class="terms-link" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</div>`
     : ''
 
   const hasGoogle = 'google' in socialProviders
@@ -573,13 +584,15 @@ export function renderLoginPage(opts: {
     .btn-atproto { margin-top: 12px; margin-bottom: 0; color: #1A130F !important; background: var(--input-bg) !important; border-color: var(--input-border) !important; }
     .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: #999; font-size: 13px; }
     .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #ececec; }
-    .error { color: #dc3545; background: #fdf0f0; padding: 12px; border-radius: 10px; margin: 12px 0; font-size: 14px; text-align: left; }
+    .flash-msg { padding: 12px; border-radius: 10px; margin: 12px 0; font-size: 14px; text-align: center; }
+    .flash-msg.error { color: #dc3545; background: #fdf0f0; }
+    .flash-msg.success { color: #28a745; background: #f0fff4; }
     .step-otp { display: none; }
     .step-otp.active { display: block; }
     .step-email.hidden { display: none; }
     .terms { margin-top: 24px; color: var(--muted-foreground); font-size: 13px; font-weight: 400; line-height: 1.5; text-align: center; }
-    .terms-link { color: inherit; text-decoration: underline; }
-    .powered-by { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 16px; color: var(--muted-foreground); font-size: 13px; text-decoration: none; }
+    .terms-link { color: inherit; text-decoration: underline; cursor: pointer; }
+    .powered-by { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 16px; color: var(--muted-foreground); font-size: 13px; text-decoration: none; cursor: pointer; }
     .powered-by:hover, .powered-by:focus, .powered-by:visited { color: var(--muted-foreground); text-decoration: none; }
     .powered-by .certified-mark { height: 14px; width: auto; display: block; }
     /* Recovery-via-backup-email link. Shown by default; trusted clients
@@ -595,7 +608,7 @@ export function renderLoginPage(opts: {
     ${logoHtml}
     <h1 id="heading">${opts.initialStep === 'otp' ? 'Enter your code' : 'Sign in'}</h1>
 
-    <div id="error-msg" class="error" style="display:none;"></div>
+    <div id="error-msg" class="flash-msg" style="display:none;"></div>
 
     ${socialButtonsHtml}
 
@@ -661,6 +674,7 @@ export function renderLoginPage(opts: {
       var requestUri = ${JSON.stringify('')};  // not needed client-side; flow_id is in cookie
       var currentEmail = '';
       var loginMode = 'email'; // 'email' | 'handle'
+      var verifying = false;
       var errorEl = document.getElementById('error-msg');
       var stepEmail = document.getElementById('step-email');
       var stepOtp = document.getElementById('step-otp');
@@ -725,14 +739,20 @@ export function renderLoginPage(opts: {
         box.addEventListener('focus', function() { box.select(); });
       });
 
-      function showError(msg) {
+      function showFlash(msg, kind) {
         errorEl.textContent = msg;
+        errorEl.classList.remove('error', 'success');
+        errorEl.classList.add(kind);
         errorEl.style.display = 'block';
       }
+
+      function showError(msg) { showFlash(msg, 'error'); }
+      function showSuccess(msg) { showFlash(msg, 'success'); }
 
       function clearError() {
         errorEl.style.display = 'none';
         errorEl.textContent = '';
+        errorEl.classList.remove('error', 'success');
       }
 
       function setLoginMode(mode) {
@@ -869,18 +889,36 @@ export function renderLoginPage(opts: {
       // Form: verify OTP
       document.getElementById('form-verify-otp').addEventListener('submit', async function(e) {
         e.preventDefault();
+        // Collapse duplicate submits (auto-submit on 6th digit + Enter, OTP
+        // autofill firing input on every box, paste+input pair, etc.). The
+        // first call consumes the code; a second one races the redirect and
+        // flashes "Invalid OTP" before the page unloads.
+        if (verifying) return;
+        verifying = true;
         clearError();
         var otp = document.getElementById('code').value.trim();
         var btn = this.querySelector('button[type=submit]');
         btn.disabled = true;
         btn.textContent = 'Verifying...';
 
-        var result = await verifyOtp(currentEmail, otp);
-        btn.disabled = false;
-        btn.textContent = 'Verify';
-
-        if (result && result.error) {
-          showError(result.error);
+        try {
+          var result = await verifyOtp(currentEmail, otp);
+          if (result && result.error) {
+            showError(result.error);
+            // Clear the boxes so the user re-enters all 6 digits. Editing
+            // a still-full grid would auto-submit on the first keystroke
+            // (length stays at 6) and spam the rate limiter.
+            clearOtpBoxes();
+            if (otpBoxes.length) otpBoxes[0].focus();
+          }
+        } finally {
+          // Leave the latch set on success: verifyOtp triggers a redirect,
+          // and we don't want late events to re-open the form mid-navigation.
+          if (!result || result.error) {
+            verifying = false;
+            btn.disabled = false;
+            btn.textContent = 'Verify';
+          }
         }
       });
 
@@ -895,9 +933,7 @@ export function renderLoginPage(opts: {
         if (result.error) {
           showError(result.error);
         } else {
-          showError('Code resent!');
-          errorEl.style.color = '#28a745';
-          errorEl.style.background = '#f0fff4';
+          showSuccess('Code resent!');
         }
       });
 

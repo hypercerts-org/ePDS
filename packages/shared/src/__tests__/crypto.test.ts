@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect } from 'vitest'
 import {
   generateVerificationToken,
   hashToken,
   timingSafeEqual,
+  verifyInternalSecret,
   generateCsrfToken,
   generateRandomHandle,
   signCallback,
@@ -55,6 +56,52 @@ describe('timingSafeEqual', () => {
 
   it('returns false for different lengths', () => {
     expect(timingSafeEqual('short', 'longer-string')).toBe(false)
+  })
+})
+
+describe('verifyInternalSecret', () => {
+  let originalSecret: string | undefined
+
+  beforeEach(() => {
+    originalSecret = process.env.EPDS_INTERNAL_SECRET
+  })
+
+  afterEach(() => {
+    if (originalSecret === undefined) delete process.env.EPDS_INTERNAL_SECRET
+    else process.env.EPDS_INTERNAL_SECRET = originalSecret
+  })
+
+  it('returns true when the header matches the env secret', () => {
+    process.env.EPDS_INTERNAL_SECRET = 'shared-secret-123'
+    expect(verifyInternalSecret('shared-secret-123')).toBe(true)
+  })
+
+  it('returns false for a mismatched header', () => {
+    process.env.EPDS_INTERNAL_SECRET = 'shared-secret-123'
+    expect(verifyInternalSecret('wrong-secret')).toBe(false)
+  })
+
+  it('returns false when the header is undefined', () => {
+    process.env.EPDS_INTERNAL_SECRET = 'shared-secret-123'
+    expect(verifyInternalSecret(undefined)).toBe(false)
+  })
+
+  it('returns false when the header is an array (e.g. duplicated headers)', () => {
+    process.env.EPDS_INTERNAL_SECRET = 'shared-secret-123'
+    expect(verifyInternalSecret(['shared-secret-123', 'extra'])).toBe(false)
+  })
+
+  it('returns false when the env secret is unset, even with a header', () => {
+    delete process.env.EPDS_INTERNAL_SECRET
+    expect(verifyInternalSecret('any-value')).toBe(false)
+  })
+
+  it('handles different-length values without throwing (hashed before compare)', () => {
+    process.env.EPDS_INTERNAL_SECRET = 'short'
+    expect(() =>
+      verifyInternalSecret('a-much-longer-supplied-value'),
+    ).not.toThrow()
+    expect(verifyInternalSecret('a-much-longer-supplied-value')).toBe(false)
   })
 })
 

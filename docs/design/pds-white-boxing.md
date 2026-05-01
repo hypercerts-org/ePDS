@@ -321,7 +321,7 @@ pds-core back to the auth-service in a loop.
 
 ### 18. Welcome-page guard pre-routes `/oauth/authorize` and `/account*`
 
-**File:** `packages/pds-core/src/welcome-page-guard.ts`, wired in
+**File:** `packages/pds-core/src/auth-ui-guard.ts`, wired in
 `packages/pds-core/src/index.ts`
 
 A pre-route Express middleware intercepts `GET /oauth/authorize` and

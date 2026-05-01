@@ -54,4 +54,8 @@ export const DEFAULT_BRANDING_CSS = [
   '.bg-gray-100, .dark\\:bg-gray-800, .bg-gray-200, .dark\\:bg-gray-700, .bg-gray-300, .dark\\:bg-slate-600 { background-color: #FFFFFF !important; color: #1A130F !important; border: 1px solid #E5E5E5 !important; }',
   // Hover lift: light neutral, like .btn-social:hover on the login page.
   '.hover\\:bg-gray-200:hover, .dark\\:hover\\:bg-gray-700:hover { background-color: #FAFAFA !important; }',
+  // Upstream stock PDS FormCard action rows use row-reverse + horizontal spacing.
+  // Longer primary labels, such as "Sign in with Certified", cramp on
+  // narrow screens, so stack below Tailwind's md breakpoint only.
+  '@media (max-width: 767.98px) { .flex.flex-row-reverse.flex-wrap.items-center.justify-end.space-x-2.space-x-reverse { flex-direction: column-reverse !important; align-items: stretch !important; gap: 0.5rem !important; } .flex.flex-row-reverse.flex-wrap.items-center.justify-end.space-x-2.space-x-reverse > * { margin-left: 0 !important; margin-right: 0 !important; margin-inline-start: 0 !important; margin-inline-end: 0 !important; } .flex.flex-row-reverse.flex-wrap.items-center.justify-end.space-x-2.space-x-reverse > .flex-auto { display: none !important; } }',
 ].join(' ')

@@ -33,6 +33,8 @@ import { resolveClientBranding } from '../lib/client-metadata.js'
 import {
   renderOptionalStyleTag,
   renderFaviconTag,
+  POWERED_BY_CSS,
+  POWERED_BY_HTML,
 } from '../lib/page-helpers.js'
 
 const logger = createLogger('auth:choose-handle')
@@ -465,8 +467,10 @@ export function renderChooseHandlePage(
   <title>Choose your handle</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-    .container { background: white; border-radius: 12px; padding: 40px; max-width: max(420px, min(90vw, 600px)); width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .page-wrap { display: flex; flex-direction: column; align-items: stretch; max-width: max(420px, min(90vw, 600px)); width: 100%; }
+    ${POWERED_BY_CSS}
+    .container { background: white; border-radius: 12px; padding: 40px; width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
     h1 { font-size: 24px; margin-bottom: 8px; color: #111; }
     .subtitle { color: #666; margin-bottom: 24px; font-size: 15px; line-height: 1.5; }
     .field { margin-bottom: 16px; }
@@ -496,35 +500,38 @@ export function renderChooseHandlePage(
   </style>${renderOptionalStyleTag(customCss)}
 </head>
 <body>
-  <div class="container">
-    <h1>Choose your handle</h1>
-    <p class="subtitle">Your handle is your public username on the AT Protocol network.</p>
+  <div class="page-wrap">
+    <div class="container">
+      <h1>Choose your handle</h1>
+      <p class="subtitle">Your handle is your public username on the AT Protocol network.</p>
 
-    ${errorHtml}
+      ${errorHtml}
 
-    <form method="POST" action="/auth/choose-handle" id="handle-form">
-      <input type="hidden" name="csrf" value="${escapeHtml(csrfToken || '')}">
-      <div class="field">
-        <label for="handle-input">Handle</label>
-        <div class="handle-row">
-          <input
-            type="text"
-            id="handle-input"
-            name="handle"
-            placeholder="yourname"
-            autocomplete="off"
-            autocapitalize="none"
-            spellcheck="false"
-            minlength="5"
-            maxlength="20"
-          >
-          <span class="handle-suffix">.${escapeHtml(handleDomain)}</span>
+      <form method="POST" action="/auth/choose-handle" id="handle-form">
+        <input type="hidden" name="csrf" value="${escapeHtml(csrfToken || '')}">
+        <div class="field">
+          <label for="handle-input">Handle</label>
+          <div class="handle-row">
+            <input
+              type="text"
+              id="handle-input"
+              name="handle"
+              placeholder="yourname"
+              autocomplete="off"
+              autocapitalize="none"
+              spellcheck="false"
+              minlength="5"
+              maxlength="20"
+            >
+            <span class="handle-suffix">.${escapeHtml(handleDomain)}</span>
+          </div>
+          <div class="status" id="handle-status"></div>
         </div>
-        <div class="status" id="handle-status"></div>
-      </div>
-      ${showRandomButton ? `<button type="button" id="random-btn" class="btn-secondary">Generate random handle</button>` : ''}
-      <button type="submit" id="submit-btn" class="btn-primary">Create</button>
-    </form>
+        ${showRandomButton ? `<button type="button" id="random-btn" class="btn-secondary">Generate random handle</button>` : ''}
+        <button type="submit" id="submit-btn" class="btn-primary">Create</button>
+      </form>
+    </div>
+    ${POWERED_BY_HTML}
   </div>
 
   <script>

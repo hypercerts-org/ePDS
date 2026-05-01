@@ -1,4 +1,44 @@
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { escapeHtml } from '@certified-app/shared'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const CERTIFIED_MARK_SVG = readFileSync(
+  path.resolve(
+    __dirname,
+    '..',
+    '..',
+    'public',
+    'certified-text-monochrome.svg',
+  ),
+  'utf8',
+)
+  .replace(/fill="#726A60"/g, 'fill="currentColor"')
+  .replace(
+    '<svg ',
+    '<svg class="certified-mark" aria-label="Certified" role="img" ',
+  )
+
+/**
+ * "Powered by Certified" footer rendered below the auth pages' card. Place
+ * inside a flex-column wrapper alongside `.container`; the wrapper sets the
+ * shared max-width so the footer lines up with the card edges.
+ */
+export const POWERED_BY_HTML = `<a class="powered-by" href="https://certified.app/" target="_blank" rel="noopener noreferrer">
+      <span>Powered by</span>
+      ${CERTIFIED_MARK_SVG}
+    </a>`
+
+/**
+ * CSS rules for the `.powered-by` link + Certified wordmark. Each page is
+ * still responsible for its own `.page-wrap` width since card widths differ.
+ */
+export const POWERED_BY_CSS = `
+  .powered-by { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 16px; color: #999; font-size: 13px; text-decoration: none; }
+  .powered-by:hover, .powered-by:focus, .powered-by:visited { color: #999; text-decoration: none; }
+  .powered-by .certified-mark { height: 14px; width: auto; display: block; }
+`
 
 export function renderOptionalStyleTag(css?: string | null): string {
   if (!css) return ''

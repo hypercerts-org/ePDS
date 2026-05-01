@@ -22,12 +22,13 @@ import { resolveClientBranding } from '../lib/client-metadata.js'
 import {
   renderOptionalStyleTag,
   renderFaviconTag,
+  POWERED_BY_CSS,
+  POWERED_BY_HTML,
 } from '../lib/page-helpers.js'
 import { renderError } from '../lib/render-error.js'
+import { AUTH_FLOW_COOKIE, AUTH_FLOW_TTL_MS } from '../lib/auth-flow.js'
 
 const logger = createLogger('auth:recovery')
-
-const AUTH_FLOW_COOKIE = 'epds_auth_flow'
 
 export function createRecoveryRouter(
   ctx: AuthServiceContext,
@@ -153,13 +154,13 @@ export function createRecoveryRouter(
             // expired rows and we have no peek accessor.
             clientId: null,
             // handleMode omitted — recovery flows don't go through handle assignment
-            expiresAt: Date.now() + 10 * 60 * 1000,
+            expiresAt: Date.now() + AUTH_FLOW_TTL_MS,
           })
           res.cookie(AUTH_FLOW_COOKIE, flowId, {
             httpOnly: true,
             secure: process.env.NODE_ENV !== 'development',
             sameSite: 'lax',
-            maxAge: 10 * 60 * 1000,
+            maxAge: AUTH_FLOW_TTL_MS,
           })
         }
 
@@ -305,21 +306,24 @@ export function renderRecoveryForm(opts: {
   <style>${CSS}</style>${renderOptionalStyleTag(opts.customCss)}
 </head>
 <body>
-  <div class="container">
-    <h1>Account Recovery</h1>
-    <p class="subtitle">Enter the backup email address associated with your account.</p>
-    ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
-    <form method="POST" action="/auth/recover">
-      <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
-      <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
-      <div class="field">
-        <label for="email">Backup email address</label>
-        <input type="email" id="email" name="email" required autofocus
-               placeholder="backup@example.com">
-      </div>
-      <button type="submit" class="btn-primary">Send recovery code</button>
-    </form>
-    <a href="${backHref}" class="btn-secondary">Back to sign in</a>
+  <div class="page-wrap">
+    <div class="container">
+      <h1>Account Recovery</h1>
+      <p class="subtitle">Enter the backup email address associated with your account.</p>
+      ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
+      <form method="POST" action="/auth/recover">
+        <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
+        <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
+        <div class="field">
+          <label for="email">Backup email address</label>
+          <input type="email" id="email" name="email" required autofocus
+                 placeholder="backup@example.com">
+        </div>
+        <button type="submit" class="btn-primary">Send recovery code</button>
+      </form>
+      <a href="${backHref}" class="btn-secondary">Back to sign in</a>
+    </div>
+    ${POWERED_BY_HTML}
   </div>
 </body>
 </html>`
@@ -354,37 +358,40 @@ export function renderRecoveryOtpForm(opts: {
   <style>${CSS}</style>${renderOptionalStyleTag(opts.customCss)}
 </head>
 <body>
-  <div class="container">
-    <h1>Enter recovery code</h1>
-    <p id="code-help" class="subtitle">If a backup email matches, we sent a ${opts.otpLength}-${opts.otpCharset === 'alphanumeric' ? 'character' : 'digit'} code to <strong>${escapeHtml(maskedEmail)}</strong></p>
-    ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
-    <form method="POST" action="/auth/recover/verify">
-      <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
-      <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
-      <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
-      <div class="field">
-        <input type="text" id="code" name="code" required autofocus
-               aria-label="One-time code"
-               aria-describedby="code-help"
-               maxlength="${opts.otpLength}"
-               pattern="${inputProps.pattern}"
-               inputmode="${inputProps.inputmode}"
-               autocomplete="one-time-code"
-               autocapitalize="${inputProps.autocapitalize}"
-               placeholder="${inputProps.placeholder}"
-               class="otp-input"
-                oninput="this.value=this.value.replace(/[\\s-]/g,'')"
-               style="letter-spacing: ${Math.max(2, Math.round(32 / opts.otpLength))}px">
-      </div>
-      <button type="submit" class="btn-primary">Verify</button>
-    </form>
-    <form method="POST" action="/auth/recover" style="margin-top: 12px;">
-      <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
-      <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
-      <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
-      <button type="submit" class="btn-secondary">Resend code</button>
-    </form>
-    <a href="${backHref}" class="btn-secondary">Back to sign in</a>
+  <div class="page-wrap">
+    <div class="container">
+      <h1>Enter recovery code</h1>
+      <p id="code-help" class="subtitle">If a backup email matches, we sent a ${opts.otpLength}-${opts.otpCharset === 'alphanumeric' ? 'character' : 'digit'} code to <strong>${escapeHtml(maskedEmail)}</strong></p>
+      ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
+      <form method="POST" action="/auth/recover/verify">
+        <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
+        <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
+        <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
+        <div class="field">
+          <input type="text" id="code" name="code" required autofocus
+                 aria-label="One-time code"
+                 aria-describedby="code-help"
+                 maxlength="${opts.otpLength}"
+                 pattern="${inputProps.pattern}"
+                 inputmode="${inputProps.inputmode}"
+                 autocomplete="one-time-code"
+                 autocapitalize="${inputProps.autocapitalize}"
+                 placeholder="${inputProps.placeholder}"
+                 class="otp-input"
+                  oninput="this.value=this.value.replace(/[\\s-]/g,'')"
+                 style="letter-spacing: ${Math.max(2, Math.round(32 / opts.otpLength))}px">
+        </div>
+        <button type="submit" class="btn-primary">Verify</button>
+      </form>
+      <form method="POST" action="/auth/recover" style="margin-top: 12px;">
+        <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
+        <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
+        <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
+        <button type="submit" class="btn-secondary">Resend code</button>
+      </form>
+      <a href="${backHref}" class="btn-secondary">Back to sign in</a>
+    </div>
+    ${POWERED_BY_HTML}
   </div>
 </body>
 </html>`
@@ -392,8 +399,10 @@ export function renderRecoveryOtpForm(opts: {
 
 const CSS = `
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-  .container { background: white; border-radius: 12px; padding: 40px; max-width: 420px; width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: center; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .page-wrap { display: flex; flex-direction: column; align-items: stretch; max-width: 420px; width: 100%; }
+  ${POWERED_BY_CSS}
+  .container { background: white; border-radius: 12px; padding: 40px; width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: center; }
   h1 { font-size: 24px; margin-bottom: 8px; color: #111; }
   .subtitle { color: #666; margin-bottom: 20px; font-size: 15px; line-height: 1.5; }
   .field { margin-bottom: 20px; text-align: left; }

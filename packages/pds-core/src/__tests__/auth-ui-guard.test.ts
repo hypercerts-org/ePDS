@@ -3,10 +3,12 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   appendCookieClearHeaders,
   buildBounceUrl,
-  createWelcomePageGuard,
+  createAuthUiGuard,
   isGuardedPath,
   parseDeviceCookies,
-} from '../welcome-page-guard.js'
+  parsePromptTokens,
+  promptHasLogin,
+} from '../auth-ui-guard.js'
 
 const VALID_DEV = 'dev-0123456789abcdef0123456789abcdef'
 const VALID_SES = 'ses-fedcba9876543210fedcba9876543210'
@@ -196,6 +198,70 @@ function makeResStub(): Response & { _calls: string[][] } {
   return res as any
 }
 
+describe('parsePromptTokens', () => {
+  it('returns an empty Set for non-string input', () => {
+    expect(parsePromptTokens(undefined).size).toBe(0)
+    expect(parsePromptTokens(null).size).toBe(0)
+    expect(parsePromptTokens(123).size).toBe(0)
+    expect(parsePromptTokens({}).size).toBe(0)
+  })
+
+  it('returns an empty Set for an empty / whitespace-only string', () => {
+    expect(parsePromptTokens('').size).toBe(0)
+    expect(parsePromptTokens('   ').size).toBe(0)
+  })
+
+  it('splits a single-token value', () => {
+    expect([...parsePromptTokens('login')]).toEqual(['login'])
+  })
+
+  it('splits a space-delimited multi-token value', () => {
+    // Per OIDC Core 1.0 §3.1.2.1, prompt is space-delimited. The order of
+    // tokens within a Set is insertion order, so an array roundtrip is
+    // stable.
+    expect([...parsePromptTokens('login consent')]).toEqual([
+      'login',
+      'consent',
+    ])
+  })
+
+  it('collapses repeated whitespace and ignores empty segments', () => {
+    expect([...parsePromptTokens('  login   consent  ')]).toEqual([
+      'login',
+      'consent',
+    ])
+  })
+})
+
+describe('promptHasLogin', () => {
+  it('is false for absent / non-string / unrelated prompt values', () => {
+    expect(promptHasLogin(undefined)).toBe(false)
+    expect(promptHasLogin(null)).toBe(false)
+    expect(promptHasLogin('')).toBe(false)
+    expect(promptHasLogin('consent')).toBe(false)
+    expect(promptHasLogin('select_account')).toBe(false)
+  })
+
+  it('is true when login is the only token', () => {
+    expect(promptHasLogin('login')).toBe(true)
+  })
+
+  it('is true when login appears alongside other tokens (in any order)', () => {
+    expect(promptHasLogin('login consent')).toBe(true)
+    expect(promptHasLogin('consent login')).toBe(true)
+    expect(promptHasLogin('login select_account consent')).toBe(true)
+  })
+
+  it('is false for substrings that do not match the login token exactly', () => {
+    // Defence against "login" appearing inside a longer token. OIDC has no
+    // such tokens defined today, but the matcher should still be exact —
+    // future spec extensions could add e.g. `login_required` and we want
+    // to be wrong-by-design rather than wrong-by-coincidence.
+    expect(promptHasLogin('logincreate')).toBe(false)
+    expect(promptHasLogin('relogin')).toBe(false)
+  })
+})
+
 describe('appendCookieClearHeaders', () => {
   it('clears dev-id and ses-id (plus :hash sidecars) host-only when no cookie domain given', () => {
     const res = makeResStub()
@@ -233,6 +299,14 @@ type FakeProvider = {
       readDevice: (id: string) => Promise<{ sessionId: string } | null>
     }
   }
+  requestManager: {
+    store: {
+      readRequest: (
+        id: string,
+      ) => Promise<{ parameters?: Record<string, unknown> } | null>
+    }
+  }
+  checkLoginRequired: (binding: unknown) => boolean
 }
 
 /** Build a FakeProvider whose deviceStore returns a row matching the
@@ -242,6 +316,16 @@ function makeProvider(opts: {
   bindings?: () => Promise<unknown[]>
   sessionId?: string | null
   readDevice?: () => Promise<{ sessionId: string } | null>
+  // Stored PAR for the request_uri on the test URL. Returned shape mirrors
+  // what `(provider.requestManager as any).store.readRequest(id)` produces:
+  // a `{ parameters: { prompt?, login_hint?, ... } }` envelope.
+  readRequest?: (
+    id: string,
+  ) => Promise<{ parameters?: Record<string, unknown> } | null>
+  // Per-binding loginRequired predicate. Default: false (everything fresh).
+  // Sign-in-view leak tests supply a custom predicate to mark specific
+  // bindings stale.
+  checkLoginRequired?: (binding: unknown) => boolean
 }): FakeProvider {
   const ses = opts.sessionId === undefined ? VALID_SES : opts.sessionId
   return {
@@ -256,6 +340,12 @@ function makeProvider(opts: {
         ),
       },
     },
+    requestManager: {
+      store: {
+        readRequest: vi.fn(opts.readRequest ?? (() => Promise.resolve(null))),
+      },
+    },
+    checkLoginRequired: vi.fn(opts.checkLoginRequired ?? (() => false)),
   }
 }
 
@@ -298,12 +388,12 @@ function makeRes(): Response & {
   return r as any
 }
 
-describe('createWelcomePageGuard', () => {
+describe('createAuthUiGuard', () => {
   const AUTH = 'auth.pds.example'
 
   it('passes non-GET requests through', async () => {
     const provider = makeProvider({})
-    const mw = createWelcomePageGuard({
+    const mw = createAuthUiGuard({
       authHostname: AUTH,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       provider: provider as any,
@@ -321,7 +411,7 @@ describe('createWelcomePageGuard', () => {
 
   it('passes unguarded paths through', async () => {
     const provider = makeProvider({})
-    const mw = createWelcomePageGuard({
+    const mw = createAuthUiGuard({
       authHostname: AUTH,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       provider: provider as any,
@@ -334,7 +424,7 @@ describe('createWelcomePageGuard', () => {
   })
 
   it('passes through when provider is null (OAuth disabled)', async () => {
-    const mw = createWelcomePageGuard({
+    const mw = createAuthUiGuard({
       authHostname: AUTH,
       provider: null,
       cookieDomain: null,
@@ -350,7 +440,7 @@ describe('createWelcomePageGuard', () => {
 
   it('bounces with cookie clears when cookies are missing', async () => {
     const provider = makeProvider({ bindings: () => Promise.resolve([]) })
-    const mw = createWelcomePageGuard({
+    const mw = createAuthUiGuard({
       authHostname: AUTH,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       provider: provider as any,
@@ -385,7 +475,7 @@ describe('createWelcomePageGuard', () => {
     // "Missing request_uri" — worse than letting upstream render. The
     // guard explicitly opts out of this case.
     const provider = makeProvider({})
-    const mw = createWelcomePageGuard({
+    const mw = createAuthUiGuard({
       authHostname: AUTH,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       provider: provider as any,
@@ -402,7 +492,7 @@ describe('createWelcomePageGuard', () => {
 
   it('passes /account* through when bindings are zero but there is no request_uri', async () => {
     const provider = makeProvider({ bindings: () => Promise.resolve([]) })
-    const mw = createWelcomePageGuard({
+    const mw = createAuthUiGuard({
       authHostname: AUTH,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       provider: provider as any,
@@ -425,7 +515,7 @@ describe('createWelcomePageGuard', () => {
 
   it('bounces when cookies parse but bindings are empty', async () => {
     const provider = makeProvider({ bindings: () => Promise.resolve([]) })
-    const mw = createWelcomePageGuard({
+    const mw = createAuthUiGuard({
       authHostname: AUTH,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       provider: provider as any,
@@ -452,7 +542,7 @@ describe('createWelcomePageGuard', () => {
     const provider = makeProvider({
       bindings: () => Promise.resolve([{ some: 'binding' }]),
     })
-    const mw = createWelcomePageGuard({
+    const mw = createAuthUiGuard({
       authHostname: AUTH,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       provider: provider as any,
@@ -475,7 +565,7 @@ describe('createWelcomePageGuard', () => {
     const provider = makeProvider({
       bindings: () => Promise.reject(new Error('db down')),
     })
-    const mw = createWelcomePageGuard({
+    const mw = createAuthUiGuard({
       authHostname: AUTH,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       provider: provider as any,
@@ -502,7 +592,7 @@ describe('createWelcomePageGuard', () => {
     const err = new Error('db down')
     const provider = makeProvider({ bindings: () => Promise.reject(err) })
     const logger = { error: vi.fn() }
-    const mw = createWelcomePageGuard({
+    const mw = createAuthUiGuard({
       authHostname: AUTH,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       provider: provider as any,
@@ -528,7 +618,7 @@ describe('createWelcomePageGuard', () => {
     // triggers ERR_INVALID_URL). The guard must treat an unparseable URL
     // as "no OAuth context" and call next() rather than crash the request.
     const provider = makeProvider({})
-    const mw = createWelcomePageGuard({
+    const mw = createAuthUiGuard({
       authHostname: AUTH,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       provider: provider as any,
@@ -561,7 +651,7 @@ describe('createWelcomePageGuard', () => {
       bindings: () => Promise.resolve([{ some: 'binding' }]),
       sessionId: ACTIVE_SES,
     })
-    const mw = createWelcomePageGuard({
+    const mw = createAuthUiGuard({
       authHostname: AUTH,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       provider: provider as any,
@@ -593,7 +683,7 @@ describe('createWelcomePageGuard', () => {
       bindings: () => Promise.resolve([{ some: 'binding' }]),
       sessionId: null,
     })
-    const mw = createWelcomePageGuard({
+    const mw = createAuthUiGuard({
       authHostname: AUTH,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       provider: provider as any,
@@ -625,7 +715,7 @@ describe('createWelcomePageGuard', () => {
       bindings: () => Promise.resolve([{ some: 'binding' }]),
       sessionId: ACTIVE_SES,
     })
-    const mw = createWelcomePageGuard({
+    const mw = createAuthUiGuard({
       authHostname: AUTH,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       provider: provider as any,
@@ -656,7 +746,7 @@ describe('createWelcomePageGuard', () => {
       readDevice: () => Promise.reject(err),
     })
     const logger = { error: vi.fn() }
-    const mw = createWelcomePageGuard({
+    const mw = createAuthUiGuard({
       authHostname: AUTH,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       provider: provider as any,
@@ -676,6 +766,184 @@ describe('createWelcomePageGuard', () => {
     expect(logger.error).toHaveBeenCalledWith(
       expect.objectContaining({ err, deviceId: VALID_DEV }),
       expect.stringContaining('readDevice failed'),
+    )
+  })
+
+  // ---------------------------------------------------------------------------
+  // Sign-in-view leak coverage. Every test below shares the same wiring —
+  // fresh cookies + non-empty bindings + a request_uri-bearing URL — and
+  // varies only in the stored PAR `prompt` / `login_hint` values and which
+  // bindings have loginRequired=true. The signinViewCase helper captures
+  // that wiring; each test just supplies the inputs and assertion.
+  // ---------------------------------------------------------------------------
+
+  // Helper: build a binding fixture good enough for the guard's matchesHint
+  // logic. Only `account.sub` and `account.preferred_username` are read.
+  function binding(sub: string, pu: string) {
+    return {
+      account: { sub, preferred_username: pu },
+    } as unknown as { account: { sub: string; preferred_username: string } }
+  }
+
+  // urn-prefixed request_uri so loadStoredPar actually attempts the read
+  // (anything else makes it short-circuit and skip the prompt/hint logic).
+  const REQUEST_URI = 'urn:ietf:params:oauth:request_uri:req-abc'
+
+  type SigninViewCaseOpts = Parameters<typeof makeProvider>[0] & {
+    loggerError?: (...args: unknown[]) => void
+  }
+  /** Run the guard against the standard sign-in-view scenario fixture and
+   *  return the (provider, res, next) trio for assertions. Centralises the
+   *  repetitive setup that Sonar flagged as duplication. */
+  async function signinViewCase(opts: SigninViewCaseOpts): Promise<{
+    provider: FakeProvider
+    res: ReturnType<typeof makeRes>
+    next: ReturnType<typeof vi.fn>
+  }> {
+    const { loggerError, ...providerOpts } = opts
+    const provider = makeProvider(providerOpts)
+    const logger = loggerError ? { error: loggerError } : undefined
+    const mw = createAuthUiGuard({
+      authHostname: AUTH,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      provider: provider as any,
+      cookieDomain: null,
+      logger,
+    })
+    const res = makeRes()
+    const next = vi.fn()
+    await mw(
+      makeReq({
+        url: `/oauth/authorize?request_uri=${encodeURIComponent(REQUEST_URI)}`,
+        cookieHeader: `dev-id=${VALID_DEV}; ses-id=${VALID_SES}`,
+      }),
+      res,
+      next,
+    )
+    return { provider, res, next }
+  }
+
+  /** Asserts the guard responded 303 (bounce). */
+  function expectBounce(res: ReturnType<typeof makeRes>): void {
+    expect(res.status).toHaveBeenCalledWith(303)
+  }
+
+  /** Asserts the guard called next() and didn't touch res.status. */
+  function expectPassThrough(
+    res: ReturnType<typeof makeRes>,
+    next: ReturnType<typeof vi.fn>,
+  ): void {
+    expect(next).toHaveBeenCalledOnce()
+    expect(res.status).not.toHaveBeenCalled()
+  }
+
+  it('bounces when the stored PAR forces re-authentication via prompt=login', async () => {
+    const { provider, res } = await signinViewCase({
+      bindings: () => Promise.resolve([binding('did:plc:a', 'a.example')]),
+      // Even though the binding itself is fresh (checkLoginRequired
+      // defaults to false), the prompt=login branch must bounce first —
+      // and short-circuit ahead of the per-binding check.
+      readRequest: () => Promise.resolve({ parameters: { prompt: 'login' } }),
+    })
+    expectBounce(res)
+    expect(provider.checkLoginRequired).not.toHaveBeenCalled()
+  })
+
+  it('bounces when login appears alongside other prompt tokens', async () => {
+    // Per OIDC Core §3.1.2.1, prompt is space-delimited. A third-party
+    // client sending prompt="login consent" must trip the same bounce as
+    // a bare prompt="login" — the earlier exact-string check missed this.
+    const { res } = await signinViewCase({
+      bindings: () => Promise.resolve([binding('did:plc:a', 'a.example')]),
+      readRequest: () =>
+        Promise.resolve({ parameters: { prompt: 'login consent' } }),
+    })
+    expectBounce(res)
+  })
+
+  it('bounces when every binding is loginRequired and there is no hint', async () => {
+    const { res } = await signinViewCase({
+      bindings: () =>
+        Promise.resolve([
+          binding('did:plc:a', 'a.example'),
+          binding('did:plc:b', 'b.example'),
+        ]),
+      readRequest: () => Promise.resolve({ parameters: {} }),
+      checkLoginRequired: () => true,
+    })
+    expectBounce(res)
+  })
+
+  // Fixture for the hint-narrowed cases: a device with two bindings,
+  // one stale and one fresh. The checkLoginRequired predicate marks
+  // only `did:plc:stale` as loginRequired.
+  const onlyStaleIsLoginRequired = (b: unknown): boolean =>
+    (b as { account: { sub: string } }).account.sub === 'did:plc:stale'
+  const TWO_BINDINGS = [
+    binding('did:plc:stale', 'stale.example'),
+    binding('did:plc:fresh', 'fresh.example'),
+  ]
+
+  it('bounces when login_hint narrows to a stale binding among otherwise-fresh bindings', async () => {
+    const { res } = await signinViewCase({
+      bindings: () => Promise.resolve(TWO_BINDINGS),
+      readRequest: () =>
+        Promise.resolve({ parameters: { login_hint: 'stale.example' } }),
+      checkLoginRequired: onlyStaleIsLoginRequired,
+    })
+    expectBounce(res)
+  })
+
+  it('passes through when login_hint matches a fresh binding', async () => {
+    // Hint resolves to a single fresh binding → SSO/chooser path is
+    // reachable; the guard must NOT bounce.
+    const { res, next } = await signinViewCase({
+      bindings: () => Promise.resolve(TWO_BINDINGS),
+      readRequest: () =>
+        Promise.resolve({ parameters: { login_hint: 'fresh.example' } }),
+      checkLoginRequired: onlyStaleIsLoginRequired,
+    })
+    expectPassThrough(res, next)
+  })
+
+  it('passes through when at least one binding is fresh and there is no hint', async () => {
+    // Mixed freshness, no hint → chooser reaches a usable session.
+    const { res, next } = await signinViewCase({
+      bindings: () => Promise.resolve(TWO_BINDINGS),
+      readRequest: () => Promise.resolve({ parameters: {} }),
+      checkLoginRequired: onlyStaleIsLoginRequired,
+    })
+    expectPassThrough(res, next)
+  })
+
+  it('falls back to all bindings when login_hint matches none of them', async () => {
+    // matchesHint → empty set → upstream treats all bindings as candidates;
+    // with at least one fresh, the guard passes through.
+    const { next } = await signinViewCase({
+      bindings: () =>
+        Promise.resolve([binding('did:plc:fresh', 'fresh.example')]),
+      readRequest: () =>
+        Promise.resolve({ parameters: { login_hint: 'unknown.example' } }),
+      checkLoginRequired: () => false,
+    })
+    expect(next).toHaveBeenCalledOnce()
+  })
+
+  it('passes through when readRequest fails — fail-open on the PAR-read path', async () => {
+    // store.readRequest throwing means we don't know whether prompt=login
+    // is set, but bindings exist and none are loginRequired by default.
+    // Failing closed here would 303 every flow whose PAR happens to be
+    // unreachable; pass through and let upstream handle it.
+    const errSpy = vi.fn()
+    const { res, next } = await signinViewCase({
+      bindings: () => Promise.resolve([binding('did:plc:a', 'a.example')]),
+      readRequest: () => Promise.reject(new Error('store down')),
+      loggerError: errSpy,
+    })
+    expectPassThrough(res, next)
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.stringContaining('store.readRequest failed'),
     )
   })
 })

@@ -1,5 +1,78 @@
 # ePDS
 
+## 0.6.1
+
+### Who should read this release
+
+- **End users:**
+  - ["Powered by Certified" footer now appears on every auth-service page.](#v0.6.1-powered-by-certified-footer-now-appears-on-every-auth)
+  - ["Use a different account" on the chooser now reliably takes you to the email form, not the code step for the previous account.](#v0.6.1-use-a-different-account-on-the-chooser-now-reliably-takes)
+  - [Sign-in no longer fails with "Authentication session expired" when an OTP code is resent after the original code times out.](#v0.6.1-sign-in-no-longer-fails-with-authentication-session-expired)
+  - [Terms of Use and Privacy Policy links on the sign-in page now open in a new tab.](#v0.6.1-terms-of-use-and-privacy-policy-links-on-the-sign-in-page)
+  - [OAuth consent buttons stack cleanly on small screens.](#v0.6.1-oauth-consent-buttons-stack-cleanly-on-small-screens)
+  - [A smoother sign-in code experience: no false error flash on a successful sign-in, no rapid-fire failures when correcting a wrong code, and tidier-looking banners.](#v0.6.1-a-smoother-sign-in-code-experience-no-false-error-flash-on)
+  - [Sign-in no longer fails with a raw JSON error page when a user takes too long on the OTP step.](#v0.6.1-sign-in-no-longer-fails-with-a-raw-json-error-page-when-a)
+  - [Sign-in no longer hits a dead-end on the password form](#v0.6.1-sign-in-no-longer-hits-a-dead-end-on-the-password-form)
+- **Client app developers:**
+  - [A smoother sign-in code experience: no false error flash on a successful sign-in, no rapid-fire failures when correcting a wrong code, and tidier-looking banners.](#v0.6.1-a-smoother-sign-in-code-experience-no-false-error-flash-on)
+
+### Patch Changes
+
+- <a id="v0.6.1-powered-by-certified-footer-now-appears-on-every-auth"></a> [#130](https://github.com/hypercerts-org/ePDS/pull/130) [`6a8671d`](https://github.com/hypercerts-org/ePDS/commit/6a8671d09285d6ad85fc07644cd94266a819baa3) Thanks [@s-adamantine](https://github.com/s-adamantine)! - "Powered by Certified" footer now appears on every auth-service page.
+
+  **Affects:** End users
+
+  **End users:** every page rendered by the auth service now displays the same "Powered by Certified" footer that the main sign-in already shows, so the branding is consistent end-to-end. New surfaces covered: the Account Settings sign-in flow at `/account/login` (email-entry and code-entry steps), the "Choose your handle" page shown to new users after email verification, both Account Recovery steps (backup-email entry and recovery-code entry), the `/account` settings dashboard, the backup-email verification confirmation, the post-deletion confirmation, and the generic error pages used by 404 / 500 / session-expired flows.
+
+- <a id="v0.6.1-use-a-different-account-on-the-chooser-now-reliably-takes"></a> [#141](https://github.com/hypercerts-org/ePDS/pull/141) [`899346c`](https://github.com/hypercerts-org/ePDS/commit/899346c9e736881e7a024ec4778901045ff40415) Thanks [@aspiers](https://github.com/aspiers)! - "Use a different account" on the chooser now reliably takes you to the email form, not the code step for the previous account.
+
+  **Affects:** End users
+
+  **End users:** when you click "Another account" on the account chooser to sign in as someone else, you now always land on a fresh email entry form. Previously, if the app that started the sign-in had pre-filled an account hint, the page jumped straight to the verification-code step for the _previous_ account — leaving you stuck typing a code for an account you were trying to leave.
+
+- <a id="v0.6.1-sign-in-no-longer-fails-with-authentication-session-expired"></a> [#122](https://github.com/hypercerts-org/ePDS/pull/122) [`dacf1d2`](https://github.com/hypercerts-org/ePDS/commit/dacf1d243f050faabbb1a18fc448f0010279d726) Thanks [@aspiers](https://github.com/aspiers)! - Sign-in no longer fails with "Authentication session expired" when an OTP code is resent after the original code times out.
+
+  **Affects:** End users
+
+  **End users:** Previously, if you took longer than 10 minutes to enter the one-time code emailed to you and then clicked **Resend code**, the new code would verify, but the next page would say "Authentication session expired. Please try again." and you would have to start the whole sign-in over. The OAuth session that was tracking your sign-in had the same 10-minute lifetime as the OTP code itself, so it had already gone away by the time the new code arrived.
+
+  The OAuth session now lives long enough to outlast a typical resend cycle, so a slow first attempt followed by Resend completes normally. The OTP code's own 10-minute lifetime is unchanged.
+
+- <a id="v0.6.1-terms-of-use-and-privacy-policy-links-on-the-sign-in-page"></a> [#127](https://github.com/hypercerts-org/ePDS/pull/127) [`8bf888b`](https://github.com/hypercerts-org/ePDS/commit/8bf888b0156ac1f1deb8bbd380953429f0241a62) Thanks [@s-adamantine](https://github.com/s-adamantine)! - Terms of Use and Privacy Policy links on the sign-in page now open in a new tab.
+
+  **Affects:** End users
+
+  **End users:** clicking Terms of Use or Privacy Policy on the sign-in page no longer navigates away from the in-progress sign-in. The links open in a new tab instead, so you can read the legal page and come back to finish signing in without restarting.
+
+- <a id="v0.6.1-oauth-consent-buttons-stack-cleanly-on-small-screens"></a> [#136](https://github.com/hypercerts-org/ePDS/pull/136) [`143ff35`](https://github.com/hypercerts-org/ePDS/commit/143ff35da607b43f45615ecb659dbc7324e95510) Thanks [@Kzoeps](https://github.com/Kzoeps)! - OAuth consent buttons stack cleanly on small screens.
+
+  **Affects:** End users
+
+  **End users:** On phones and narrow browser windows, the consent screen now places the approve and deny buttons on separate lines so they are easier to read and tap. Larger screens keep the existing button layout.
+
+- <a id="v0.6.1-a-smoother-sign-in-code-experience-no-false-error-flash-on"></a> [#134](https://github.com/hypercerts-org/ePDS/pull/134) [`bce65b5`](https://github.com/hypercerts-org/ePDS/commit/bce65b53706e1c5edd41d6fa4d3c583fab6de606) Thanks [@s-adamantine](https://github.com/s-adamantine)! - A smoother sign-in code experience: no false error flash on a successful sign-in, no rapid-fire failures when correcting a wrong code, and tidier-looking banners.
+
+  **Affects:** End users, Client app developers
+
+  **End users:**
+  - A successful sign-in no longer briefly shows a red "Invalid OTP" message on its way to signing you in.
+  - After entering a wrong code, the boxes clear and focus jumps back to the first one, so retyping doesn't immediately resubmit the still-wrong code on every keystroke (which previously could lock you out for spamming the server).
+  - The red "Invalid OTP" and green "Code resent" banners are centred inside their coloured container instead of sitting in the corner of an empty wide box.
+
+  **Client app developers:** the sign-in page's flash-message container now uses a stable `flash-msg` base class with `error` / `success` modifier classes, so custom client CSS can restyle either variant cleanly via `.flash-msg`, `.flash-msg.error`, and `.flash-msg.success`.
+
+- <a id="v0.6.1-sign-in-no-longer-fails-with-a-raw-json-error-page-when-a"></a> [#128](https://github.com/hypercerts-org/ePDS/pull/128) [`0e62bd6`](https://github.com/hypercerts-org/ePDS/commit/0e62bd6c464e6660e4a890bd0f84da9c7d8f89d4) Thanks [@aspiers](https://github.com/aspiers)! - Sign-in no longer fails with a raw JSON error page when a user takes too long on the OTP step.
+
+  **Affects:** End users
+
+  **End users:** Previously, if you took more than five minutes between requesting your one-time code and submitting it (a slow inbox, switching tabs, fishing the code out of spam, multiple Resend cycles), sign-in could fail with a blank page showing only `{"error": "Authentication failed"}` on the PDS host — even though your OTP code itself was still valid. You now either land back inside the app you were signing into (which can offer a one-click retry), or see a styled error page on the PDS host explaining that sign-in timed out — depending on how far through the flow the timeout is detected. Either way, no more raw JSON.
+
+- <a id="v0.6.1-sign-in-no-longer-hits-a-dead-end-on-the-password-form"></a> [#129](https://github.com/hypercerts-org/ePDS/pull/129) [`14e5033`](https://github.com/hypercerts-org/ePDS/commit/14e5033026ecebb21acdc23211d96c755cedb1e0) Thanks [@aspiers](https://github.com/aspiers)! - Sign-in no longer hits a dead-end on the password form
+
+  **Affects:** End users
+
+  **End users:** if you saw a "handle and password" form during sign-in with no way to enter a code, that path is gone. The email-code form will be shown instead, and after entering the code you'll be signed in normally.
+
 ## 0.6.0
 
 ### Who should read this release
