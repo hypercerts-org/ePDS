@@ -517,3 +517,122 @@ Then('the login page renders normally', async function (this: EpdsWorld) {
 Then('the OTP flow still works to completion', function (this: EpdsWorld) {
   return this.skipIfNoMailpit()
 })
+
+// ---------------------------------------------------------------------------
+// PAR (request_uri) expiry scenario
+// ---------------------------------------------------------------------------
+//
+// The PAR record lives in pds-core's @atproto/oauth-provider store
+// (authorization_request table) and is independent of the auth-service
+// auth_flow row. Upstream hardcodes PAR_EXPIRES_IN = 5 min, so a user
+// who takes >5 min between requesting and submitting the OTP (slow
+// inbox, switching tabs, multiple Resend cycles) trips
+// "AccessDeniedError: This request has expired" inside
+// /oauth/epds-callback even though all auth-service-side state is
+// healthy. PAR expiry is genuine: once expired, the row cannot be
+// revived — RequestManager.get() throws AND deletes the row in the
+// same call, so any "ping" mechanism is too late.
+//
+// The fix is to honour RFC 6749 §4.1.2.1 and surface the failure as
+// a redirect back to the client's redirect_uri with error,
+// error_description, iss, and state query params. To reproduce
+// without a 5-minute wall-clock wait, a pds-core test-only hook
+// (mounted iff EPDS_TEST_HOOKS=1, double-gated by
+// EPDS_INTERNAL_SECRET and a NODE_ENV=production refusal) deletes
+// the PAR row directly:
+//
+//   POST /_internal/test/delete-par   { request_uri }
+
+async function callPdsExpiryHook(
+  hookPath: string,
+  requestUri: string,
+): Promise<void> {
+  const url = `${testEnv.pdsUrl}${hookPath}`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-internal-secret': testEnv.internalSecret,
+    },
+    body: JSON.stringify({ request_uri: requestUri }),
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '')
+    throw new Error(
+      `${hookPath} hook failed: ${res.status} ${res.statusText}: ${errBody}`,
+    )
+  }
+}
+
+/**
+ * Read the PAR request_uri from the current auth-service login page
+ * URL and stash it on the world for subsequent expiry hooks. The URL
+ * is `https://<auth>/oauth/authorize?request_uri=urn:...&...` while the
+ * user is on the login/OTP form. Throws if the URL doesn't carry it,
+ * which means the surrounding scenario is mis-ordered (the page must
+ * be on the auth-service side before this step runs).
+ */
+function captureRequestUriFromPage(world: EpdsWorld): string {
+  const page = getPage(world)
+  const requestUri = new URL(page.url()).searchParams.get('request_uri')
+  if (!requestUri) {
+    throw new Error(
+      `Expected request_uri in page URL but found none: ${page.url()}`,
+    )
+  }
+  world.lastRequestUri = requestUri
+  return requestUri
+}
+
+When(
+  'the PAR request_uri has expired before the bridge fires',
+  async function (this: EpdsWorld) {
+    if (!testEnv.mailpitPass) return 'pending'
+    if (!testEnv.internalSecret) return 'pending'
+    const requestUri = captureRequestUriFromPage(this)
+    await callPdsExpiryHook('/_internal/test/delete-par', requestUri)
+  },
+)
+
+Then('the response body is not raw JSON', async function (this: EpdsWorld) {
+  const page = getPage(this)
+  // The OTP form's submit is JS-driven and async, and Playwright's
+  // fill() returns before the bridge redirects. Wait for the
+  // browser to actually leave the auth-service host and arrive at
+  // pds-core's epds-callback (where, in this scenario, the
+  // catch-block renders the error page). Without this wait we'd
+  // read the still-rendering OTP form's body.
+  const pdsHost = new URL(testEnv.pdsUrl).host
+  await page.waitForURL(
+    (url) => url.host === pdsHost && url.pathname.includes('epds-callback'),
+    { timeout: 30_000 },
+  )
+  const body = await page.locator('body').innerText()
+  // The pre-fix behaviour returned a body that started with
+  // {"error": "Authentication failed"}. A graceful HTML page won't —
+  // its <h1>/<p> text isn't valid JSON. The regex catches any
+  // {"error": ...} shape so a future leak of a different JSON
+  // payload is still caught.
+  if (/^\s*\{\s*"error"/.test(body)) {
+    throw new Error(
+      `pds-core leaked raw JSON to the browser: ${body.slice(0, 200)}`,
+    )
+  }
+})
+
+Then(
+  'the response body explains that sign-in timed out',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    const body = await page.locator('body').innerText()
+    // Don't pin exact wording — just require something that mentions
+    // the timeout / expiry so a human reading it understands why
+    // their sign-in failed.
+    if (!/expir|timed? ?out|too long/i.test(body)) {
+      throw new Error(
+        `Error page should mention the timeout but said: "${body.slice(0, 500)}"`,
+      )
+    }
+  },
+)

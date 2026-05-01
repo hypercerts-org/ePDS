@@ -1,7 +1,7 @@
 /**
  * E2E test-only hooks. Mounted only when EPDS_TEST_HOOKS=1 and refused
  * outright when NODE_ENV=production. Mirrors auth-service's /_internal/test/*
- * pattern: narrow UPDATEs that backdate a single timestamp to reproduce
+ * pattern: narrow UPDATEs / DELETEs that mutate one row to reproduce
  * time-dependent behaviour without waiting out the wall-clock TTL.
  *
  * Currently exposes:
@@ -11,11 +11,30 @@
  *     matching row(s). Used by the e2e suite to age bindings past
  *     upstream's authenticationMaxAge (7d) so checkLoginRequired returns
  *     true for the targeted binding(s).
+ *
+ *   POST /_internal/test/delete-par
+ *     Body: {request_uri}
+ *     Deletes the matching `authorization_request` row. Used by the
+ *     @par-callback-error scenario to reproduce the production failure
+ *     where /oauth/epds-callback hits an expired/missing PAR — the
+ *     fix in the same commit responds with a friendly OAuth-spec
+ *     redirect (or styled HTML) instead of leaking
+ *     `{"error": "Authentication failed"}` JSON.
  */
 import express, { type Application } from 'express'
 import type { PDS } from '@atproto/pds'
 import { verifyInternalSecret } from '@certified-app/shared'
 import type { Logger } from 'pino'
+
+const REQUEST_URI_PREFIX = 'urn:ietf:params:oauth:request_uri:'
+
+function decodeRequestUri(requestUri: string): string {
+  return decodeURIComponent(requestUri.slice(REQUEST_URI_PREFIX.length))
+}
+
+function isValidRequestUri(value: string): boolean {
+  return value.startsWith(`${REQUEST_URI_PREFIX}req-`)
+}
 
 export function installTestHooks(opts: {
   pds: PDS
@@ -41,7 +60,8 @@ export function installTestHooks(opts: {
         res.status(401).json({ error: 'Unauthorized' })
         return
       }
-      const did = ((req.body?.did as string) || '').trim()
+      const rawDid: unknown = req.body?.did
+      const did = typeof rawDid === 'string' ? rawDid.trim() : ''
       const deviceId =
         typeof req.body?.deviceId === 'string'
           ? req.body.deviceId.trim()
@@ -82,4 +102,41 @@ export function installTestHooks(opts: {
       }
     },
   )
+
+  app.post('/_internal/test/delete-par', express.json(), async (req, res) => {
+    if (!verifyInternalSecret(req.headers['x-internal-secret'])) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+    const rawRequestUri: unknown = req.body?.request_uri
+    const requestUri =
+      typeof rawRequestUri === 'string' ? rawRequestUri.trim() : ''
+    if (!requestUri || !isValidRequestUri(requestUri)) {
+      res.status(400).json({ error: 'Missing or malformed request_uri' })
+      return
+    }
+    try {
+      const requestId = decodeRequestUri(requestUri)
+      // Same Kysely instance as expire-device-account above. The
+      // authorization_request table is owned by @atproto/pds — see
+      // its account-manager/db/schema/authorization-request.ts. We
+      // narrow the cast to a single column lookup so the absence
+      // of a typed schema here doesn't propagate.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- authorization_request shape not exported by @atproto/pds
+      const db = pds.ctx.accountManager.db.db as any
+      const result = await db
+        .deleteFrom('authorization_request')
+        .where('id', '=', requestId)
+        .executeTakeFirst()
+      const deleted = Number(result?.numDeletedRows ?? 0)
+      logger.warn(
+        { requestUri, deleted },
+        'Deleted PAR row — /oauth/epds-callback will treat this as expired',
+      )
+      res.json({ deleted })
+    } catch (err) {
+      logger.error({ err, requestUri }, 'Failed to delete PAR row')
+      res.status(500).json({ error: 'Internal server error' })
+    }
+  })
 }

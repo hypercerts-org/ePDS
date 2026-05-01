@@ -272,6 +272,72 @@ Feature: Passwordless authentication via email OTP
     Then the browser is redirected back to the demo client
     And the demo client has a valid OAuth access token
 
+  # --- PAR (request_uri) expiry ---
+  #
+  # The PAR ("Pushed Authorization Request") record lives in pds-core's
+  # @atproto/oauth-provider store. Upstream hardcodes:
+  #   * PAR_EXPIRES_IN = 5 minutes (initial TTL on PAR creation), and
+  #   * AUTHORIZATION_INACTIVITY_TIMEOUT = 5 minutes (sliding window
+  #     reset on every requestManager.get()).
+  # If the user takes >5 minutes between requesting an OTP and
+  # submitting it (slow inbox, switching tabs, fishing the code out
+  # of spam, multiple Resend cycles), the PAR row is gone by the time
+  # auth-service's /auth/complete redirects to /oauth/epds-callback.
+  # PAR expiry is genuine: once expired, the row cannot be revived —
+  # @atproto/oauth-provider's RequestManager.get() throws
+  # AccessDeniedError AND deletes the row in the same call.
+  #
+  # The bug a real user hit: the resulting AccessDeniedError was
+  # caught inside /oauth/epds-callback and surfaced as a raw JSON
+  # response body of {"error": "Authentication failed"} on the PDS
+  # host, with no client redirect and no styled page. The fix is to
+  # honour RFC 6749 §4.1.2.1: redirect the user back to the OAuth
+  # client's redirect_uri with error=access_denied,
+  # error_description, iss, and state query parameters, so the
+  # client can offer "Sign-in expired, try again". When no
+  # redirect_uri is recoverable from the dead PAR row, fall back to
+  # a styled HTML page on the PDS host instead of raw JSON.
+  #
+  # access_denied is the same error code @atproto/oauth-provider uses
+  # for PAR expiry on its own paths (e.g. when a user is bounced
+  # through /oauth/authorize with an expired request_uri). We follow
+  # that precedent for consistency, even though "denied" is mildly
+  # misleading — the error_description carries the real user-friendly
+  # explanation.
+  #
+  # Wall-clock waiting 5 minutes is unacceptable for an e2e scenario,
+  # so a test-only pds-core hook (POST /_internal/test/delete-par,
+  # gated by EPDS_TEST_HOOKS=1 + EPDS_INTERNAL_SECRET, and refused
+  # under NODE_ENV=production) deletes the PAR row directly. The
+  # auth_flow row, OTP, and cookie are all left alive so the failure
+  # isolates to the PAR layer — exactly what a slow user trips in
+  # production.
+
+  # The test deletes the PAR row before the callback fires, mirroring
+  # the production failure where /oauth/epds-callback's first
+  # requestManager.get() (Step 2 in the handler) throws
+  # InvalidRequestError("Unknown request_uri"). With no live PAR row
+  # there is no redirect_uri to recover, so the user must land on a
+  # styled HTML page on the PDS host — not the previous raw JSON
+  # body — explaining that the sign-in timed out.
+  #
+  # The redirect-back-to-client path (driven by the redirect_uri /
+  # state captured during a successful Step 2) is exercised by the
+  # other paths inside the same handler that throw later in the
+  # flow; we don't have an easy e2e harness to inject a mid-flow
+  # failure today.
+  @email @par-callback-error
+  Scenario: Expired PAR shows a styled HTML page instead of leaking JSON
+    Given a returning user has a PDS account
+    When the demo client initiates an OAuth login
+    And the user enters the test email on the login page
+    Then an OTP email arrives in the mail trap
+    And the login page shows an OTP verification form
+    When the PAR request_uri has expired before the bridge fires
+    And the user enters the OTP code
+    Then the response body is not raw JSON
+    And the response body explains that sign-in timed out
+
   # --- Brute force protection ---
 
   Scenario: OTP verification rejects wrong code
