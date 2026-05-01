@@ -180,6 +180,9 @@ export function buildChooserEnrichmentScript(): string {
       if (email) matches.push({ el: node, email: email });
     }
     matches.forEach(function(m) {
+      // oauth-provider-ui 0.4.3 renders chooser rows this way; revisit if the upstream PDS UI is upgraded.
+      var row = m.el.closest('[role="button"][tabindex="0"]');
+      if (!row) return;
       // Upstream wraps the handle span in a flex-row container:
       //   <span class="flex flex-wrap items-center">
       //     <span aria-label="Identifier">HANDLE</span>
