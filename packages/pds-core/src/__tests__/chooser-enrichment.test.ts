@@ -30,6 +30,283 @@ describe('buildChooserEnrichmentScript (HYPER-268)', () => {
   })
 })
 
+class FakeTextNode {
+  readonly nodeType = 3
+
+  constructor(readonly data: string) {}
+}
+
+class FakeClassList {
+  private readonly classes = new Set<string>()
+
+  add(className: string): void {
+    this.classes.add(className)
+  }
+
+  contains(className: string): boolean {
+    return this.classes.has(className)
+  }
+
+  set(value: string): void {
+    this.classes.clear()
+    for (const className of value.split(/\s+/)) {
+      if (className) this.classes.add(className)
+    }
+  }
+}
+
+class FakeElement {
+  readonly nodeType = 1
+  readonly childNodes: Array<FakeElement | FakeTextNode> = []
+  readonly dataset: Record<string, string> = {}
+  readonly classList = new FakeClassList()
+  readonly style: Record<string, string> = {}
+  parentElement: FakeElement | null = null
+  textContentOverride: string | null = null
+
+  constructor(
+    readonly tagName: string,
+    private readonly attributes: Record<string, string> = {},
+  ) {}
+
+  appendChild(child: FakeElement | FakeTextNode): void {
+    if (child instanceof FakeElement) {
+      child.parentElement = this
+    }
+    this.childNodes.push(child)
+  }
+
+  set textContent(value: string) {
+    this.textContentOverride = value
+  }
+
+  set className(value: string) {
+    this.classList.set(value)
+  }
+
+  get textContent(): string {
+    if (this.textContentOverride !== null) return this.textContentOverride
+    return this.childNodes
+      .map((child) =>
+        child instanceof FakeTextNode ? child.data : child.textContent,
+      )
+      .join('')
+  }
+
+  closest(selector: string): FakeElement | null {
+    if (selector !== '[role="button"][tabindex="0"]') return null
+    let current: FakeElement | null = this
+    while (current) {
+      if (
+        current.attributes.role === 'button' &&
+        current.attributes.tabindex === '0'
+      ) {
+        return current
+      }
+      current = current.parentElement
+    }
+    return null
+  }
+
+  querySelectorAll(selector: string): FakeElement[] {
+    const descendants = this.descendants()
+    if (selector === 'button, a') {
+      return descendants.filter(
+        (el) => el.tagName === 'button' || el.tagName === 'a',
+      )
+    }
+    if (selector === '[role="button"]') {
+      return descendants.filter((el) => el.attributes.role === 'button')
+    }
+    return []
+  }
+
+  querySelector(selector: string): FakeElement | null {
+    if (
+      selector ===
+      '[role="button"][aria-label="Login to account that is not listed"]'
+    ) {
+      return (
+        this.descendants().find(
+          (el) =>
+            el.attributes.role === 'button' &&
+            el.attributes['aria-label'] === 'Login to account that is not listed',
+        ) ?? null
+      )
+    }
+    return null
+  }
+
+  descendants(): FakeElement[] {
+    const result: FakeElement[] = []
+    const visit = (node: FakeElement): void => {
+      for (const child of node.childNodes) {
+        if (child instanceof FakeElement) {
+          result.push(child)
+          visit(child)
+        }
+      }
+    }
+    visit(this)
+    return result
+  }
+}
+
+class FakeDocument {
+  readonly root = new FakeElement('div', { id: 'root' })
+  readyState = 'loading'
+  private domContentLoadedListener: (() => void) | null = null
+
+  get documentElement(): FakeElement {
+    return this.root
+  }
+
+  getElementById(id: string): FakeElement | null {
+    return id === 'root' ? this.root : null
+  }
+
+  createTreeWalker(root: FakeElement): { nextNode: () => FakeElement | null } {
+    const elements = root.descendants()
+    let index = 0
+    return {
+      nextNode: () => elements[index++] ?? null,
+    }
+  }
+
+  createElement(tagName: string): FakeElement {
+    return new FakeElement(tagName)
+  }
+
+  querySelector(): null {
+    return null
+  }
+
+  addEventListener(event: string, listener: () => void): void {
+    if (event === 'DOMContentLoaded') this.domContentLoadedListener = listener
+  }
+
+  dispatchDOMContentLoaded(): void {
+    this.readyState = 'complete'
+    this.domContentLoadedListener?.()
+  }
+}
+
+function appendText(parent: FakeElement, text: string): void {
+  parent.appendChild(new FakeTextNode(text))
+}
+
+function runChooserEnrichmentScript(document: FakeDocument): void {
+  const globals = globalThis as typeof globalThis & Record<string, unknown>
+  const previous = {
+    window: globals.window,
+    document: globals.document,
+    Node: globals.Node,
+    NodeFilter: globals.NodeFilter,
+    MutationObserver: globals.MutationObserver,
+  }
+  const fakeWindow: Record<string, unknown> = {
+    location: { search: '' },
+  }
+
+  try {
+    globals.window = fakeWindow
+    globals.document = document
+    globals.Node = { TEXT_NODE: 3 }
+    globals.NodeFilter = { SHOW_ELEMENT: 1 }
+    globals.MutationObserver = class {
+      observe(): void {}
+    }
+
+    new Function(buildChooserEnrichmentScript())()
+    fakeWindow.__sessions = [
+      {
+        account: {
+          sub: 'did:plc:alice',
+          email: 'alice@example.test',
+          preferred_username: 'alice.test',
+        },
+      },
+      {
+        account: {
+          sub: 'did:plc:bob',
+          email: 'bob@example.test',
+          preferred_username: 'bob.test',
+        },
+      },
+    ]
+    document.dispatchDOMContentLoaded()
+  } finally {
+    globals.window = previous.window
+    globals.document = previous.document
+    globals.Node = previous.Node
+    globals.NodeFilter = previous.NodeFilter
+    globals.MutationObserver = previous.MutationObserver
+  }
+}
+
+describe('buildChooserEnrichmentScript account row scoping', () => {
+  it('does not enrich consent copy outside a chooser account row', () => {
+    const document = new FakeDocument()
+    const paragraph = new FakeElement('p')
+    const consentHandle = new FakeElement('span')
+    appendText(consentHandle, 'alice.test')
+    paragraph.appendChild(consentHandle)
+    appendText(paragraph, ' grants access to did:plc:alice')
+    document.root.appendChild(paragraph)
+
+    runChooserEnrichmentScript(document)
+
+    expect(document.root.descendants()).not.toContainEqual(
+      expect.objectContaining({ textContentOverride: 'alice@example.test' }),
+    )
+    expect(consentHandle.classList.contains('epds-handle-label')).toBe(false)
+  })
+
+  it('enriches a chooser-like account row', () => {
+    const document = new FakeDocument()
+    const row = new FakeElement('div', { role: 'button', tabindex: '0' })
+    const wrap = new FakeElement('span')
+    const handle = new FakeElement('span')
+    appendText(handle, 'alice.test')
+    wrap.appendChild(handle)
+    row.appendChild(wrap)
+    document.root.appendChild(row)
+
+    runChooserEnrichmentScript(document)
+
+    const emailLabel = wrap.childNodes.find(
+      (child) =>
+        child instanceof FakeElement &&
+        child.classList.contains('epds-email-label'),
+    ) as FakeElement | undefined
+
+    expect(emailLabel).toBeInstanceOf(FakeElement)
+    expect(emailLabel?.textContent).toBe('alice@example.test')
+    expect(handle.classList.contains('epds-handle-label')).toBe(true)
+  })
+
+  it('enriches multiple chooser-like account rows', () => {
+    const document = new FakeDocument()
+    const rows = ['alice.test', 'bob.test'].map((handleText) => {
+      const row = new FakeElement('div', { role: 'button', tabindex: '0' })
+      const wrap = new FakeElement('span')
+      const handle = new FakeElement('span')
+      appendText(handle, handleText)
+      wrap.appendChild(handle)
+      row.appendChild(wrap)
+      document.root.appendChild(row)
+      return { wrap, handle }
+    })
+
+    runChooserEnrichmentScript(document)
+
+    expect(rows[0].wrap.textContent).toContain('alice@example.test')
+    expect(rows[1].wrap.textContent).toContain('bob@example.test')
+    expect(rows[0].handle.classList.contains('epds-handle-label')).toBe(true)
+    expect(rows[1].handle.classList.contains('epds-handle-label')).toBe(true)
+  })
+})
+
 describe('sha256Base64', () => {
   it('produces a stable SHA256 base64 hash', () => {
     // Known value for the empty string.
