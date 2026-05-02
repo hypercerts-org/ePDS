@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm'
 import { describe, expect, it, vi } from 'vitest'
 import {
   appendScriptHashToCsp,
@@ -95,7 +96,12 @@ class FakeElement {
 
   closest(selector: string): FakeElement | null {
     if (selector !== '[role="button"][tabindex="0"]') return null
-    let current: FakeElement | null = this
+
+    if (this.attributes.role === 'button' && this.attributes.tabindex === '0') {
+      return this
+    }
+
+    let current = this.parentElement
     while (current) {
       if (
         current.attributes.role === 'button' &&
@@ -130,7 +136,8 @@ class FakeElement {
         this.descendants().find(
           (el) =>
             el.attributes.role === 'button' &&
-            el.attributes['aria-label'] === 'Login to account that is not listed',
+            el.attributes['aria-label'] ===
+              'Login to account that is not listed',
         ) ?? null
       )
     }
@@ -196,52 +203,42 @@ function appendText(parent: FakeElement, text: string): void {
 }
 
 function runChooserEnrichmentScript(document: FakeDocument): void {
-  const globals = globalThis as typeof globalThis & Record<string, unknown>
-  const previous = {
-    window: globals.window,
-    document: globals.document,
-    Node: globals.Node,
-    NodeFilter: globals.NodeFilter,
-    MutationObserver: globals.MutationObserver,
-  }
   const fakeWindow: Record<string, unknown> = {
     location: { search: '' },
   }
+  const sandbox = {
+    document,
+    MutationObserver: class {
+      observed = false
 
-  try {
-    globals.window = fakeWindow
-    globals.document = document
-    globals.Node = { TEXT_NODE: 3 }
-    globals.NodeFilter = { SHOW_ELEMENT: 1 }
-    globals.MutationObserver = class {
-      observe(): void {}
-    }
-
-    new Function(buildChooserEnrichmentScript())()
-    fakeWindow.__sessions = [
-      {
-        account: {
-          sub: 'did:plc:alice',
-          email: 'alice@example.test',
-          preferred_username: 'alice.test',
-        },
-      },
-      {
-        account: {
-          sub: 'did:plc:bob',
-          email: 'bob@example.test',
-          preferred_username: 'bob.test',
-        },
-      },
-    ]
-    document.dispatchDOMContentLoaded()
-  } finally {
-    globals.window = previous.window
-    globals.document = previous.document
-    globals.Node = previous.Node
-    globals.NodeFilter = previous.NodeFilter
-    globals.MutationObserver = previous.MutationObserver
+      observe(): void {
+        this.observed = true
+      }
+    },
+    Node: { TEXT_NODE: 3 },
+    NodeFilter: { SHOW_ELEMENT: 1 },
+    URLSearchParams,
+    window: fakeWindow,
   }
+
+  runInNewContext(buildChooserEnrichmentScript(), sandbox) // NOSONAR — test executes only the deterministic script generated in this repository.
+  fakeWindow.__sessions = [
+    {
+      account: {
+        sub: 'did:plc:alice',
+        email: 'alice@example.test',
+        preferred_username: 'alice.test',
+      },
+    },
+    {
+      account: {
+        sub: 'did:plc:bob',
+        email: 'bob@example.test',
+        preferred_username: 'bob.test',
+      },
+    },
+  ]
+  document.dispatchDOMContentLoaded()
 }
 
 describe('buildChooserEnrichmentScript account row scoping', () => {
