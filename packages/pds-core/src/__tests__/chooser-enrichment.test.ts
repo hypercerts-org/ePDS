@@ -414,6 +414,24 @@ function createConsentIdentity(
   return { container, identifier }
 }
 
+function findConsentIdentityTooltip(container: FakeElement): {
+  icon: FakeElement
+  tooltip: FakeElement
+} {
+  const icon = container.childNodes.find(
+    (child) =>
+      child instanceof FakeElement &&
+      child.classList.contains('epds-identity-info-icon'),
+  ) as FakeElement
+  const tooltip = container.childNodes.find(
+    (child) =>
+      child instanceof FakeElement &&
+      child.classList.contains('epds-identity-tooltip'),
+  ) as FakeElement
+
+  return { icon, tooltip }
+}
+
 function selectedAliceSession(preferredUsername = 'alice.test'): unknown[] {
   return [
     {
@@ -1164,31 +1182,64 @@ describe('buildChooserEnrichmentScript consent identity enrichment', () => {
 
     runChooserEnrichmentScript(document, { __sessions: selectedAliceSession() })
 
-    const icon = container.childNodes.find(
-      (child) =>
-        child instanceof FakeElement &&
-        child.classList.contains('epds-identity-info-icon'),
-    ) as FakeElement
-    const tooltip = container.childNodes.find(
-      (child) =>
-        child instanceof FakeElement &&
-        child.classList.contains('epds-identity-tooltip'),
-    ) as FakeElement
+    const { icon, tooltip } = findConsentIdentityTooltip(container)
 
     expect(tooltip.hidden).toBe(true)
+    expect(icon.getAttribute('aria-expanded')).toBe('false')
     icon.dispatchEvent('mouseenter')
     expect(tooltip.hidden).toBe(false)
+    expect(icon.getAttribute('aria-expanded')).toBe('true')
     icon.dispatchEvent('mouseleave')
     expect(tooltip.hidden).toBe(true)
+    expect(icon.getAttribute('aria-expanded')).toBe('false')
     icon.dispatchEvent('focus')
     expect(tooltip.hidden).toBe(false)
+    expect(icon.getAttribute('aria-expanded')).toBe('true')
     icon.dispatchEvent('blur')
     expect(tooltip.hidden).toBe(true)
+    expect(icon.getAttribute('aria-expanded')).toBe('false')
     const click = icon.dispatchEvent('click')
     expect(click.defaultPrevented).toBe(true)
+    expect(click.propagationStopped).toBe(true)
+    expect(tooltip.hidden).toBe(false)
+    expect(icon.getAttribute('aria-expanded')).toBe('true')
+    icon.dispatchEvent('mouseleave')
+    expect(tooltip.hidden).toBe(false)
+    icon.dispatchEvent('blur')
     expect(tooltip.hidden).toBe(false)
     icon.dispatchEvent('click')
     expect(tooltip.hidden).toBe(true)
+    expect(icon.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('keeps the tooltip pinned open when touch focus fires before click', () => {
+    const document = new FakeDocument()
+    const { container } = createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'alice.test',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(document, { __sessions: selectedAliceSession() })
+
+    const { icon, tooltip } = findConsentIdentityTooltip(container)
+
+    icon.dispatchEvent('focus')
+    expect(tooltip.hidden).toBe(false)
+    expect(icon.getAttribute('aria-expanded')).toBe('true')
+
+    icon.dispatchEvent('click')
+    expect(tooltip.hidden).toBe(false)
+    expect(icon.getAttribute('aria-expanded')).toBe('true')
+
+    icon.dispatchEvent('blur')
+    expect(tooltip.hidden).toBe(false)
+    expect(icon.getAttribute('aria-expanded')).toBe('true')
+
+    icon.dispatchEvent('click')
+    expect(tooltip.hidden).toBe(true)
+    expect(icon.getAttribute('aria-expanded')).toBe('false')
   })
 
   it('does not apply consent tooltip behavior on account pages', () => {
