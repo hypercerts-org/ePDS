@@ -68,16 +68,6 @@ export function createCompleteRouter(
       return
     }
 
-    const clientId = flow.clientId
-    if (!clientId) {
-      logger.warn({ flowId }, 'auth_flow missing client_id')
-      res
-        .status(400)
-        .type('html')
-        .send(renderError('Authentication session expired. Please try again.'))
-      return
-    }
-
     // Step 3: Get better-auth session to extract verified email
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth session type not exported
     let session: any
@@ -100,9 +90,11 @@ export function createCompleteRouter(
         'No authenticated session found on /auth/complete',
       )
       // Redirect back to auth flow with error — user needs to authenticate
-      const authUrl =
-        `/oauth/authorize?request_uri=${encodeURIComponent(flow.requestUri)}` +
-        `&client_id=${encodeURIComponent(clientId)}`
+      const authParams = new URLSearchParams({ request_uri: flow.requestUri })
+      if (flow.clientId) {
+        authParams.set('client_id', flow.clientId)
+      }
+      const authUrl = `/oauth/authorize?${authParams.toString()}`
       res.redirect(303, authUrl)
       return
     }
@@ -168,7 +160,7 @@ export function createCompleteRouter(
          */
         const callbackParams = {
           request_uri: flow.requestUri,
-          client_id: clientId,
+          ...(flow.clientId ? { client_id: flow.clientId } : {}),
           email,
           approved: '1',
           new_account: '1',
@@ -212,7 +204,7 @@ export function createCompleteRouter(
 
     const callbackParams = {
       request_uri: flow.requestUri,
-      client_id: clientId,
+      ...(flow.clientId ? { client_id: flow.clientId } : {}),
       email,
       approved: '1',
       new_account: '0',

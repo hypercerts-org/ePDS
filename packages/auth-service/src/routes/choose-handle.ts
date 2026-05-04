@@ -63,7 +63,7 @@ export function createChooseHandleRouter(
     flow: {
       requestUri: string
       handleMode: HandleMode | null
-      clientId: string
+      clientId: string | null
     }
     email: string
   } | null> {
@@ -83,15 +83,6 @@ export function createChooseHandleRouter(
     if (!flow) {
       logger.warn({ flowId }, 'auth_flow not found or expired on choose-handle')
       res.clearCookie(AUTH_FLOW_COOKIE)
-      res
-        .status(400)
-        .type('html')
-        .send(renderError('Session expired, please start over'))
-      return null
-    }
-
-    if (!flow.clientId) {
-      logger.warn({ flowId }, 'auth_flow missing client_id on choose-handle')
       res
         .status(400)
         .type('html')
@@ -202,11 +193,17 @@ export function createChooseHandleRouter(
       : undefined
     const showRandomButton = result.flow.handleMode === 'picker-with-random'
 
-    // Branding injection for trusted clients — clientId is already in the flow row
-    const branding = await resolveClientBranding(
-      result.flow.clientId,
-      ctx.config.trustedClients,
-    )
+    // Branding injection is only available when the original flow included a client_id.
+    const branding = result.flow.clientId
+      ? await resolveClientBranding(
+          result.flow.clientId,
+          ctx.config.trustedClients,
+        )
+      : {
+          customCss: null,
+          customFaviconUrl: null,
+          customFaviconUrlDark: null,
+        }
 
     res
       .type('html')
@@ -244,11 +241,14 @@ export function createChooseHandleRouter(
 
     const showRandomButton = flow.handleMode === 'picker-with-random'
 
-    // Branding injection for trusted clients — clientId is already in the flow row
-    const branding = await resolveClientBranding(
-      flow.clientId,
-      ctx.config.trustedClients,
-    )
+    // Branding injection is only available when the original flow included a client_id.
+    const branding = flow.clientId
+      ? await resolveClientBranding(flow.clientId, ctx.config.trustedClients)
+      : {
+          customCss: null,
+          customFaviconUrl: null,
+          customFaviconUrlDark: null,
+        }
 
     // Guard: if PDS account already exists, bounce back to /auth/complete
     // (mirrors the same check in the GET handler — prevents signing a
@@ -376,7 +376,7 @@ export function createChooseHandleRouter(
     // trusted handleDomain, eliminating any possibility of domain mismatch.
     const callbackParams = {
       request_uri: flow.requestUri,
-      client_id: flow.clientId,
+      ...(flow.clientId ? { client_id: flow.clientId } : {}),
       email,
       approved: '1',
       new_account: '1',
