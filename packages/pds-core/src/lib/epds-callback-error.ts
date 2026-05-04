@@ -24,8 +24,12 @@
  *   - other: generic server failure. error=server_error per spec, 500
  *     on the HTML fallback.
  */
+import { createHash } from 'node:crypto'
+
 import type { Response } from 'express'
 import type { Logger } from 'pino'
+
+import { ERROR_CSS } from '@certified-app/shared'
 
 /** Decoded view of a thrown error for response shaping. */
 export interface CallbackErrorClassification {
@@ -86,7 +90,25 @@ export interface HandleCallbackErrorOpts {
   /** Renders the styled HTML fallback page. Injected so tests can
    * assert on the rendered string without pulling in the real
    * renderer. */
-  renderError: (message: string) => string
+  renderError: (message: string, options?: { extraCss?: string }) => string
+  /** Trusted client CSS appended to fallback HTML after the shared
+   * error-page CSS so client-provided styles can override defaults
+   * without relaxing CSP for external resources. */
+  trustedClientCss?: string | null
+}
+
+function createFallbackHtmlContentSecurityPolicy(inlineStyle: string): string {
+  const styleHash = createHash('sha256').update(inlineStyle).digest('base64')
+  return [
+    "default-src 'none'",
+    "script-src 'none'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+    "img-src 'self' data:",
+    `style-src 'sha256-${styleHash}'`,
+  ].join('; ')
 }
 
 export function handleCallbackError(opts: HandleCallbackErrorOpts): void {
@@ -98,6 +120,7 @@ export function handleCallbackError(opts: HandleCallbackErrorOpts): void {
     pdsUrl,
     logger,
     renderError,
+    trustedClientCss,
   } = opts
 
   const { code, description, isExpired } = classifyCallbackError(err)
@@ -148,13 +171,19 @@ export function handleCallbackError(opts: HandleCallbackErrorOpts): void {
   }
 
   if (!res.headersSent) {
+    const extraCss = trustedClientCss ?? ''
     // Cache-Control: no-store on the HTML page too — the page is
     // produced from per-request state, so a cached copy is at best
     // misleading on a later attempt.
     res.setHeader('Cache-Control', 'no-store')
+    res.setHeader('Referrer-Policy', 'no-referrer')
+    res.setHeader(
+      'Content-Security-Policy',
+      createFallbackHtmlContentSecurityPolicy(ERROR_CSS + extraCss),
+    )
     res
       .status(isExpired ? 400 : 500)
       .type('html')
-      .send(renderError(description))
+      .send(renderError(description, { extraCss }))
   }
 }

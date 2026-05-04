@@ -181,6 +181,7 @@ describe('signCallback / verifyCallback', () => {
       params.approved,
       params.new_account,
       '', // handle sentinel (absent)
+      '', // client_id sentinel (absent)
       staleTs,
     ].join('\n')
     const { createHmac } = await import('node:crypto')
@@ -196,6 +197,7 @@ describe('signCallback / verifyCallback', () => {
       params.approved,
       params.new_account,
       '', // handle sentinel (absent)
+      '', // client_id sentinel (absent)
       futureTs,
     ].join('\n')
     const { createHmac } = await import('node:crypto')
@@ -296,5 +298,67 @@ describe('signCallback / verifyCallback with handle', () => {
       handle: 'evil.pds.example.com',
     }
     expect(verifyCallback(tamperedParams, ts, sig, secret)).toBe(false)
+  })
+
+  it('signs and verifies callback with client_id param', () => {
+    const secret = 'test-secret'
+    const params: CallbackParams = {
+      request_uri: 'urn:ietf:params:oauth:request_uri:test',
+      email: 'alice@example.com',
+      approved: '1',
+      new_account: '1',
+      client_id: 'https://client.example.com/metadata.json',
+    }
+    const { sig, ts } = signCallback(params, secret)
+    expect(verifyCallback(params, ts, sig, secret)).toBe(true)
+  })
+
+  it('rejects tampered client_id', () => {
+    const secret = 'test-secret'
+    const params: CallbackParams = {
+      request_uri: 'urn:ietf:params:oauth:request_uri:test',
+      email: 'alice@example.com',
+      approved: '1',
+      new_account: '1',
+      client_id: 'https://client.example.com/metadata.json',
+    }
+    const { sig, ts } = signCallback(params, secret)
+    const tamperedParams: CallbackParams = {
+      ...params,
+      client_id: 'https://evil.example.com/metadata.json',
+    }
+    expect(verifyCallback(tamperedParams, ts, sig, secret)).toBe(false)
+  })
+
+  it('rejects appended client_id on callback signed without one', () => {
+    const secret = 'test-secret'
+    const params: CallbackParams = {
+      request_uri: 'urn:ietf:params:oauth:request_uri:test',
+      email: 'alice@example.com',
+      approved: '1',
+      new_account: '1',
+    }
+    const { sig, ts } = signCallback(params, secret)
+    const withClientId: CallbackParams = {
+      ...params,
+      client_id: 'https://client.example.com/metadata.json',
+    }
+    expect(verifyCallback(withClientId, ts, sig, secret)).toBe(false)
+  })
+
+  it('treats omitted client_id and client_id=undefined as equivalent', () => {
+    const secret = 'test-secret-32bytes-padding-here'
+    const params: CallbackParams = {
+      request_uri: 'urn:ietf:params:oauth:request_uri:test',
+      email: 'alice@example.com',
+      approved: '1',
+      new_account: '1',
+    }
+    const withUndefined: CallbackParams = { ...params, client_id: undefined }
+    const { sig, ts } = signCallback(params, secret)
+    expect(verifyCallback(withUndefined, ts, sig, secret)).toBe(true)
+
+    const { sig: sig2, ts: ts2 } = signCallback(withUndefined, secret)
+    expect(verifyCallback(params, ts2, sig2, secret)).toBe(true)
   })
 })

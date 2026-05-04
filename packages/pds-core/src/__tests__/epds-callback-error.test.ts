@@ -148,12 +148,16 @@ function invoke(opts: {
   capturedRedirectUri?: string
   capturedState?: string
   forceHeadersSent?: boolean
+  trustedClientCss?: string | null
 }) {
   const { res, inspect } = makeResStub()
   if (opts.forceHeadersSent) {
     ;(res as Response & { forceHeadersSent: () => void }).forceHeadersSent()
   }
-  const renderError = vi.fn((m: string) => `<html>${m}</html>`)
+  const renderError = vi.fn(
+    (m: string, options?: { extraCss?: string }) =>
+      `<html>${m}<style>${options?.extraCss ?? ''}</style></html>`,
+  )
   const logger = { error: vi.fn(), warn: vi.fn() }
   handleCallbackError({
     res,
@@ -163,6 +167,7 @@ function invoke(opts: {
     pdsUrl: PDS_URL,
     logger,
     renderError,
+    trustedClientCss: opts.trustedClientCss,
   })
   return { ...inspect(), renderError, logger }
 }
@@ -222,6 +227,21 @@ describe('handleCallbackError — redirect path', () => {
     })
     expect(got.headers['cache-control']).toBe('no-store')
   })
+
+  it('does not render HTML or emit fallback-only security headers', () => {
+    const got = invoke({
+      err: new Error('This request has expired'),
+      capturedRedirectUri: REDIRECT_URI,
+      capturedState: STATE,
+      trustedClientCss: '.container { color: purple; }',
+    })
+    expect(got.redirectStatus).toBe(303)
+    expect(got.redirectLocation).toBeDefined()
+    expect(got.body).toBeUndefined()
+    expect(got.renderError).not.toHaveBeenCalled()
+    expect(got.headers['referrer-policy']).toBeUndefined()
+    expect(got.headers['content-security-policy']).toBeUndefined()
+  })
 })
 
 describe('handleCallbackError — malformed captured redirect_uri', () => {
@@ -246,7 +266,9 @@ describe('handleCallbackError — malformed captured redirect_uri', () => {
     // HTML page served instead.
     expect(got.statusCode).toBe(400)
     expect(got.contentType).toBe('html')
-    expect(got.renderError).toHaveBeenCalledWith(TIMEOUT_DESCRIPTION)
+    expect(got.renderError).toHaveBeenCalledWith(TIMEOUT_DESCRIPTION, {
+      extraCss: '',
+    })
     // The URL parse failure must be visible in operational logs.
     expect(got.logger.error).toHaveBeenCalledWith(
       expect.objectContaining({ capturedRedirectUri: badUri }),
@@ -260,9 +282,23 @@ describe('handleCallbackError — HTML fallback path', () => {
     const got = invoke({ err: new Error('This request has expired') })
     expect(got.statusCode).toBe(400)
     expect(got.contentType).toBe('html')
-    expect(got.renderError).toHaveBeenCalledWith(TIMEOUT_DESCRIPTION)
+    expect(got.renderError).toHaveBeenCalledWith(TIMEOUT_DESCRIPTION, {
+      extraCss: '',
+    })
     expect(got.body).toContain(TIMEOUT_DESCRIPTION)
     expect(got.redirectLocation).toBeUndefined()
+  })
+
+  it('passes trusted client CSS to the renderer after the shared error CSS', () => {
+    const trustedClientCss = '.container { border-color: #123456; }'
+    const got = invoke({
+      err: new Error('This request has expired'),
+      trustedClientCss,
+    })
+    expect(got.renderError).toHaveBeenCalledWith(TIMEOUT_DESCRIPTION, {
+      extraCss: trustedClientCss,
+    })
+    expect(got.body).toContain(trustedClientCss)
   })
 
   it('marks the HTML response non-cacheable', () => {
@@ -270,10 +306,37 @@ describe('handleCallbackError — HTML fallback path', () => {
     expect(got.headers['cache-control']).toBe('no-store')
   })
 
+  it('prevents fallback HTML from leaking the signed callback URL as a referrer', () => {
+    const got = invoke({ err: new Error('This request has expired') })
+    expect(got.headers['referrer-policy']).toBe('no-referrer')
+  })
+
+  it('sets a strict fallback HTML CSP with a hashed inline style only', () => {
+    const got = invoke({
+      err: new Error('This request has expired'),
+      trustedClientCss: '.error { color: purple; }',
+    })
+    const csp = got.headers['content-security-policy']
+    expect(csp).toContain("default-src 'none'")
+    expect(csp).toContain("script-src 'none'")
+    expect(csp).toContain("object-src 'none'")
+    expect(csp).toContain("base-uri 'none'")
+    expect(csp).toContain("form-action 'none'")
+    expect(csp).toContain("frame-ancestors 'none'")
+    expect(csp).toContain("img-src 'self' data:")
+    expect(csp).toMatch(/style-src 'sha256-[A-Za-z0-9+/]+=*'/)
+    expect(csp).not.toContain("'unsafe-inline'")
+    expect(csp).not.toContain('style-src https:')
+    expect(csp).not.toContain('connect-src')
+    expect(csp).not.toContain('font-src')
+  })
+
   it('renders a 500 HTML page on generic server failure with no redirect_uri', () => {
     const got = invoke({ err: new Error('Database connection refused') })
     expect(got.statusCode).toBe(500)
-    expect(got.renderError).toHaveBeenCalledWith(SERVER_DESCRIPTION)
+    expect(got.renderError).toHaveBeenCalledWith(SERVER_DESCRIPTION, {
+      extraCss: '',
+    })
   })
 
   it('does NOT leak raw JSON {"error":"Authentication failed"}', () => {
