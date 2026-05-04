@@ -326,7 +326,9 @@ async function main() {
           { signedClientId, requestClientId: clientId },
           'ePDS callback: signed client_id does not match PAR client_id',
         )
-        throw new Error('Signed callback client_id does not match PAR client_id')
+        throw new Error(
+          'Signed callback client_id does not match PAR client_id',
+        )
       }
       // Stash redirect_uri/state now while the PAR is alive — if a later
       // step throws and the row has since been deleted (e.g. flushed
