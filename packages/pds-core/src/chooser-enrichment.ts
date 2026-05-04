@@ -53,19 +53,19 @@ export function buildChooserEnrichmentScript(): string {
   //     sets window.__deviceSessions (type: readonly ActiveDeviceSession[])
   // Both contain { account: { sub, email, preferred_username, ... }, ... }
   // so our DOM-enrichment heuristic can operate on either one.
-  var captured = null;
+  var capturedGlobals = Object.create(null);
   function interceptGlobal(name) {
     try {
       Object.defineProperty(window, name, {
         configurable: true,
         set: function(v) {
-          captured = v;
+          capturedGlobals[name] = v;
           // Forward to a plain data prop so the SPA still sees the value.
           Object.defineProperty(window, name, {
             configurable: true, enumerable: true, writable: true, value: v,
           });
         },
-        get: function() { return captured; },
+        get: function() { return capturedGlobals[name]; },
       });
     } catch (_) {}
   }
@@ -75,8 +75,9 @@ export function buildChooserEnrichmentScript(): string {
   // Current OAuth flow's handle-assignment mode, written into a
   // <meta name="epds-handle-mode"> by the pds-core middleware. When
   // "random", the handle is a server-generated opaque string that the
-  // user never chose, so we hide it from the chooser and expose it only
-  // via a title= tooltip — the email remains the primary identifier.
+  // user never chose, so OAuth authorize chooser rows show the email as
+  // the primary identifier while keeping the handle available through an
+  // explicit accessible description.
   // Any unknown / missing value disables hiding and renders handle +
   // email side-by-side, same as pre-Layer-4 behaviour.
   function readHandleMode() {
@@ -131,30 +132,265 @@ export function buildChooserEnrichmentScript(): string {
     return authOrigin + '/oauth/authorize?' + params.toString();
   }
 
+  function buildAccounts() {
+    return buildAccountsFromSources([capturedGlobals.__sessions, capturedGlobals.__deviceSessions]);
+  }
+
+  function buildDeviceAccounts() {
+    return buildAccountsFromSources([capturedGlobals.__deviceSessions]);
+  }
+
+  function buildAccountsFromSources(sources) {
+    var accounts = [];
+    sources.forEach(function(source) {
+      if (!Array.isArray(source)) return;
+      source.forEach(function(session) {
+        var account = session && session.account;
+        if (!account) return;
+        accounts.push({
+          sub: account.sub || '',
+          email: account.email || '',
+          preferred_username: account.preferred_username || '',
+          selected: !!(account.selected || session.selected),
+        });
+      });
+    });
+    return accounts;
+  }
+
+  function matchAccountIdentifier(accounts, text) {
+    var trimmed = (text || '').trim();
+    if (!trimmed) return null;
+    for (var i = 0; i < accounts.length; i++) {
+      var account = accounts[i];
+      if (!account.email) continue;
+      if (account.preferred_username) {
+        if (trimmed === account.preferred_username) return account;
+        if (trimmed === '@' + account.preferred_username) return account;
+      }
+      if (account.sub && trimmed === account.sub) return account;
+    }
+    return null;
+  }
+
+  function selectedAccount(accounts) {
+    for (var i = 0; i < accounts.length; i++) {
+      if (accounts[i].selected) return accounts[i];
+    }
+    return accounts.length === 1 ? accounts[0] : null;
+  }
+
+  function formatPublicHandle(handle) {
+    return handle && handle.charAt(0) === '@' ? handle : '@' + handle;
+  }
+
+  function appendAriaReference(el, attr, id) {
+    var current = el.getAttribute(attr) || '';
+    var refs = current ? current.split(/\\s+/) : [];
+    for (var i = 0; i < refs.length; i++) {
+      if (refs[i] === id) return;
+    }
+    refs.push(id);
+    el.setAttribute(attr, refs.join(' ').trim());
+  }
+
+  function appendIdentityInfoIcon(el, tooltipText) {
+    var id = 'epds-identity-tooltip-' + Math.random().toString(36).slice(2);
+    var icon = document.createElement('button');
+    icon.type = 'button';
+    icon.className = 'epds-identity-info-icon';
+    icon.textContent = 'ⓘ';
+    icon.setAttribute('aria-label', 'Identity information');
+    icon.setAttribute('aria-describedby', id);
+    icon.setAttribute('aria-expanded', 'false');
+    icon.style.cssText = 'border:0;background:transparent;padding:0 0 0 .25em;cursor:pointer;font:inherit;line-height:1;color:inherit;';
+
+    var tooltip = document.createElement('span');
+    tooltip.id = id;
+    tooltip.className = 'epds-identity-tooltip';
+    tooltip.setAttribute('role', 'tooltip');
+    tooltip.hidden = true;
+    tooltip.textContent = tooltipText;
+    tooltip.style.cssText = 'position:absolute;z-index:10;max-width:20rem;margin-left:.35em;padding:.35em .5em;border-radius:.25rem;background:#111;color:#fff;font-size:.875em;line-height:1.3;';
+
+    var pinned = false;
+    function show() {
+      tooltip.hidden = false;
+      icon.setAttribute('aria-expanded', 'true');
+    }
+    function hide() {
+      if (pinned) return;
+      tooltip.hidden = true;
+      icon.setAttribute('aria-expanded', 'false');
+    }
+    icon.addEventListener('mouseenter', show);
+    icon.addEventListener('focus', show);
+    icon.addEventListener('mouseleave', hide);
+    icon.addEventListener('blur', hide);
+    icon.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      pinned = tooltip.hidden;
+      if (pinned) show();
+      else hide();
+    });
+
+    el.insertAdjacentElement('afterend', tooltip);
+    el.insertAdjacentElement('afterend', icon);
+  }
+
+  function isConsentIdentityElement(el) {
+    var parent = el.parentElement;
+    if (!parent) return false;
+    var tagName = (el.tagName || '').toLowerCase();
+    if (tagName !== 'b' && tagName !== 'strong') return false;
+    return true;
+  }
+
+  function enrichConsentIdentity(accounts, handleMode) {
+    if (!isOauthAuthorizePage()) return;
+    var selected = selectedAccount(accounts);
+    var consentAccounts = selected ? [selected] : accounts;
+    var root = document.getElementById('root');
+    if (!root) return;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+    var node;
+    while ((node = walker.nextNode())) {
+      if (node.dataset && node.dataset.epdsConsentEnriched) continue;
+      var text = (node.textContent || '').trim();
+      if (!text || !isConsentIdentityElement(node)) continue;
+      var account = matchAccountIdentifier(consentAccounts, text);
+      if (!account) continue;
+
+      if (handleMode === 'random') {
+        node.textContent = account.email;
+        appendIdentityInfoIcon(
+          node,
+          'Public AT Protocol handle: ' + formatPublicHandle(text) + '. Handles are public account names used by AT Protocol apps.',
+        );
+      } else {
+        appendIdentityInfoIcon(
+          node,
+          'This handle is associated with ' + account.email + '.',
+        );
+      }
+      if (node.dataset) node.dataset.epdsConsentEnriched = '1';
+    }
+  }
+
+  function isOauthAuthorizePage() {
+    return window.location && window.location.pathname === '/oauth/authorize';
+  }
+
+  function isAccountPage() {
+    var pathname = (window.location && window.location.pathname) || '';
+    return pathname === '/account' || pathname.indexOf('/account/') === 0;
+  }
+
+  function isAccountDetailPage() {
+    var pathname = (window.location && window.location.pathname) || '';
+    return pathname.indexOf('/account/did:') === 0;
+  }
+
+  function ownTextOf(el) {
+    var own = '';
+    for (var i = 0; i < el.childNodes.length; i++) {
+      var c = el.childNodes[i];
+      if (c.nodeType === Node.TEXT_NODE) own += c.data;
+    }
+    return own;
+  }
+
+  function accountSelectorButtons(root) {
+    var buttons = [];
+    var candidates = root.querySelectorAll('button, a');
+    for (var i = 0; i < candidates.length; i++) {
+      var candidate = candidates[i];
+      if ((candidate.tagName || '').toLowerCase() !== 'button') continue;
+      if (candidate.getAttribute('aria-label') !== 'Select an account') continue;
+      buttons.push(candidate);
+    }
+    return buttons;
+  }
+
+  function enrichAccountSelector(root) {
+    if (!isAccountDetailPage()) return;
+    var accounts = buildDeviceAccounts();
+    if (!accounts.length) return;
+    var selectors = accountSelectorButtons(root);
+    for (var i = 0; i < selectors.length; i++) {
+      var selector = selectors[i];
+      if (selector.dataset && selector.dataset.epdsAccountSelectorEnriched) continue;
+      var walker = document.createTreeWalker(selector, NodeFilter.SHOW_ELEMENT);
+      var node;
+      var selectorMatches = [];
+      while ((node = walker.nextNode())) {
+        if (node.dataset && node.dataset.epdsEnriched) continue;
+        var own = ownTextOf(node);
+        if (!own) continue;
+        var account = matchAccountIdentifier(accounts, own);
+        if (account) selectorMatches.push({ el: node, account: account, text: own });
+      }
+      if (!selectorMatches.length) continue;
+      var match = selectorMatches[0];
+      var duplicateMatches = selectorMatches.filter(function(candidate) {
+        return candidate.account === match.account;
+      });
+      var publicIdentifier = match.account.preferred_username
+        ? formatPublicHandle(match.account.preferred_username)
+        : formatPublicHandle((match.text || '').trim());
+      selector.setAttribute('aria-label', 'Select account ' + match.account.email + ' (' + publicIdentifier + ')');
+      if (duplicateMatches.length > 1) {
+        duplicateMatches[0].el.textContent = match.account.email;
+        duplicateMatches[0].el.classList.add('epds-email-label');
+        for (var d = 1; d < duplicateMatches.length; d++) {
+          duplicateMatches[d].el.classList.add('epds-handle-label');
+          if (duplicateMatches[d].el.dataset) duplicateMatches[d].el.dataset.epdsEnriched = '1';
+        }
+      } else {
+        match.el.classList.add('epds-handle-label');
+        var label = document.createElement('span');
+        label.className = 'epds-email-label';
+        label.style.cssText =
+          'min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
+        label.textContent = match.account.email;
+        var wrap = match.el.parentElement;
+        if (wrap) {
+          wrap.style.flexDirection = 'column';
+          wrap.style.alignItems = 'flex-start';
+          wrap.style.minWidth = '0';
+          match.el.insertAdjacentElement('afterend', label);
+        } else {
+          match.el.appendChild(label);
+        }
+      }
+      if (match.el.dataset) match.el.dataset.epdsEnriched = '1';
+      if (selector.dataset) selector.dataset.epdsAccountSelectorEnriched = '1';
+    }
+  }
+
   // Enrich each visible account row with its email. Runs repeatedly
   // via a MutationObserver because the SPA hydrates/re-renders after
   // initial HTML delivery.
   function enrich() {
-    if (!captured || !Array.isArray(captured)) return;
+    if (!isOauthAuthorizePage() && !isAccountPage()) return;
+    var accounts = buildAccounts();
+    if (!accounts.length) return;
     var handleMode = readHandleMode();
-    var hideHandle = handleMode === 'random';
-    var byHandle = Object.create(null);
-    var bySub = Object.create(null);
-    captured.forEach(function(s) {
-      var a = s && s.account;
-      if (!a) return;
-      if (a.preferred_username) byHandle[a.preferred_username] = a.email || '';
-      if (a.sub) bySub[a.sub] = a.email || '';
-    });
+    var hideHandle = handleMode === 'random' && isOauthAuthorizePage();
 
-    // Find the deepest element whose own text content contains a known
-    // handle or sub, and append the email next to it. Upstream's markup
+    enrichConsentIdentity(accounts, handleMode);
+
+    // Find the deepest element whose own trimmed text exactly matches a
+    // known handle, @handle, or DID, and append the email next to it.
+    // Upstream's markup
     // varies between versions; walking by leaf-element text is more
     // resilient than guessing at class names. We skip elements that have
     // children whose text also matches (so we only label the deepest
     // match per row — usually a <span> or similar inline container).
     var root = document.getElementById('root');
     if (!root) return;
+    enrichAccountSelector(root);
     var walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
     var node;
     var matches = [];
@@ -162,24 +398,64 @@ export function buildChooserEnrichmentScript(): string {
       if (node.dataset && node.dataset.epdsEnriched) continue;
       // Compute "own text" — text content excluding descendant element
       // text. We approximate by joining Text-node children's data.
-      var own = '';
-      for (var i = 0; i < node.childNodes.length; i++) {
-        var c = node.childNodes[i];
-        if (c.nodeType === Node.TEXT_NODE) own += c.data;
-      }
+      var own = ownTextOf(node);
       if (!own) continue;
-      var email = '';
-      for (var handle in byHandle) {
-        if (own.indexOf(handle) >= 0) { email = byHandle[handle]; break; }
+      var account = matchAccountIdentifier(accounts, own);
+      if (account) matches.push({ el: node, account: account, email: account.email });
+    }
+    function accountListAnchor(el) {
+      var anchor = el.closest('a');
+      if (!anchor) return null;
+      var href = anchor.getAttribute('href') || '';
+      var ariaLabel = anchor.getAttribute('aria-label') || '';
+      if (href.indexOf('/account/did:') !== 0) return null;
+      if (ariaLabel.indexOf('View and manage account for') !== 0) return null;
+      return anchor;
+    }
+    function emptyAccountTitle(anchor) {
+      var headings = anchor.querySelectorAll('h2');
+      for (var i = 0; i < headings.length; i++) {
+        if (!((headings[i].textContent || '').trim())) return headings[i];
       }
-      if (!email) {
-        for (var sub in bySub) {
-          if (own.indexOf(sub) >= 0) { email = bySub[sub]; break; }
+      return null;
+    }
+    function enrichAccountListRow(m) {
+      var anchor = accountListAnchor(m.el);
+      if (!anchor || (anchor.dataset && anchor.dataset.epdsAccountListEnriched)) return;
+      var ownText = (m.el.textContent || '').trim();
+      var publicIdentifier = m.account.preferred_username
+        ? formatPublicHandle(m.account.preferred_username)
+        : formatPublicHandle(ownText);
+      var title = emptyAccountTitle(anchor);
+      if (title) {
+        title.textContent = m.email;
+        title.classList.add('epds-email-label');
+      } else {
+        var label = document.createElement('span');
+        label.className = 'epds-email-label';
+        label.style.cssText =
+          'min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
+        label.textContent = m.email;
+        var wrap = m.el.parentElement;
+        if (wrap) {
+          wrap.style.flexDirection = 'column';
+          wrap.style.alignItems = 'flex-start';
+          wrap.style.minWidth = '0';
+          wrap.appendChild(label);
+        } else {
+          m.el.appendChild(label);
         }
       }
-      if (email) matches.push({ el: node, email: email });
+      m.el.classList.add('epds-handle-label');
+      anchor.setAttribute('aria-label', 'View and manage account for ' + m.email + ' (' + publicIdentifier + ')');
+      if (m.el.dataset) m.el.dataset.epdsEnriched = '1';
+      if (anchor.dataset) anchor.dataset.epdsAccountListEnriched = '1';
     }
     matches.forEach(function(m) {
+      if (isAccountPage()) {
+        enrichAccountListRow(m);
+        return;
+      }
       // oauth-provider-ui 0.4.3 renders chooser rows this way; revisit if the upstream PDS UI is upgraded.
       var row = m.el.closest('[role="button"][tabindex="0"]');
       if (!row) return;
@@ -199,6 +475,7 @@ export function buildChooserEnrichmentScript(): string {
       //   .epds-email-label { order: -1 }
       // No inline typography (font-size, color, weight) so normal CSS
       // specificity rules apply when branding wants to override.
+      var ownText = (m.el.textContent || '').trim();
       var label = document.createElement('span');
       label.className = 'epds-email-label';
       label.style.cssText =
@@ -216,19 +493,25 @@ export function buildChooserEnrichmentScript(): string {
         m.el.appendChild(label);
       }
 
+      row.setAttribute('aria-label', 'Sign in as ' + m.email);
+
       // Random-handle mode: the handle is server-assigned gibberish
       // the user never chose (e.g. "frail-ivy-cabbage.pds.example").
-      // We use display:none — which removes the element from the
-      // accessibility tree — intentionally. Announcing the opaque
-      // string to screen-reader users carries no semantic value and
-      // actively confuses the row's accessible name ("DID xyz, handle
-      // frail-ivy-cabbage, email alice@example"). The email label
-      // immediately below stays visible and announced; power users
-      // can still inspect the handle via the tooltip we set on it.
+      // Keep it out of normal visual layout, but attach a separate
+      // non-interactive description so assistive technology can still
+      // expose the underlying handle without making it the row name.
       if (hideHandle) {
-        var ownText = (m.el.textContent || '').trim();
         if (ownText) {
-          label.title = ownText;
+          var description = document.createElement('span');
+          var descriptionId = 'epds-hidden-handle-' + matches.indexOf(m);
+          description.id = descriptionId;
+          description.className = 'epds-hidden-handle-description';
+          description.textContent = 'Underlying handle: ' + ownText;
+          description.style.cssText =
+            'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;';
+          description.setAttribute('aria-hidden', 'false');
+          row.appendChild(description);
+          appendAriaReference(row, 'aria-describedby', descriptionId);
         }
         m.el.style.display = 'none';
       }
