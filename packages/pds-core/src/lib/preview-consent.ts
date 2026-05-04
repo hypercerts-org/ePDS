@@ -37,7 +37,15 @@
  *   routes' relaxed CSP. See {@link ./preview-shared.ts} for the shared
  *   header set.
  */
-import { escapeHtml, renderPreviewIndexPage } from '@certified-app/shared'
+import {
+  escapeHtml,
+  renderPreviewIndexPage,
+  resolveHandleMode,
+  VALID_HANDLE_MODES,
+  type ClientMetadata,
+  type HandleMode,
+} from '@certified-app/shared'
+import { buildChooserEnrichmentScript } from '../chooser-enrichment.js'
 import { DEFAULT_BRANDING_CSS } from './default-branding.js'
 import {
   applyPreviewHeaders,
@@ -52,6 +60,10 @@ import {
   type RequestLike,
   type ResponseLike,
 } from './preview-shared.js'
+
+interface PreviewConsentFixture extends PreviewAuthorizeFixture {
+  handleMode: HandleMode
+}
 
 function buildSessions(): unknown {
   // Fixture session that drives the SPA straight to the consent screen:
@@ -75,7 +87,7 @@ function buildSessions(): unknown {
 
 /** Build the HTML page that the real oauth-provider SPA boots from. */
 async function renderConsentHtml(opts: {
-  fixture: PreviewAuthorizeFixture
+  fixture: PreviewConsentFixture
   injectedCss: string | null
 }): Promise<string> {
   const { scripts, styles } = await loadAssetRefs()
@@ -102,6 +114,8 @@ async function renderConsentHtml(opts: {
     ? `<style>${opts.injectedCss}</style>`
     : ''
   const injectedStyle = `${defaultStyle}${clientStyle}`
+  const handleModeMeta = `<meta name="epds-handle-mode" content="${opts.fixture.handleMode}">`
+  const enrichmentScript = `<script>${buildChooserEnrichmentScript()}</script>`
 
   return `<!doctype html>
 <html>
@@ -109,11 +123,13 @@ async function renderConsentHtml(opts: {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex">
+    ${handleModeMeta}
     <link rel="icon" href="/static/favicon.svg" media="(prefers-color-scheme: light)" type="image/svg+xml">
     <link rel="icon" href="/static/favicon-dark.svg" media="(prefers-color-scheme: dark)" type="image/svg+xml">
     <title>Consent preview — ${escapeHtml(opts.fixture.clientId)}</title>
     ${styleLinks}
     ${injectedStyle}
+    ${enrichmentScript}
   </head>
   <body class="bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100">
     <div id="root"></div>
@@ -124,6 +140,23 @@ async function renderConsentHtml(opts: {
 }
 
 type PreviewConsentDeps = PreviewMetadataDeps
+
+function resolveQueryHandleMode(
+  req: RequestLike,
+  metadata: ClientMetadata,
+): HandleMode {
+  const queryMode =
+    typeof req.query.epds_handle_mode === 'string'
+      ? req.query.epds_handle_mode
+      : undefined
+  const rawMetaMode = metadata.epds_handle_mode
+  const metaMode =
+    typeof rawMetaMode === 'string' &&
+    (VALID_HANDLE_MODES as readonly string[]).includes(rawMetaMode)
+      ? rawMetaMode
+      : undefined
+  return resolveHandleMode(queryMode, metaMode)
+}
 
 /**
  * Express handler factory: creates a GET /preview/consent handler if the
@@ -142,10 +175,13 @@ export function createPreviewConsentHandler(
       'Preview consent',
     )
 
-    const fixture: PreviewAuthorizeFixture = {
+    const handleMode = resolveQueryHandleMode(req, metadata)
+
+    const fixture: PreviewConsentFixture = {
       clientId,
       clientMetadata: metadata,
       isTrusted: deps.trustedClients.includes(clientId),
+      handleMode,
     }
 
     const html = await renderConsentHtml({ fixture, injectedCss })
