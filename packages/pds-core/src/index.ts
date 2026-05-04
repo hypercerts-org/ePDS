@@ -64,6 +64,7 @@ import { createChooserEnrichmentMiddleware } from './chooser-enrichment.js'
 import { createUpstreamFaviconMiddleware } from './upstream-favicon.js'
 import { createAuthUiGuard, parsePromptTokens } from './auth-ui-guard.js'
 import { loadDeviceAccountEmails } from './lib/device-accounts.js'
+import { resolveTrustedCallbackCss } from './lib/callback-branding.js'
 import { handleCallbackError } from './lib/epds-callback-error.js'
 import { installTestHooks } from './lib/test-hooks.js'
 
@@ -177,6 +178,11 @@ async function main() {
     process.env.PDS_SIGNUP_ALLOW_CONSENT_SKIP === 'true' ||
     process.env.PDS_SIGNUP_ALLOW_CONSENT_SKIP === '1'
 
+  const trustedClients = (process.env.PDS_OAUTH_TRUSTED_CLIENTS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+
   pds.app.get('/oauth/epds-callback', async (req, res) => {
     // We use `as any` casts for branded OAuth types (RequestUri, Code, etc.)
     // since these internal types aren't cleanly exported from @atproto/oauth-provider.
@@ -187,6 +193,13 @@ async function main() {
     const _isNewAccount = req.query.new_account === '1'
     const ts = req.query.ts as string
     const sig = req.query.sig as string
+    const clientIdQuery = req.query.client_id
+
+    if (clientIdQuery !== undefined && typeof clientIdQuery !== 'string') {
+      res.status(400).json({ error: 'Invalid client_id parameter' })
+      return
+    }
+    const signedClientId = clientIdQuery
 
     if (!requestUri || !email || !approved) {
       res.status(400).json({ error: 'Missing required parameters' })
@@ -211,6 +224,7 @@ async function main() {
         approved: approvedStr,
         new_account: newAccountStr,
         handle: handleParam,
+        client_id: signedClientId,
       },
       ts,
       sig,
@@ -307,6 +321,13 @@ async function main() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
       const requestData = await (provider.requestManager as any).get(requestUri)
       const { clientId } = requestData
+      if (signedClientId && clientId && signedClientId !== clientId) {
+        logger.error(
+          { signedClientId, requestClientId: clientId },
+          'ePDS callback: signed client_id does not match PAR client_id',
+        )
+        throw new Error('Signed callback client_id does not match PAR client_id')
+      }
       // Stash redirect_uri/state now while the PAR is alive — if a later
       // step throws and the row has since been deleted (e.g. flushed
       // post-success or the test-only delete-par hook), the catch block
@@ -602,6 +623,13 @@ async function main() {
         'ePDS callback: redirecting to stock /oauth/authorize for consent/approval',
       )
     } catch (err) {
+      const trustedClientCss = await resolveTrustedCallbackCss({
+        clientId: signedClientId,
+        trustedClients,
+        resolveClientMetadata,
+        getClientCss,
+        logger,
+      })
       handleCallbackError({
         res,
         err,
@@ -610,6 +638,7 @@ async function main() {
         pdsUrl,
         logger,
         renderError,
+        trustedClientCss,
       })
     }
   })
@@ -766,11 +795,6 @@ async function main() {
   // The npm @atproto/oauth-provider pre-computes CSS at factory init time.
   // We intercept /oauth/authorize responses to inject a <style> tag with
   // client-provided CSS and add the SHA256 hash to the CSP style-src.
-
-  const trustedClients = (process.env.PDS_OAUTH_TRUSTED_CLIENTS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
 
   installCssInjectionMiddleware(pds.app, stack, {
     trustedClients,

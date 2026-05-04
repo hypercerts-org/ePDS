@@ -68,6 +68,16 @@ export function createCompleteRouter(
       return
     }
 
+    const clientId = flow.clientId
+    if (!clientId) {
+      logger.warn({ flowId }, 'auth_flow missing client_id')
+      res
+        .status(400)
+        .type('html')
+        .send(renderError('Authentication session expired. Please try again.'))
+      return
+    }
+
     // Step 3: Get better-auth session to extract verified email
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth session type not exported
     let session: any
@@ -92,7 +102,7 @@ export function createCompleteRouter(
       // Redirect back to auth flow with error — user needs to authenticate
       const authUrl =
         `/oauth/authorize?request_uri=${encodeURIComponent(flow.requestUri)}` +
-        (flow.clientId ? `&client_id=${encodeURIComponent(flow.clientId)}` : '')
+        `&client_id=${encodeURIComponent(clientId)}`
       res.redirect(303, authUrl)
       return
     }
@@ -151,12 +161,14 @@ export function createCompleteRouter(
          *  generateRandomHandle() instead of using a caller-supplied value.
          *
          *  Both signCallback and verifyCallback use the same `params.handle ?? ''`
+         *  sentinel while still signing every present field, including client_id.
          *
          *  If you ever change this contract, update pds-core/src/index.ts
          *  and the sentinel tests in packages/shared/src/__tests__/crypto.test.ts.
          */
         const callbackParams = {
           request_uri: flow.requestUri,
+          client_id: clientId,
           email,
           approved: '1',
           new_account: '1',
@@ -200,6 +212,7 @@ export function createCompleteRouter(
 
     const callbackParams = {
       request_uri: flow.requestUri,
+      client_id: clientId,
       email,
       approved: '1',
       new_account: '0',

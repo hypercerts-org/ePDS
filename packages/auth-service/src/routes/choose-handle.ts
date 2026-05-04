@@ -63,7 +63,7 @@ export function createChooseHandleRouter(
     flow: {
       requestUri: string
       handleMode: HandleMode | null
-      clientId: string | null
+      clientId: string
     }
     email: string
   } | null> {
@@ -83,6 +83,15 @@ export function createChooseHandleRouter(
     if (!flow) {
       logger.warn({ flowId }, 'auth_flow not found or expired on choose-handle')
       res.clearCookie(AUTH_FLOW_COOKIE)
+      res
+        .status(400)
+        .type('html')
+        .send(renderError('Session expired, please start over'))
+      return null
+    }
+
+    if (!flow.clientId) {
+      logger.warn({ flowId }, 'auth_flow missing client_id on choose-handle')
       res
         .status(400)
         .type('html')
@@ -118,7 +127,15 @@ export function createChooseHandleRouter(
       return null
     }
 
-    return { flowId, flow, email: session.user.email.toLowerCase() }
+    return {
+      flowId,
+      flow: {
+        requestUri: flow.requestUri,
+        handleMode: flow.handleMode,
+        clientId: flow.clientId,
+      },
+      email: session.user.email.toLowerCase(),
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -186,10 +203,10 @@ export function createChooseHandleRouter(
     const showRandomButton = result.flow.handleMode === 'picker-with-random'
 
     // Branding injection for trusted clients — clientId is already in the flow row
-    const clientId = result.flow.clientId
-    const branding = clientId
-      ? await resolveClientBranding(clientId, ctx.config.trustedClients)
-      : { customCss: null, customFaviconUrl: null, customFaviconUrlDark: null }
+    const branding = await resolveClientBranding(
+      result.flow.clientId,
+      ctx.config.trustedClients,
+    )
 
     res
       .type('html')
@@ -228,9 +245,10 @@ export function createChooseHandleRouter(
     const showRandomButton = flow.handleMode === 'picker-with-random'
 
     // Branding injection for trusted clients — clientId is already in the flow row
-    const branding = flow.clientId
-      ? await resolveClientBranding(flow.clientId, ctx.config.trustedClients)
-      : { customCss: null, customFaviconUrl: null, customFaviconUrlDark: null }
+    const branding = await resolveClientBranding(
+      flow.clientId,
+      ctx.config.trustedClients,
+    )
 
     // Guard: if PDS account already exists, bounce back to /auth/complete
     // (mirrors the same check in the GET handler — prevents signing a
@@ -358,6 +376,7 @@ export function createChooseHandleRouter(
     // trusted handleDomain, eliminating any possibility of domain mismatch.
     const callbackParams = {
       request_uri: flow.requestUri,
+      client_id: flow.clientId,
       email,
       approved: '1',
       new_account: '1',
