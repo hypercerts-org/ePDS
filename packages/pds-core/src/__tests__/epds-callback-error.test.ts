@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Response } from 'express'
+import type { RenderErrorOptions } from '@certified-app/shared'
 import {
   EXPIRED_PAR_MESSAGE_PATTERN,
   classifyCallbackError,
@@ -155,7 +156,7 @@ function invoke(opts: {
     ;(res as Response & { forceHeadersSent: () => void }).forceHeadersSent()
   }
   const renderError = vi.fn(
-    (m: string, options?: { extraCss?: string }) =>
+    (m: string, options?: RenderErrorOptions) =>
       `<html>${m}<style>${options?.extraCss ?? ''}</style></html>`,
   )
   const logger = { error: vi.fn(), warn: vi.fn() }

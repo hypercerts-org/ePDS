@@ -29,7 +29,7 @@ import { createHash } from 'node:crypto'
 import type { Response } from 'express'
 import type { Logger } from 'pino'
 
-import { ERROR_CSS } from '@certified-app/shared'
+import { ERROR_CSS, type RenderErrorOptions } from '@certified-app/shared'
 
 /** Decoded view of a thrown error for response shaping. */
 export interface CallbackErrorClassification {
@@ -90,7 +90,7 @@ export interface HandleCallbackErrorOpts {
   /** Renders the styled HTML fallback page. Injected so tests can
    * assert on the rendered string without pulling in the real
    * renderer. */
-  renderError: (message: string, options?: { extraCss?: string }) => string
+  renderError: (message: string, options?: RenderErrorOptions) => string
   /** Trusted client CSS appended to fallback HTML after the shared
    * error-page CSS so client-provided styles can override defaults
    * without relaxing CSP for external resources. */
