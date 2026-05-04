@@ -19,11 +19,16 @@ import type { AuthServiceContext } from '../context.js'
 import { createLogger, escapeHtml, maskEmail } from '@certified-app/shared'
 import { buildOtpInputProps } from '../otp-input.js'
 import { resolveClientBranding } from '../lib/client-metadata.js'
-import { renderOptionalStyleTag } from '../lib/page-helpers.js'
+import {
+  renderOptionalStyleTag,
+  renderFaviconTag,
+  POWERED_BY_CSS,
+  POWERED_BY_HTML,
+} from '../lib/page-helpers.js'
+import { renderError } from '../lib/render-error.js'
+import { AUTH_FLOW_COOKIE, AUTH_FLOW_TTL_MS } from '../lib/auth-flow.js'
 
 const logger = createLogger('auth:recovery')
-
-const AUTH_FLOW_COOKIE = 'epds_auth_flow'
 
 export function createRecoveryRouter(
   ctx: AuthServiceContext,
@@ -34,39 +39,59 @@ export function createRecoveryRouter(
   const otpLength = ctx.config.otpLength
   const otpCharset = ctx.config.otpCharset
 
-  /** Look up clientId and requestUri from the epds_auth_flow cookie. */
-  async function getFlowCss(req: Request): Promise<{
+  /** Look up clientId, requestUri, and branding from the epds_auth_flow cookie. */
+  async function getFlowBranding(req: Request): Promise<{
     clientId: string | null
     backUri: string | null
     customCss: string | null
+    customFaviconUrl: string | null
+    customFaviconUrlDark: string | null
   }> {
     const flowId = req.cookies[AUTH_FLOW_COOKIE] as string | undefined
     const flow = flowId ? ctx.db.getAuthFlow(flowId) : undefined
     const clientId = flow?.clientId ?? null
     const backUri = flow?.requestUri ?? null
-    if (!clientId) return { clientId: null, backUri, customCss: null }
-    const { customCss } = await resolveClientBranding(
+    if (!clientId) {
+      return {
+        clientId: null,
+        backUri,
+        customCss: null,
+        customFaviconUrl: null,
+        customFaviconUrlDark: null,
+      }
+    }
+    const { customCss, customFaviconUrl, customFaviconUrlDark } =
+      await resolveClientBranding(clientId, ctx.config.trustedClients)
+    return {
       clientId,
-      ctx.config.trustedClients,
-    )
-    return { clientId, backUri, customCss }
+      backUri,
+      customCss,
+      customFaviconUrl,
+      customFaviconUrlDark,
+    }
   }
 
   router.get('/auth/recover', async (req: Request, res: Response) => {
     const requestUri = req.query.request_uri as string | undefined
 
     if (!requestUri) {
-      res.status(400).send(renderError('Missing request_uri parameter'))
+      res
+        .status(400)
+        .type('html')
+        .send(renderError('Missing request_uri parameter'))
       return
     }
 
-    const { customCss, backUri } = await getFlowCss(req)
+    const { customCss, customFaviconUrl, customFaviconUrlDark, backUri } =
+      await getFlowBranding(req)
 
     res.type('html').send(
       renderRecoveryForm({
         requestUri,
         csrfToken: res.locals.csrfToken,
         customCss,
+        customFaviconUrl,
+        customFaviconUrlDark,
         backUri,
       }),
     )
@@ -76,7 +101,8 @@ export function createRecoveryRouter(
     const email = ((req.body.email as string) || '').trim().toLowerCase()
     const requestUri = req.body.request_uri as string
 
-    const { customCss, backUri } = await getFlowCss(req)
+    const { customCss, customFaviconUrl, customFaviconUrlDark, backUri } =
+      await getFlowBranding(req)
 
     if (!email || !requestUri) {
       res.status(400).send(
@@ -85,6 +111,8 @@ export function createRecoveryRouter(
           csrfToken: res.locals.csrfToken,
           error: 'Email and request URI are required.',
           customCss,
+          customFaviconUrl,
+          customFaviconUrlDark,
           backUri,
         }),
       )
@@ -98,6 +126,8 @@ export function createRecoveryRouter(
           csrfToken: res.locals.csrfToken,
           error: 'Please enter a valid email address.',
           customCss,
+          customFaviconUrl,
+          customFaviconUrlDark,
           backUri,
         }),
       )
@@ -124,13 +154,13 @@ export function createRecoveryRouter(
             // expired rows and we have no peek accessor.
             clientId: null,
             // handleMode omitted — recovery flows don't go through handle assignment
-            expiresAt: Date.now() + 10 * 60 * 1000,
+            expiresAt: Date.now() + AUTH_FLOW_TTL_MS,
           })
           res.cookie(AUTH_FLOW_COOKIE, flowId, {
             httpOnly: true,
             secure: process.env.NODE_ENV !== 'development',
             sameSite: 'lax',
-            maxAge: 10 * 60 * 1000,
+            maxAge: AUTH_FLOW_TTL_MS,
           })
         }
 
@@ -148,6 +178,8 @@ export function createRecoveryRouter(
             otpLength,
             otpCharset,
             customCss,
+            customFaviconUrl,
+            customFaviconUrlDark,
             backUri,
           }),
         )
@@ -162,6 +194,8 @@ export function createRecoveryRouter(
             otpLength,
             otpCharset,
             customCss,
+            customFaviconUrl,
+            customFaviconUrlDark,
             backUri,
           }),
         )
@@ -176,6 +210,8 @@ export function createRecoveryRouter(
           otpLength,
           otpCharset,
           customCss,
+          customFaviconUrl,
+          customFaviconUrlDark,
           backUri,
         }),
       )
@@ -189,7 +225,7 @@ export function createRecoveryRouter(
     const requestUri = req.body.request_uri as string
 
     if (!code || !email || !requestUri) {
-      res.status(400).send('<p>Missing required fields.</p>')
+      res.status(400).type('html').send(renderError('Missing required fields.'))
       return
     }
 
@@ -225,7 +261,8 @@ export function createRecoveryRouter(
         (err.message.includes('invalid') || err.message.includes('expired'))
           ? 'Invalid or expired code. Please try again.'
           : 'Verification failed. Please try again.'
-      const { customCss, backUri } = await getFlowCss(req)
+      const { customCss, customFaviconUrl, customFaviconUrlDark, backUri } =
+        await getFlowBranding(req)
       res.send(
         renderRecoveryOtpForm({
           email,
@@ -235,6 +272,8 @@ export function createRecoveryRouter(
           otpLength,
           otpCharset,
           customCss,
+          customFaviconUrl,
+          customFaviconUrlDark,
           backUri,
         }),
       )
@@ -249,6 +288,8 @@ export function renderRecoveryForm(opts: {
   csrfToken: string
   error?: string
   customCss?: string | null
+  customFaviconUrl?: string | null
+  customFaviconUrlDark?: string | null
   backUri?: string | null
 }): string {
   const requestUriForBack = opts.backUri ?? opts.requestUri
@@ -260,25 +301,29 @@ export function renderRecoveryForm(opts: {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  ${renderFaviconTag(opts.customFaviconUrl, opts.customFaviconUrlDark)}
   <title>Account Recovery</title>
   <style>${CSS}</style>${renderOptionalStyleTag(opts.customCss)}
 </head>
 <body>
-  <div class="container">
-    <h1>Account Recovery</h1>
-    <p class="subtitle">Enter the backup email address associated with your account.</p>
-    ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
-    <form method="POST" action="/auth/recover">
-      <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
-      <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
-      <div class="field">
-        <label for="email">Backup email address</label>
-        <input type="email" id="email" name="email" required autofocus
-               placeholder="backup@example.com">
-      </div>
-      <button type="submit" class="btn-primary">Send recovery code</button>
-    </form>
-    <a href="${backHref}" class="btn-secondary">Back to sign in</a>
+  <div class="page-wrap">
+    <div class="container">
+      <h1>Account Recovery</h1>
+      <p class="subtitle">Enter the backup email address associated with your account.</p>
+      ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
+      <form method="POST" action="/auth/recover">
+        <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
+        <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
+        <div class="field">
+          <label for="email">Backup email address</label>
+          <input type="email" id="email" name="email" required autofocus
+                 placeholder="backup@example.com">
+        </div>
+        <button type="submit" class="btn-primary">Send recovery code</button>
+      </form>
+      <a href="${backHref}" class="btn-secondary">Back to sign in</a>
+    </div>
+    ${POWERED_BY_HTML}
   </div>
 </body>
 </html>`
@@ -292,6 +337,8 @@ export function renderRecoveryOtpForm(opts: {
   otpCharset: 'numeric' | 'alphanumeric'
   error?: string
   customCss?: string | null
+  customFaviconUrl?: string | null
+  customFaviconUrlDark?: string | null
   backUri?: string | null
 }): string {
   const maskedEmail = maskEmail(opts.email)
@@ -306,58 +353,56 @@ export function renderRecoveryOtpForm(opts: {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  ${renderFaviconTag(opts.customFaviconUrl, opts.customFaviconUrlDark)}
   <title>Enter recovery code</title>
   <style>${CSS}</style>${renderOptionalStyleTag(opts.customCss)}
 </head>
 <body>
-  <div class="container">
-    <h1>Enter recovery code</h1>
-    <p id="code-help" class="subtitle">If a backup email matches, we sent a ${opts.otpLength}-${opts.otpCharset === 'alphanumeric' ? 'character' : 'digit'} code to <strong>${escapeHtml(maskedEmail)}</strong></p>
-    ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
-    <form method="POST" action="/auth/recover/verify">
-      <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
-      <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
-      <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
-      <div class="field">
-        <input type="text" id="code" name="code" required autofocus
-               aria-label="One-time code"
-               aria-describedby="code-help"
-               maxlength="${opts.otpLength}"
-               pattern="${inputProps.pattern}"
-               inputmode="${inputProps.inputmode}"
-               autocomplete="one-time-code"
-               autocapitalize="${inputProps.autocapitalize}"
-               placeholder="${inputProps.placeholder}"
-               class="otp-input"
-                oninput="this.value=this.value.replace(/[\\s-]/g,'')"
-               style="letter-spacing: ${Math.max(2, Math.round(32 / opts.otpLength))}px">
-      </div>
-      <button type="submit" class="btn-primary">Verify</button>
-    </form>
-    <form method="POST" action="/auth/recover" style="margin-top: 12px;">
-      <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
-      <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
-      <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
-      <button type="submit" class="btn-secondary">Resend code</button>
-    </form>
-    <a href="${backHref}" class="btn-secondary">Back to sign in</a>
+  <div class="page-wrap">
+    <div class="container">
+      <h1>Enter recovery code</h1>
+      <p id="code-help" class="subtitle">If a backup email matches, we sent a ${opts.otpLength}-${opts.otpCharset === 'alphanumeric' ? 'character' : 'digit'} code to <strong>${escapeHtml(maskedEmail)}</strong></p>
+      ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
+      <form method="POST" action="/auth/recover/verify">
+        <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
+        <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
+        <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
+        <div class="field">
+          <input type="text" id="code" name="code" required autofocus
+                 aria-label="One-time code"
+                 aria-describedby="code-help"
+                 maxlength="${opts.otpLength}"
+                 pattern="${inputProps.pattern}"
+                 inputmode="${inputProps.inputmode}"
+                 autocomplete="one-time-code"
+                 autocapitalize="${inputProps.autocapitalize}"
+                 placeholder="${inputProps.placeholder}"
+                 class="otp-input"
+                  oninput="this.value=this.value.replace(/[\\s-]/g,'')"
+                 style="letter-spacing: ${Math.max(2, Math.round(32 / opts.otpLength))}px">
+        </div>
+        <button type="submit" class="btn-primary">Verify</button>
+      </form>
+      <form method="POST" action="/auth/recover" style="margin-top: 12px;">
+        <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
+        <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
+        <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
+        <button type="submit" class="btn-secondary">Resend code</button>
+      </form>
+      <a href="${backHref}" class="btn-secondary">Back to sign in</a>
+    </div>
+    ${POWERED_BY_HTML}
   </div>
 </body>
 </html>`
 }
 
-function renderError(message: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Error</title><style>${CSS}</style></head>
-<body><div class="container"><h1>Error</h1><p class="error">${escapeHtml(message)}</p></div></body>
-</html>`
-}
-
 const CSS = `
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-  .container { background: white; border-radius: 12px; padding: 40px; max-width: 420px; width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: center; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .page-wrap { display: flex; flex-direction: column; align-items: stretch; max-width: 420px; width: 100%; }
+  ${POWERED_BY_CSS}
+  .container { background: white; border-radius: 12px; padding: 40px; width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: center; }
   h1 { font-size: 24px; margin-bottom: 8px; color: #111; }
   .subtitle { color: #666; margin-bottom: 20px; font-size: 15px; line-height: 1.5; }
   .field { margin-bottom: 20px; text-align: left; }

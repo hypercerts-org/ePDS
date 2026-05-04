@@ -9,6 +9,8 @@ import {
   resolveClientMetadata,
   resolveClientName,
   getClientCss,
+  getClientFaviconUrl,
+  getClientFaviconUrlDark,
   createLogger,
 } from '@certified-app/shared'
 import type { ClientMetadata } from '@certified-app/shared'
@@ -18,6 +20,8 @@ export {
   resolveClientName,
   escapeCss,
   getClientCss,
+  getClientFaviconUrl,
+  getClientFaviconUrlDark,
   clearClientMetadataCache,
 } from '@certified-app/shared'
 export type { ClientMetadata, ClientBranding } from '@certified-app/shared'
@@ -42,22 +46,51 @@ export async function resolveClientBranding(
   clientMeta: ClientMetadata
   clientName: string
   customCss: string | null
+  customFaviconUrl: string | null
+  customFaviconUrlDark: string | null
 }> {
   try {
     const clientMeta = await resolveClientMetadata(clientId)
     const clientName =
       clientMeta.client_name || (await resolveClientName(clientId))
     const customCss = getClientCss(clientId, clientMeta, trustedClients)
-    logger.debug(
-      { clientId, trusted: customCss !== null },
-      'client CSS trust check',
+    const customFaviconUrl = getClientFaviconUrl(
+      clientId,
+      clientMeta,
+      trustedClients,
     )
-    return { clientMeta, clientName, customCss }
+    const customFaviconUrlDark = getClientFaviconUrlDark(
+      clientId,
+      clientMeta,
+      trustedClients,
+    )
+    logger.debug(
+      {
+        clientId,
+        cssTrusted: customCss !== null,
+        faviconTrusted: customFaviconUrl !== null,
+        faviconDarkTrusted: customFaviconUrlDark !== null,
+      },
+      'client branding trust check',
+    )
+    return {
+      clientMeta,
+      clientName,
+      customCss,
+      customFaviconUrl,
+      customFaviconUrlDark,
+    }
   } catch (err) {
     logger.warn(
       { err, clientId },
       'Failed to resolve client branding, using defaults',
     )
-    return { clientMeta: {}, clientName: 'the application', customCss: null }
+    return {
+      clientMeta: {},
+      clientName: 'the application',
+      customCss: null,
+      customFaviconUrl: null,
+      customFaviconUrlDark: null,
+    }
   }
 }

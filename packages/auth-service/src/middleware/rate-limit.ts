@@ -17,12 +17,22 @@ setInterval(
  * In-memory request rate limiter (per IP).
  * Suitable for single-instance deployments. For multi-instance,
  * use a Redis-backed rate limiter (e.g. express-rate-limit + rate-limit-redis).
+ *
+ * Honours `EPDS_DISABLE_RATE_LIMIT=true` as a no-op opt-out for
+ * docker-compose / e2e stacks where a single source IP fires hundreds of
+ * requests per scenario. Production deployments leave the env var unset
+ * and the limiter applies normally.
  */
 export function requestRateLimit(opts: {
   windowMs: number
   maxRequests: number
 }) {
+  const disabled = process.env.EPDS_DISABLE_RATE_LIMIT === 'true'
   return (req: Request, res: Response, next: NextFunction): void => {
+    if (disabled) {
+      next()
+      return
+    }
     const ip = req.ip || req.socket.remoteAddress || 'unknown'
     const now = Date.now()
 

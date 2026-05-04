@@ -125,7 +125,7 @@ The core e2e test exercises the full OAuth login:
 3. Click "Sign in with Certified"
 4. Browser is redirected through PDS (PAR) to auth service
 5. Auth service shows OTP form (with email pre-filled via login_hint)
-6. Extract OTP from MailHog API (`http://localhost:8025/api/v2/messages`)
+6. Extract OTP from Mailpit API (`http://localhost:8025/api/v1/search`)
 7. Enter OTP in the auth form
 8. Browser redirected back through PDS (epds-callback) to demo (callback)
 9. Assert: welcome page shows handle and DID
@@ -154,19 +154,19 @@ starts services and runs Playwright. Individual test files don't manage lifecycl
    the ATProto loopback format
 3. **Add Playwright to monorepo** — `@playwright/test` dev dep, config file,
    `e2e/` directory
-4. **Add `pnpm test:e2e` script** — starts PDS + auth + demo + MailHog in dev
+4. **Add `pnpm test:e2e` script** — starts PDS + auth + demo + Mailpit in dev
    mode, waits for health, runs Playwright, reports results
 5. **Write the login e2e test** — full Flow 1 (email login with OTP from
-   MailHog)
+   Mailpit)
 6. **Add Flow 2 e2e test** — button-only login (no email form on demo side)
 
 ## Open questions
 
 - **Docker vs bare-metal for e2e?** Docker adds build time but is
-  self-contained. Bare-metal (via `pnpm dev` + MailHog container) is faster
+  self-contained. Bare-metal (via `pnpm dev` + Mailpit container) is faster
   for iteration. The `pnpm test:e2e` script could support both modes.
 - **CI integration** — GitHub Actions with Docker Compose, or bare-metal
-  with MailHog service container? Defer until the local flow works.
+  with Mailpit service container? Defer until the local flow works.
 - **Test accounts** — the ePDS auto-provisions accounts on first login. No
   pre-seeding needed, but the test email domain must match what the PDS
   accepts.

@@ -217,6 +217,63 @@ Service-to-image mapping (use this to decide what to rebuild):
 Container names: `epds-core` (PDS, port 3000), `epds-auth` (auth service, port 3001),
 and `epds-demo` (demo frontend, port 3002).
 
+## Railway
+
+ePDS deploys to Railway. When checking the live config, follow these rules
+to avoid wasting time on `--help` / wrong commands and to avoid leaking
+secrets into your context.
+
+### Discovery commands
+
+```bash
+railway status --json          # current project, service IDs, linked env
+railway environment list       # all environments in the project
+```
+
+### Use -s and -e, not `railway link`
+
+For any command that targets a specific service or environment, pass
+`-s <SERVICE>` and `-e <ENVIRONMENT>` directly. Do **not** run
+`railway environment link …` or `railway service link …` to "switch
+context" first — those mutate local CLI state and are only needed when
+`-s` / `-e` genuinely don't work for a given subcommand.
+
+```bash
+railway variable list -s demo-untrusted -e pr-base --kv | cut -d= -f1
+railway logs -s pds-core -e pr-base --deployment
+```
+
+### NEVER extract sensitive variable values
+
+This is non-negotiable. Variable values on Railway include API keys,
+JWT secrets, database passwords, signing keys, and similar credentials.
+Anything pulled into your context is effectively logged.
+
+- **Allowed:** listing variable _names_ to check for presence /
+  absence (e.g. "is `EPDS_CLIENT_PRIVATE_JWK` set on this service?").
+- **Disallowed without explicit user permission:** the actual value of
+  any variable that is not obviously non-sensitive (a hostname, a
+  public URL, a log level, a feature flag boolean). When in doubt,
+  treat it as sensitive.
+- This applies to every command that can return values, including
+  `railway variable list` (without filtering), `railway environment
+config --json` (dumps all variables across all services with values),
+  and `railway run …` (injects them into a subprocess).
+
+To check presence without seeing values, list names only:
+
+```bash
+# Names only — pipe through cut to drop values
+railway variable list -s demo-untrusted -e pr-base --kv | cut -d= -f1 | sort
+
+# Or via the JSON API, extracting keys only
+railway variable list -s demo-untrusted -e pr-base --json \
+  | python3 -c 'import json,sys; print("\n".join(sorted(json.load(sys.stdin))))'
+```
+
+If a value genuinely needs inspection (e.g. debugging a misconfigured
+URL), ask the user first.
+
 ## Code Style
 
 ### TypeScript

@@ -9,6 +9,7 @@ export {
   generateVerificationToken,
   hashToken,
   timingSafeEqual,
+  verifyInternalSecret,
   generateCsrfToken,
   generateRandomHandle,
   signCallback,
@@ -34,6 +35,7 @@ export {
   LOCAL_PART_MIN,
   LOCAL_PART_MAX,
   VALID_HANDLE_MODES,
+  resolveHandleMode,
 } from './handle.js'
 export type { HandleMode } from './handle.js'
 export {
@@ -42,6 +44,8 @@ export {
   escapeCss,
   MAX_CSS_BYTES,
   getClientCss,
+  getClientFaviconUrl,
+  getClientFaviconUrlDark,
   clearClientMetadataCache,
   getClientMetadataCacheStatus,
   _seedClientMetadataCacheForTest,
@@ -67,6 +71,11 @@ export type {
   PreviewCheck,
   PreviewValidationResult,
 } from './preview-validation.js'
+export { parsePromptTokens, promptHasLogin } from './oidc-prompt.js'
 export { getEpdsVersion } from './version.js'
 export { makeSafeFetch } from './safe-fetch.js'
 export type { SafeFetchOptions } from './safe-fetch.js'
+export { postHook } from './test-utils/post-hook.js'
+export type { PostHookResult } from './test-utils/post-hook.js'
+export { ERROR_CSS, renderError } from './render-error.js'
+export type { RenderErrorOptions } from './render-error.js'

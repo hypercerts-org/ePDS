@@ -2,6 +2,7 @@
 
 import { useSearchParams } from 'next/navigation'
 import { useState } from 'react'
+import { ForceLoginCheckbox } from './ForceLoginCheckbox'
 
 const ERROR_MESSAGES: Record<string, string> = {
   auth_failed: 'Authentication failed. Please try again.',
@@ -9,6 +10,7 @@ const ERROR_MESSAGES: Record<string, string> = {
     'Could not start login — the PDS rejected the request. Check server logs.',
   invalid_email: 'Please enter a valid email address.',
   invalid_handle: 'Please enter a valid handle (e.g. you.bsky.social).',
+  invalid_login_hint: 'Invalid login hint format.',
   token_failed: 'Login could not be completed — token exchange failed.',
   state_mismatch:
     'Login session expired or was tampered with. Please try again.',
@@ -118,6 +120,7 @@ export function LoginForm() {
             />
           )}
         </div>
+        <ForceLoginCheckbox disabled={submitting} />
         <button
           type="submit"
           disabled={submitting}
@@ -142,7 +145,12 @@ export function LoginForm() {
         >
           {mode === 'email' ? (
             submitting ? (
-              'Sending verification code...'
+              // Neutral copy rather than "Sending verification code..." —
+              // the demo redirects to auth-service which decides whether
+              // to send an OTP or auto-sign-in via an existing device
+              // session (HYPER-268). Claiming we're sending a code is
+              // inaccurate in the reuse path.
+              'Redirecting...'
             ) : (
               <>
                 <img

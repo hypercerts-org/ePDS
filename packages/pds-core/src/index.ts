@@ -23,7 +23,8 @@ import { applyPdsPortFallback } from './lib/resolve-port.js'
 applyPdsPortFallback()
 
 import type * as http from 'node:http'
-import { randomBytes, timingSafeEqual, createHash } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
+import * as path from 'node:path'
 import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
 import { readFileSync } from 'node:fs'
 /* v8 ignore next 3 -- module-level init, only testable via e2e */
@@ -35,21 +36,36 @@ import {
   generateRandomHandle,
   createLogger,
   verifyCallback,
-  escapeHtml,
+  verifyInternalSecret,
   validateLocalPart,
   resolveClientMetadata,
   getClientCss,
   getClientMetadataCacheStatus,
   getEpdsVersion,
+  renderError,
   validateClientMetadataForPreview,
 } from '@certified-app/shared'
 import { shouldRewriteSecFetchSite } from './lib/sec-fetch-site-rewrite.js'
-import { installCssInjectionMiddleware } from './lib/client-css-injection.js'
-import type { Application, Request, Response } from 'express'
+import {
+  findInsertionIndex,
+  installCssInjectionMiddleware,
+} from './lib/client-css-injection.js'
+import express, { type Application, type Request, type Response } from 'express'
 import {
   createPreviewConsentHandler,
   renderPreviewIndex,
 } from './lib/preview-consent.js'
+import { createPreviewChooserHandler } from './lib/preview-chooser.js'
+import {
+  createCookieDomainMiddleware,
+  deriveCookieDomain,
+} from './cookie-domain.js'
+import { createChooserEnrichmentMiddleware } from './chooser-enrichment.js'
+import { createUpstreamFaviconMiddleware } from './upstream-favicon.js'
+import { createAuthUiGuard, parsePromptTokens } from './auth-ui-guard.js'
+import { loadDeviceAccountEmails } from './lib/device-accounts.js'
+import { handleCallbackError } from './lib/epds-callback-error.js'
+import { installTestHooks } from './lib/test-hooks.js'
 
 const logger = createLogger('pds-core')
 
@@ -64,6 +80,9 @@ function installPreviewRoutes(
   opts: {
     previewConsentHandler: NonNullable<
       ReturnType<typeof createPreviewConsentHandler>
+    >
+    previewChooserHandler: NonNullable<
+      ReturnType<typeof createPreviewChooserHandler>
     >
     authHostname: string
     pdsPublicUrl: string
@@ -86,6 +105,7 @@ function installPreviewRoutes(
     )
   })
   app.get('/preview/consent', opts.previewConsentHandler)
+  app.get('/preview/chooser', opts.previewChooserHandler)
   app.get('/preview/cache-status', (_req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'no-store')
     res.json({ now: Date.now(), entries: getClientMetadataCacheStatus() })
@@ -105,7 +125,7 @@ function installPreviewRoutes(
     res.json(result)
   })
   logger.info(
-    'Preview routes installed (PDS_PREVIEW_ROUTES=1): /preview, /preview/consent, /preview/cache-status, /preview/validate',
+    'Preview routes installed (PDS_PREVIEW_ROUTES=1): /preview, /preview/consent, /preview/chooser, /preview/cache-status, /preview/validate',
   )
 }
 
@@ -118,6 +138,16 @@ async function main() {
   const authHostname = process.env.AUTH_HOSTNAME || 'auth.localhost'
   const handleDomain = process.env.PDS_HOSTNAME || 'localhost'
   const pdsUrl = cfg.service.publicUrl || `https://${handleDomain}`
+
+  // The shared parent domain for cross-subdomain device-session cookies, or
+  // null when auth-service and pds-core are on unrelated hostnames (e.g.
+  // Railway preview envs, where both services live under up.railway.app
+  // and cookies stay host-only). Computed once and reused for both the
+  // cookie-domain broadening middleware and the host-only-twin clear in
+  // /oauth/epds-callback. When null, the broadening is a no-op so device
+  // cookies are themselves host-only — emitting host-only clears in that
+  // case would evict the freshly-minted session cookies.
+  const cookieDomain = deriveCookieDomain(authHostname, handleDomain)
 
   const pds = await PDS.create(cfg, secrets)
   const ctx = pds.ctx
@@ -225,6 +255,18 @@ async function main() {
       return
     }
 
+    // Captured from Step 2's requestManager.get() — used by the catch
+    // block to redirect any later failure back to the client per RFC
+    // 6749 §4.1.2.1, even when the PAR row has since been deleted (in
+    // particular: RequestManager.get() deletes any expired row in the
+    // same call that throws AccessDeniedError, so by the time the
+    // catch block runs there's nothing left to re-read). Empty when
+    // Step 2 itself threw — i.e. the PAR was already dead on entry,
+    // the case the @par-callback-error scenario covers — and the
+    // catch falls through to a styled HTML page in that branch.
+    let capturedRedirectUri: string | undefined
+    let capturedState: string | undefined
+
     try {
       // Step 1: Load or create device session
       const deviceInfo = await provider.deviceManager.load(
@@ -233,6 +275,31 @@ async function main() {
       )
       const { deviceId, deviceMetadata } = deviceInfo
 
+      // Step 1b (issue #116): when this deployment broadens device-session
+      // cookies to a shared parent domain, evict any host-only twin that
+      // a pre-PR-#103 session may have left in the browser jar. Browsers
+      // store host-only and Domain-scoped cookies of the same name as
+      // distinct entries; when both are present, the cookie parser picks
+      // the host-only one first per RFC 6265 §5.4 ordering, shadowing the
+      // fresh Domain-scoped pair we just emitted in Step 1. The explicit
+      // host-only Max-Age=0 clear here forces the browser to evict the
+      // stale twin before the very next request, so the welcome-page
+      // guard at /oauth/authorize sees only the fresh pair. Idempotent —
+      // emitting clears for cookies that don't exist is a no-op.
+      // The cookie-domain middleware passes Max-Age=0 lines through
+      // unchanged (also added in #116) so these clears reach the browser
+      // without a Domain= attribute and match the host-only scope.
+      // Skipped on deployments where the cookie-domain broadening is a
+      // no-op (auth-service and pds-core on unrelated hostnames, e.g.
+      // Railway preview envs under up.railway.app) — there the device
+      // cookies set in Step 1 are themselves host-only, so emitting a
+      // host-only clear would evict them.
+      if (cookieDomain) {
+        for (const name of ['dev-id', 'dev-id:hash', 'ses-id', 'ses-id:hash']) {
+          res.append('Set-Cookie', `${name}=; Max-Age=0; Path=/`)
+        }
+      }
+
       // Step 2: Refresh the PAR request expiry timer.
       // Call get() WITHOUT deviceId so it doesn't bind one — the stock
       // oauthMiddleware will bind the browser's deviceId when we redirect
@@ -240,6 +307,12 @@ async function main() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
       const requestData = await (provider.requestManager as any).get(requestUri)
       const { clientId } = requestData
+      // Stash redirect_uri/state now while the PAR is alive — if a later
+      // step throws and the row has since been deleted (e.g. flushed
+      // post-success or the test-only delete-par hook), the catch block
+      // can still mount an RFC 6749 redirect to the client.
+      capturedRedirectUri = requestData?.parameters?.redirect_uri
+      capturedState = requestData?.parameters?.state
 
       // Step 3: Resolve or create the account.
       // Use the PDS accountManager directly — account.sqlite is the single source of truth.
@@ -460,13 +533,25 @@ async function main() {
         }
       }
 
-      // Step 6: Set login_hint in the stored PAR parameters so the stock
-      // authorize UI auto-selects this account's session and skips account
-      // selection (going straight to consent or auto-approve).
-      // The oauth-provider UI checks `selected` which is true when
-      // login_hint matches the account AND prompt !== 'select_account'.
-      // prompt is already 'consent' (forced by the provider for
-      // unauthenticated clients).
+      // Step 6: Mutate the stored PAR parameters before redirecting to the
+      // stock /oauth/authorize endpoint:
+      //
+      //   - Set `login_hint` to the freshly-authenticated DID so the stock
+      //     authorize UI auto-selects this account's session and skips
+      //     account selection. The oauth-provider UI checks `selected`,
+      //     which is true when login_hint matches the account AND
+      //     prompt !== 'select_account'. (prompt is already 'consent',
+      //     forced by the provider for unauthenticated clients.)
+      //
+      //   - Strip the `login` token from `prompt` if present. The
+      //     auth-ui-guard at /oauth/authorize bounces requests whose
+      //     stored PAR carries prompt=login, so leaving it set after a
+      //     successful OTP cycle would loop forever: authenticate →
+      //     bounce → authenticate → bounce. By the time this hop fires,
+      //     the user IS freshly authenticated; the forced-login
+      //     contract is satisfied. Other prompt tokens ('consent',
+      //     'select_account', etc.) stay untouched — only 'login' is
+      //     loop-forming.
       if (did) {
         const REQUEST_URI_PREFIX = 'urn:ietf:params:oauth:request_uri:'
         const requestId = decodeURIComponent(
@@ -476,9 +561,26 @@ async function main() {
         const store = (provider.requestManager as any).store
         const storedRequest = await store.readRequest(requestId)
         if (storedRequest?.parameters) {
-          await store.updateRequest(requestId, {
-            parameters: { ...storedRequest.parameters, login_hint: did },
-          })
+          const nextParams: Record<string, unknown> = {
+            ...storedRequest.parameters,
+            login_hint: did,
+          }
+          // Strip the 'login' token from the prompt parameter, leaving any
+          // other tokens (e.g. 'consent') intact. Per OIDC Core §3.1.2.1
+          // prompt is space-delimited; a third-party client could send
+          // 'login consent', and an exact-string strip would miss 'login'
+          // in that case and re-trigger the guard's bounce after every
+          // OTP cycle.
+          if (typeof nextParams.prompt === 'string') {
+            const remaining = parsePromptTokens(nextParams.prompt)
+            remaining.delete('login')
+            if (remaining.size === 0) {
+              delete nextParams.prompt
+            } else {
+              nextParams.prompt = [...remaining].join(' ')
+            }
+          }
+          await store.updateRequest(requestId, { parameters: nextParams })
         }
       }
 
@@ -500,36 +602,15 @@ async function main() {
         'ePDS callback: redirecting to stock /oauth/authorize for consent/approval',
       )
     } catch (err) {
-      logger.error({ err }, 'ePDS callback error')
-
-      // Try to redirect error back to client
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
-        const requestData = await (provider.requestManager as any).get(
-          requestUri,
-        )
-        const redirectUri = requestData?.parameters?.redirect_uri
-        if (redirectUri) {
-          const errorUrl = new URL(redirectUri)
-          errorUrl.searchParams.set('error', 'server_error')
-          errorUrl.searchParams.set(
-            'error_description',
-            'Authentication failed',
-          )
-          errorUrl.searchParams.set('iss', pdsUrl)
-          if (requestData.parameters.state) {
-            errorUrl.searchParams.set('state', requestData.parameters.state)
-          }
-          res.redirect(303, errorUrl.toString())
-          return
-        }
-      } catch {
-        // Fall through
-      }
-
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Authentication failed' })
-      }
+      handleCallbackError({
+        res,
+        err,
+        capturedRedirectUri,
+        capturedState,
+        pdsUrl,
+        logger,
+        renderError,
+      })
     }
   })
 
@@ -620,6 +701,65 @@ async function main() {
   }
 
   // =========================================================================
+  // Auth-UI guard: never let upstream render the welcome page or sign-in-view
+  // =========================================================================
+  //
+  // The stock @atproto/oauth-provider has two authentication UIs that ePDS
+  // must never surface:
+  //
+  //   1. Welcome page (Authenticate / Create new account / Sign in / Cancel) —
+  //      rendered when upstream ends up with a device that has zero bound
+  //      accounts (partial cookie pairs, stale pairs, fixation-race device
+  //      deletions, or the migration-005 1h TTL purge of remember=0 bindings).
+  //
+  //   2. Sign-in-view (handle + password form) — rendered when bindings exist
+  //      but every binding upstream considers has loginRequired: true (forced
+  //      `prompt=login`, all bindings older than authenticationMaxAge, or
+  //      login_hint pre-selecting an individually stale binding).
+  //
+  // ePDS users should always land on the email/OTP form or the enriched
+  // account picker. See docs/design/session-reuse-bugs.md.
+  //
+  // The guard intercepts /oauth/authorize and /account* before upstream's
+  // own middleware and bounces to auth-service with stale cookies cleared
+  // whenever upstream would render either UI. All other requests pass
+  // through unchanged.
+
+  const authUiGuardMiddleware = createAuthUiGuard({
+    authHostname,
+    provider: provider ?? null,
+    cookieDomain,
+    logger,
+  })
+  pds.app.use(authUiGuardMiddleware)
+  // Fail closed: the guard has to run BEFORE upstream's OAuth / account
+  // middleware, otherwise it can never intercept the stock UIs. If the
+  // Express `_router.stack` we rely on isn't exposed (Express 5, future
+  // pds-core swap), refuse to start rather than silently run the service
+  // with the guard defeated — the whole security value of this guard
+  // depends on the splice succeeding.
+  if (!stack) {
+    throw new Error(
+      'Auth-UI guard install failed: Express _router.stack is unavailable — refusing to start pds-core with an inert guard',
+    )
+  }
+  const guardLayer = stack.pop()
+  if (!guardLayer) {
+    throw new Error(
+      'Auth-UI guard install failed: middleware layer missing from stack after pop',
+    )
+  }
+  let guardIdx = 0
+  for (let i = 0; i < stack.length; i++) {
+    if (stack[i].name === 'expressInit') {
+      guardIdx = i + 1
+      break
+    }
+  }
+  stack.splice(guardIdx, 0, guardLayer)
+  logger.info('Auth-UI guard installed')
+
+  // =========================================================================
   // CSS injection for trusted OAuth clients
   // =========================================================================
   //
@@ -648,16 +788,28 @@ async function main() {
     logger,
   })
 
+  // auth-service origin baked into the injected enrichment script's
+  // "Another account" rebind, and into the chooser preview's
+  // <meta name="epds-auth-origin"> so the preview exercises the same
+  // rebind path. Hoisted above preview wiring so it's available to
+  // createPreviewChooserHandler. https for real hosts, http for
+  // localhost-flavoured dev.
+  const authOriginScheme =
+    authHostname === 'localhost' || authHostname.endsWith('.localhost')
+      ? 'http'
+      : 'https'
+  const authOrigin = `${authOriginScheme}://${authHostname}`
+
   // =========================================================================
   // Preview routes for iterating on branding.css
   // =========================================================================
   //
-  // Gated by PDS_PREVIEW_ROUTES=1. Renders the OAuth consent page with
-  // fixture hydration data so client-app developers can iterate on their
-  // branding.css without walking through the full OAuth flow. The CSS
-  // injection middleware above intercepts /preview/consent responses
-  // exactly like /oauth/authorize — the trusted-clients gate still
-  // applies. See docs/tutorial.md for the full reference.
+  // Gated by PDS_PREVIEW_ROUTES=1. Renders the OAuth consent + chooser
+  // pages with fixture hydration data so client-app developers can
+  // iterate on their branding.css without walking through the full
+  // OAuth flow. The CSS injection middleware above intercepts /preview/*
+  // responses exactly like /oauth/authorize — the trusted-clients gate
+  // still applies. See docs/tutorial.md for the full reference.
 
   const previewConsentHandler = createPreviewConsentHandler({
     trustedClients,
@@ -665,9 +817,17 @@ async function main() {
     getClientCss,
     logger,
   })
-  if (previewConsentHandler) {
+  const previewChooserHandler = createPreviewChooserHandler({
+    trustedClients,
+    resolveClientMetadata,
+    getClientCss,
+    authOrigin,
+    logger,
+  })
+  if (previewConsentHandler && previewChooserHandler) {
     installPreviewRoutes(pds.app, {
       previewConsentHandler,
+      previewChooserHandler,
       authHostname,
       pdsPublicUrl: pdsUrl,
       trustedClients,
@@ -675,22 +835,129 @@ async function main() {
   }
 
   // =========================================================================
+  // Account chooser enrichment (HYPER-268)
+  // =========================================================================
+  //
+  // The upstream @atproto/oauth-provider account chooser (/account) is a
+  // compiled React SPA that renders each bound account as a clickable
+  // row — showing only the handle (preferred_username), not the email.
+  // For ePDS deployments where handles may be randomly generated and
+  // hard for users to recognise, this is a real UX problem. We need
+  // email alongside handle so users can identify themselves.
+  //
+  // Strategy — reusing the PR #9 response-rewrite pattern:
+  //   1. Intercept HTML responses from the upstream /account routes.
+  //   2. Inject a <script> in the <head> (before the hydration script
+  //      fires) that (a) captures the upstream deviceSessions payload
+  //      via an accessor on window.__deviceSessions, (b) watches the
+  //      DOM after hydration, and (c) appends each account's email as
+  //      a small label next to its handle. See cross-client-session-reuse.md
+  //      for the design doc.
+  //
+  // Unlike PR #9's CSS injection, we're inserting JS — which requires
+  // adding a script hash to the CSP script-src directive rather than
+  // style-src.
+
+  // authOrigin is computed above (preview wiring also needs it).
+
+  const chooserEnrichmentMiddleware = createChooserEnrichmentMiddleware({
+    resolveClientMetadata,
+    authOrigin,
+  })
+
+  pds.app.use(chooserEnrichmentMiddleware)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- accessing Express internal _router stack
+  const chooserStack = (pds.app as any)._router?.stack
+  if (chooserStack) {
+    const chooserLayer = chooserStack.pop()
+    // Must run AFTER compression so our res.end wrapper sees the raw
+    // uncompressed HTML and can find the `</head>` marker — same
+    // constraint as the CSS-injection middleware above. Earlier
+    // iterations spliced this immediately after expressInit, which
+    // left compression's wrapped end() on top of ours so we only ever
+    // saw gzipped bytes and the <script> never got injected.
+    const insertIdx = findInsertionIndex(chooserStack)
+    chooserStack.splice(insertIdx, 0, chooserLayer)
+    logger.info(
+      { insertIdx },
+      'Account chooser enrichment middleware installed (HYPER-268)',
+    )
+  }
+
+  // Favicon injection for upstream `@atproto/oauth-provider`-rendered
+  // pages (`/account*`, `/oauth/*`). Same post-compression placement as
+  // chooser-enrichment so our wrapped end() sees the raw uncompressed
+  // HTML and can find `<head>`.
+  pds.app.use(createUpstreamFaviconMiddleware())
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- accessing Express internal _router stack
+  const faviconStack = (pds.app as any)._router?.stack
+  if (faviconStack) {
+    const faviconLayer = faviconStack.pop()
+    const insertIdx = findInsertionIndex(faviconStack)
+    faviconStack.splice(insertIdx, 0, faviconLayer)
+    logger.info({ insertIdx }, 'Upstream favicon middleware installed')
+  }
+
+  // Serve /static/favicon*.svg from packages/pds-core/public so the
+  // pds-core-rendered error page and the /preview/consent shell can
+  // reference the Certified favicon without a cross-origin request to
+  // the auth-service host.
+  const publicDir = path.resolve(__dirname, '..', 'public')
+  pds.app.get('/favicon.ico', (_req, res) => {
+    res.sendFile(path.join(publicDir, 'favicon.svg'))
+  })
+  pds.app.use('/static', express.static(publicDir))
+
+  // =========================================================================
+  // Cookie domain broadening (HYPER-268)
+  // =========================================================================
+  //
+  // Upstream @atproto/oauth-provider sets dev-id and ses-id cookies with no
+  // Domain attribute, which scopes them to the exact pds-core host. The
+  // auth-service runs on a sibling subdomain (e.g. auth.pds.foo.com) and
+  // cannot read those cookies — so it has no way to detect an existing
+  // device session when a second OAuth client starts a new /oauth/authorize
+  // flow.
+  //
+  // Fix: intercept all outbound Set-Cookie headers for the device-session
+  // cookies and inject Domain=<parent>. With Domain=pds.foo.com both
+  // pds.foo.com and auth.pds.foo.com see the cookie, unlocking the
+  // cross-subdomain session-reuse path.
+  //
+  // Auto-derived: if AUTH_HOSTNAME ends with .<PDS_HOSTNAME>, PDS_HOSTNAME
+  // is the shared parent and we use it as the cookie domain. Otherwise
+  // (e.g. Railway preview envs where services have unrelated hostnames
+  // under a public suffix), there is no valid parent and the middleware
+  // is skipped — session reuse simply isn't possible on those topologies.
+  // Upstream's DeviceManager has no domain option, so we rewrite headers
+  // rather than pass config.
+
+  if (cookieDomain) {
+    const cookieDomainMiddleware = createCookieDomainMiddleware(cookieDomain)
+
+    pds.app.use(cookieDomainMiddleware)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- accessing Express internal _router stack
+    const cookieStack = (pds.app as any)._router?.stack
+    if (cookieStack) {
+      const cookieLayer = cookieStack.pop()
+      let insertIdx = 0
+      for (let i = 0; i < cookieStack.length; i++) {
+        if (cookieStack[i].name === 'expressInit') {
+          insertIdx = i + 1
+          break
+        }
+      }
+      cookieStack.splice(insertIdx, 0, cookieLayer)
+    }
+    logger.info(
+      { cookieDomain },
+      'Cookie domain broadening middleware installed (HYPER-268)',
+    )
+  }
+
+  // =========================================================================
   // Internal endpoints
   // =========================================================================
-
-  /** Timing-safe check of the x-internal-secret header. Returns false if the
-   *  env var is unset or the header is missing/mismatched.
-   *  Both values are hashed to SHA-256 so timingSafeEqual always receives
-   *  equal-length buffers, avoiding length-leak timing side-channels and
-   *  ERR_INVALID_ARG_VALUE throws from multibyte string length mismatches. */
-  function verifyInternalSecret(
-    header: string | string[] | undefined,
-  ): boolean {
-    const secret = process.env.EPDS_INTERNAL_SECRET
-    if (!secret || typeof header !== 'string') return false
-    const hash = (v: string) => createHash('sha256').update(v).digest()
-    return timingSafeEqual(hash(header), hash(secret))
-  }
 
   // Protected internal endpoint for auth service to look up an account by email.
   // Replaces the old unauthenticated /_magic/check-email to prevent email enumeration.
@@ -825,6 +1092,40 @@ async function main() {
     }
   })
 
+  // Protected internal endpoint for auth-service to enumerate the emails
+  // of every account bound to the supplied (dev-id, ses-id) cookie pair.
+  // Used by Flow 1 session-reuse: when a login_hint resolves to an email
+  // that is NOT in this list, auth-service skips the chooser redirect and
+  // renders its own OTP form for a fresh sign-in. A null `emails` field
+  // means the cookie pair was malformed, unknown, or stale (ses-id no
+  // longer matches the device row) — caller should treat this the same
+  // as "no usable session" and bypass session reuse for this request.
+  pds.app.get('/_internal/device-accounts', async (req, res) => {
+    if (!verifyInternalSecret(req.headers['x-internal-secret'])) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+    const devId = ((req.query.dev_id as string) || '').trim()
+    const sesId = ((req.query.ses_id as string) || '').trim()
+    if (!devId || !sesId) {
+      res.status(400).json({ error: 'Missing dev_id or ses_id' })
+      return
+    }
+    if (!provider) {
+      res.status(503).json({ error: 'OAuth provider not available' })
+      return
+    }
+    const emails = await loadDeviceAccountEmails({
+      provider,
+      deviceId: devId,
+      sessionId: sesId,
+      logger,
+    })
+    res.json({ emails })
+  })
+
+  installTestHooks({ pds, app: pds.app, logger })
+
   // =========================================================================
   // TLS check - used by Caddy on-demand TLS to verify handle ownership
   // =========================================================================
@@ -896,14 +1197,6 @@ async function checkHandleRoute(
       .status(500)
       .json({ error: 'InternalServerError', message: 'Internal Server Error' })
   }
-}
-
-function renderError(message: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Error</title></head>
-<body><p style="color:red;padding:20px">${escapeHtml(message)}</p></body>
-</html>`
 }
 
 main().catch((err: unknown) => {

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 
 import type { ClientMetadata } from '@certified-app/shared'
+import { DEFAULT_BRANDING_CSS } from './default-branding.js'
 
 type LoggerLike = {
   info: (obj: object, msg: string) => void
@@ -35,6 +36,7 @@ type ResponseLike = {
   setHeader: (name: string, value: string | string[]) => unknown
   removeHeader: (name: string) => void
   end: EndLike
+  readonly headersSent: boolean
 }
 
 type NextLike = (err?: unknown) => void
@@ -119,7 +121,9 @@ export function installCssInjectionMiddleware(
   stack: Array<{ name?: string }> | undefined,
   deps: ClientCssInjectionDeps,
 ): void {
-  if (deps.trustedClients.length === 0) return
+  // Always install — the middleware injects DEFAULT_BRANDING_CSS for
+  // every /oauth/authorize response, then layers a trusted client's
+  // branding.css on top when applicable.
   const middleware = createClientCssInjectionMiddleware(deps)
   app.use(middleware)
   const layer = stack?.pop()
@@ -128,7 +132,7 @@ export function installCssInjectionMiddleware(
     stack.splice(insertIdx, 0, layer)
     deps.logger.info(
       { trustedClients: deps.trustedClients, insertIdx },
-      'CSS injection middleware installed for trusted OAuth clients',
+      'CSS injection middleware installed (default + trusted-client branding)',
     )
   }
 }
@@ -175,59 +179,74 @@ export function createClientCssInjectionMiddleware({
       }
     }
 
-    if (!clientId || !trustedClients.includes(clientId)) {
+    // Resolve trusted-client css if applicable. Untrusted/unknown
+    // clients still get DEFAULT_BRANDING_CSS — only the per-client
+    // override layer is gated.
+    let clientCss: string | null = null
+    if (clientId && trustedClients.includes(clientId)) {
+      try {
+        const metadata = await resolveClientMetadata(clientId)
+        clientCss = getClientCss(clientId, metadata, trustedClients)
+      } catch (err) {
+        logger.warn(
+          { err, clientId },
+          'Failed to resolve client CSS, falling back to default branding only',
+        )
+      }
+    } else {
       logger.debug(
         {
           clientId: clientId ?? null,
           path: request.path,
           hasRequestUri: !!query.request_uri,
         },
-        'CSS middleware: skipping — no trusted client_id resolved',
+        'CSS middleware: no trusted client_id; injecting default branding only',
       )
-      next()
-      return
     }
 
-    try {
-      const metadata = await resolveClientMetadata(clientId)
-      const css = getClientCss(clientId, metadata, trustedClients)
-      if (!css) {
-        next()
-        return
-      }
+    // Default first, client second — cascade order means client styles
+    // win on overlapping selectors.
+    const defaultStyle = `<style>${DEFAULT_BRANDING_CSS}</style>`
+    const clientStyle = clientCss ? `<style>${clientCss}</style>` : ''
+    const styleTag = `${defaultStyle}${clientStyle}`
 
-      const cssHash = createHash('sha256').update(css).digest('base64')
-      const styleTag = `<style>${css}</style>`
+    // CSP `style-src 'sha256-…'` hashes are per-`<style>` element, so
+    // append each block's hash separately.
+    const cssHashes = [
+      createHash('sha256').update(DEFAULT_BRANDING_CSS).digest('base64'),
+      ...(clientCss
+        ? [createHash('sha256').update(clientCss).digest('base64')]
+        : []),
+    ]
 
-      const origSetHeader = response.setHeader.bind(response)
-      response.setHeader = (name: string, value: string | string[]) => {
-        if (
-          name.toLowerCase() === 'content-security-policy' &&
-          typeof value === 'string'
-        ) {
-          value = appendStyleHashToCsp(value, cssHash)
+    const origSetHeader = response.setHeader.bind(response)
+    response.setHeader = (name: string, value: string | string[]) => {
+      if (
+        name.toLowerCase() === 'content-security-policy' &&
+        typeof value === 'string'
+      ) {
+        for (const h of cssHashes) {
+          value = appendStyleHashToCsp(value, h)
         }
-        return origSetHeader(name, value)
       }
-
-      const origEnd = response.end.bind(response)
-      const wrappedEnd: EndLike = (chunk?: unknown, ...args: unknown[]) => {
-        const result = injectStyleTagIntoHtml(chunk, styleTag)
-        if (result.rewritten) {
-          response.removeHeader('Content-Length')
-          response.removeHeader('ETag')
-        }
-        return origEnd(result.chunk, ...args)
-      }
-      response.end = wrappedEnd
-
-      next()
-    } catch (err) {
-      logger.warn(
-        { err, clientId },
-        'Failed to resolve client CSS, skipping injection',
-      )
-      next()
+      return origSetHeader(name, value)
     }
+
+    const origEnd = response.end.bind(response)
+    const wrappedEnd: EndLike = (chunk?: unknown, ...args: unknown[]) => {
+      const result = injectStyleTagIntoHtml(chunk, styleTag)
+      if (result.rewritten && !response.headersSent) {
+        // Skip the Content-Length / ETag rewrite once upstream has
+        // already flushed its headers — removeHeader() would throw
+        // ERR_HTTP_HEADERS_SENT and crash the process. See the matching
+        // guard in chooser-enrichment.ts for the full rationale.
+        response.removeHeader('Content-Length')
+        response.removeHeader('ETag')
+      }
+      return origEnd(result.chunk, ...args)
+    }
+    response.end = wrappedEnd
+
+    next()
   }
 }

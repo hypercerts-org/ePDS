@@ -64,3 +64,32 @@ export const VALID_HANDLE_MODES = [
   'picker-with-random',
 ] as const
 export type HandleMode = (typeof VALID_HANDLE_MODES)[number]
+
+/**
+ * Resolve the handle assignment mode for an OAuth flow using the three-level
+ * precedence shared between auth-service (signup page) and pds-core (chooser
+ * enrichment):
+ *
+ *   1. explicit `epds_handle_mode` query-string value on the authorize URL,
+ *   2. the client metadata's `epds_handle_mode`,
+ *   3. the `EPDS_DEFAULT_HANDLE_MODE` env var,
+ *   4. `'picker-with-random'` as the final fallback.
+ *
+ * Exported from shared so both services resolve identically — otherwise the
+ * signup form and the chooser can disagree about whether to hide the handle.
+ *
+ * Invalid values at any level are silently skipped rather than erroring: the
+ * OAuth flow must not 500 because a client shipped a typo'd value.
+ */
+export function resolveHandleMode(
+  queryParam: string | undefined,
+  clientMetaHandleMode: string | undefined,
+  envDefault: string | undefined = process.env.EPDS_DEFAULT_HANDLE_MODE,
+): HandleMode {
+  for (const raw of [queryParam, clientMetaHandleMode, envDefault]) {
+    if (raw && (VALID_HANDLE_MODES as readonly string[]).includes(raw)) {
+      return raw as HandleMode
+    }
+  }
+  return 'picker-with-random'
+}

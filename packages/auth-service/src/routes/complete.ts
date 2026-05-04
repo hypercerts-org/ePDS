@@ -27,7 +27,9 @@ import { createLogger, signCallback } from '@certified-app/shared'
 import { fromNodeHeaders } from 'better-auth/node'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
 import { pingParRequest } from '../lib/ping-par-request.js'
+import { renderError } from '../lib/render-error.js'
 import { requireInternalEnv } from '../lib/require-internal-env.js'
+import { resolveRecoveryEmail } from '../lib/resolve-recovery-email.js'
 
 const logger = createLogger('auth:complete')
 
@@ -49,7 +51,8 @@ export function createCompleteRouter(
       logger.warn('No epds_auth_flow cookie found on /auth/complete')
       res
         .status(400)
-        .send('<p>Authentication session expired. Please try again.</p>')
+        .type('html')
+        .send(renderError('Authentication session expired. Please try again.'))
       return
     }
 
@@ -60,7 +63,8 @@ export function createCompleteRouter(
       res.clearCookie(AUTH_FLOW_COOKIE)
       res
         .status(400)
-        .send('<p>Authentication session expired. Please try again.</p>')
+        .type('html')
+        .send(renderError('Authentication session expired. Please try again.'))
       return
     }
 
@@ -73,7 +77,10 @@ export function createCompleteRouter(
       })
     } catch (err) {
       logger.error({ err }, 'Failed to get better-auth session')
-      res.status(500).send('<p>Authentication failed. Please try again.</p>')
+      res
+        .status(500)
+        .type('html')
+        .send(renderError('Authentication failed. Please try again.'))
       return
     }
 
@@ -90,10 +97,32 @@ export function createCompleteRouter(
       return
     }
 
-    const email = session.user.email.toLowerCase()
+    let email = session.user.email.toLowerCase()
 
     // Step 4: Check whether this is a new user (no PDS account for email).
-    const did = await getDidByEmail(email, pdsUrl, internalSecret)
+    let did = await getDidByEmail(email, pdsUrl, internalSecret)
+
+    // Recovery path: session email is a backup email, not a primary. Resolve
+    // the backup-email → DID mapping (auth-service-owned) and then DID →
+    // primary email via pds-core's internal API, so the downstream callback
+    // signs the user's real account email, not the recovery address.
+    if (!did) {
+      const recovered = await resolveRecoveryEmail(
+        email,
+        ctx,
+        pdsUrl,
+        internalSecret,
+      )
+      if (recovered) {
+        logger.info(
+          { flowId, did: recovered.did },
+          'Recovery: translated backup email to primary email via DID',
+        )
+        email = recovered.email
+        did = recovered.did
+      }
+    }
+
     const isNewAccount = !did
 
     if (isNewAccount) {

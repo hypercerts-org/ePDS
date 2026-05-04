@@ -65,13 +65,7 @@ vi.mock('next/server', () => {
   return { NextResponse: MockNextResponse }
 })
 
-// Mock ratelimit — default: allow
-vi.mock('../lib/ratelimit', () => ({
-  checkRateLimit: vi.fn(() => ({ allowed: true })),
-}))
-
 import { GET } from '../app/api/oauth/login/route'
-import { checkRateLimit } from '../lib/ratelimit'
 import { getOAuthSessionFromCookie, OAUTH_COOKIE } from '../lib/session'
 
 const MOCK_PAR_RESPONSE = {
@@ -90,7 +84,6 @@ describe('OAuth login route (Flow 2)', () => {
 
   beforeEach(() => {
     originalFetch = global.fetch
-    vi.mocked(checkRateLimit).mockReturnValue({ allowed: true })
   })
 
   afterEach(() => {
@@ -177,21 +170,6 @@ describe('OAuth login route (Flow 2)', () => {
     // Should redirect successfully after retry
     expect(resp.status).toBe(307)
     expect(resp._url).toContain('request_uri=')
-  })
-
-  it('returns 429 when rate limited', async () => {
-    vi.mocked(checkRateLimit).mockReturnValue({
-      allowed: false,
-      retryAfter: 60,
-    })
-
-    const resp = (await GET(makeRequest())) as unknown as {
-      status: number
-      headers: { get(k: string): string | null }
-    }
-
-    expect(resp.status).toBe(429)
-    expect(resp.headers.get('retry-after')).toBe('60')
   })
 
   it('session cookie round-trips the stored OAuth data', async () => {

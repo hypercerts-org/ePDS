@@ -8,6 +8,14 @@ services:
     env_file: .env
     environment:
       - PDS_PORT=3000
+      # Optional /_internal/test/* hooks used by the e2e suite (e.g.
+      # backdating account_device.updatedAt past upstream's 7-day
+      # authenticationMaxAge so checkLoginRequired returns true).
+      # Defaults OFF so the local docker-compose stack matches a
+      # production deployment by default; opt in for e2e runs by setting
+      # EPDS_TEST_HOOKS=1 in your .env or shell. The router additionally
+      # throws at startup if NODE_ENV=production, regardless of this var.
+      - EPDS_TEST_HOOKS=${EPDS_TEST_HOOKS:-0}
     volumes:
       - pds-data:/data
     restart: unless-stopped
@@ -27,6 +35,12 @@ services:
     env_file: .env
     environment:
       - AUTH_PORT=3001
+      # Optional /_internal/test/* hooks used by the e2e suite (e.g. forcing
+      # OTP expiry without a 10-minute wait). Defaults OFF — opt in for e2e
+      # runs by setting EPDS_TEST_HOOKS=1 in your .env or shell. The router
+      # additionally throws at startup if NODE_ENV=production, regardless
+      # of this var.
+      - EPDS_TEST_HOOKS=${EPDS_TEST_HOOKS:-0}
     volumes:
       - auth-data:/data
     restart: unless-stopped
@@ -48,6 +62,19 @@ services:
       - caddy-config:/config
     env_file: .env
     restart: unless-stopped
+    networks:
+      # Surface the public PDS / auth / demo hostnames inside the compose
+      # network so sibling containers (demo, auth) can reach each other
+      # via their real public URLs without NAT-hairpinning back out to
+      # the public IP. Needed for OAuth flows where demo's PAR request
+      # targets PDS_URL (public) but lives in the same docker network.
+      default:
+        aliases:
+          - ${PDS_HOSTNAME:-pds.example}
+          - auth.${PDS_HOSTNAME:-pds.example}
+          - ${DEMO_HOSTNAME:-demo.pds.example}
+          - ${DEMO_UNTRUSTED_HOSTNAME:-demo-untrusted.pds.example}
+          - ${MAILPIT_HOSTNAME:-mailpit.pds.example}
     depends_on:
       core:
         condition: service_healthy
@@ -71,12 +98,55 @@ services:
       core:
         condition: service_healthy
 
-  # Local email trap for development
-  mailhog:
-    image: mailhog/mailhog:latest
+  # Second demo instance for e2e scenarios that need an untrusted OAuth
+  # client (trusted-vs-untrusted branding tests, HYPER-268 cross-client
+  # session reuse). Identical image, different PUBLIC_URL so the client_id
+  # is distinct, and deliberately NOT listed in PDS_OAUTH_TRUSTED_CLIENTS.
+  # Gated behind the `dev` compose profile — production deployments don't
+  # spin it up.
+  demo-untrusted:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo
+    env_file: packages/demo/.env
+    environment:
+      - PDS_URL=https://${PDS_HOSTNAME:-pds.example}
+      - PDS_INTERNAL_URL=http://core:3000
+      - AUTH_ENDPOINT=https://auth.${PDS_HOSTNAME:-pds.example}/oauth/authorize
+      - PUBLIC_URL=https://${DEMO_UNTRUSTED_HOSTNAME:-demo-untrusted.pds.example}
+      # Override the trusted-only skip-consent hint — an untrusted client
+      # can advertise it but pds-core won't honour the flag.
+      - EPDS_SKIP_CONSENT_ON_SIGNUP=
+      # Blank theme so the untrusted client is visually distinct from the
+      # trusted one when the latter opts into a demo theme (ocean, amber).
+      - EPDS_CLIENT_THEME=
+      # Distinct ES256 keypair so this confidential client cannot forge
+      # client_assertion JWTs claiming to be the trusted demo. Sourced
+      # from root .env (auto-loaded by compose for variable substitution)
+      # so the trusted demo's keypair in packages/demo/.env stays scoped
+      # to that container only. Without this override both demos would
+      # share packages/demo/.env's EPDS_CLIENT_PRIVATE_JWK and either
+      # could impersonate the other at the token endpoint.
+      - EPDS_CLIENT_PRIVATE_JWK=${DEMO_UNTRUSTED_PRIVATE_JWK}
+    restart: unless-stopped
+    profiles:
+      - dev
+    depends_on:
+      core:
+        condition: service_healthy
+
+  # Local email trap for development + e2e tests
+  mailpit:
+    image: axllent/mailpit:latest
     ports:
       - '1025:1025'
       - '8025:8025'
+    environment:
+      # Basic-auth creds for the HTTP UI + API. E2E suite reads these via
+      # E2E_MAILPIT_USER / E2E_MAILPIT_PASS. Plaintext is fine for a
+      # dev-only email trap.
+      - MP_UI_AUTH=${MAILPIT_USER:-admin}:${MAILPIT_PASS:-admin}
+      - MP_MAX_MESSAGES=5000
     profiles:
       - dev
 

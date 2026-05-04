@@ -34,6 +34,26 @@ export function timingSafeEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b))
 }
 
+/**
+ * Timing-safe verification of an `x-internal-secret` request header against
+ * the configured `EPDS_INTERNAL_SECRET`. Returns false when the env var is
+ * unset, the header is missing, or the value is an array (Node parses repeated
+ * headers as `string[]`, which we never expect for this header).
+ *
+ * Both values are SHA-256-hashed before comparison so timingSafeEqual always
+ * sees equal-length buffers — avoids length-leak side-channels and the
+ * ERR_INVALID_ARG_VALUE throws that node:crypto raises on multibyte length
+ * mismatches.
+ */
+export function verifyInternalSecret(
+  header: string | string[] | undefined,
+): boolean {
+  const secret = process.env.EPDS_INTERNAL_SECRET
+  if (!secret || typeof header !== 'string') return false
+  const hash = (v: string) => crypto.createHash('sha256').update(v).digest()
+  return crypto.timingSafeEqual(hash(header), hash(secret))
+}
+
 /** Generate an 8-digit OTP code. Returns the code and its SHA-256 hash. */
 export function generateOtpCode(): { code: string; codeHash: string } {
   const num = crypto.randomInt(0, 100_000_000)

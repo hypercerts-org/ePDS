@@ -43,11 +43,11 @@ in your `.env` to disable secure cookies (needed for `http://localhost`).
 
 To run the demo frontend separately: `pnpm dev:demo`
 
-To start MailHog for local email testing:
+To start Mailpit for local email testing:
 
 ```bash
-docker compose --profile dev up -d mailhog
-# MailHog UI: http://localhost:8025
+docker compose --profile dev up -d mailpit
+# Mailpit UI: http://localhost:8025
 ```
 
 ## Running with Docker Locally

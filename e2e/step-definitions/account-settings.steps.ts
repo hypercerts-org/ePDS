@@ -118,6 +118,25 @@ Given(
   },
 )
 
+When('the user adds a unique backup email', async function (this: EpdsWorld) {
+  if (!testEnv.mailpitPass) return 'pending'
+  const page = getPage(this)
+  await assertOnAccountSettingsPage(this)
+  this.backupEmail = `backup-${Date.now()}@example.com`
+  await clearMailpit(this.backupEmail)
+  const backupForm = page.locator('form[action="/account/backup-email/add"]')
+  await backupForm.locator('input[name="email"]').fill(this.backupEmail)
+  await Promise.all([
+    page.waitForURL(
+      (url) =>
+        url.origin === testEnv.authUrl &&
+        url.pathname === '/account' &&
+        url.searchParams.get('success') === 'backup_added',
+    ),
+    backupForm.getByRole('button', { name: 'Add backup email' }).click(),
+  ])
+})
+
 When(
   /^a user navigates to \/account without a session$/,
   async function (this: EpdsWorld) {

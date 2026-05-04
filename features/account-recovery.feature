@@ -1,48 +1,48 @@
-@pending
 Feature: Account recovery via backup emails
   Users can register backup email addresses. If they lose access to their
   primary email, they can use a backup email to recover their account via
   the same OTP flow.
 
+  Test accounts and backup-email addresses are created dynamically per
+  scenario so multiple runs against the same shared environment do not
+  collide.
+
   Background:
     Given the ePDS test environment is running
-    And "alice@example.com" has a PDS account
+    And a returning user has a PDS account
 
   # --- Backup email setup (via account settings) ---
 
-  @email
   Scenario: User adds and verifies a backup email
-    Given "alice@example.com" is logged into account settings
-    When the user adds "backup@example.com" as a backup email
-    Then a verification email is sent to "backup@example.com"
+    Given the user is logged into account settings
+    When the user adds a unique backup email
+    Then a verification email arrives in the mail trap for the backup email
+    And the email contains a verification link
     When the user clicks the verification link in that email
-    Then the backup email is marked as verified in the settings page
+    Then the backup email is marked as verified on the account settings page
 
   # --- Recovery flow ---
 
-  @email
   Scenario: User recovers account via verified backup email
-    Given "backup@example.com" is a verified backup email for alice's account
-    And an OAuth client has initiated a login flow
+    Given the test user has a verified backup email
+    And the demo client initiates OAuth with the test email as login_hint
     When the user navigates to the recovery page
-    And enters "backup@example.com"
-    Then an OTP code is sent to "backup@example.com"
-    When the user enters the correct OTP code
-    Then the browser is redirected back to the OAuth client with a valid session
-    And the session is for alice's PDS account
+    And the user enters the backup email on the recovery page
+    Then an OTP email arrives in the mail trap for the backup email
+    When the user enters the recovery OTP
+    Then the demo client's welcome page confirms the user is signed in
 
-  @email
   Scenario: Recovery with non-existent email shows same UI (anti-enumeration)
-    Given an OAuth client has initiated a login flow
+    Given the demo client initiates OAuth with the test email as login_hint
     When the user navigates to the recovery page
-    And enters "nonexistent@example.com"
-    Then the OTP form is displayed (same as if the email was found)
-    But no email arrives in the mail trap
+    And the user enters a random non-existent email on the recovery page
+    Then the recovery OTP form is displayed
+    And no email arrives for that non-existent address
 
   # --- Backup email management ---
 
   Scenario: User removes a backup email
-    Given "alice@example.com" has a verified backup email "old@example.com"
-    When the user removes "old@example.com" from account settings
-    Then "old@example.com" no longer appears in the backup emails list
-    And recovery via "old@example.com" no longer works
+    Given the test user has a verified backup email
+    When the user removes the backup email from account settings
+    Then the backup email no longer appears on the account settings page
+    And recovery via the removed backup email no longer works

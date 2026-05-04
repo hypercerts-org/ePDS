@@ -28,8 +28,14 @@ import { fromNodeHeaders } from 'better-auth/node'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
 import { pingParRequest } from '../lib/ping-par-request.js'
 import { requireInternalEnv } from '../lib/require-internal-env.js'
+import { renderError } from '../lib/render-error.js'
 import { resolveClientBranding } from '../lib/client-metadata.js'
-import { renderOptionalStyleTag } from '../lib/page-helpers.js'
+import {
+  renderOptionalStyleTag,
+  renderFaviconTag,
+  POWERED_BY_CSS,
+  POWERED_BY_HTML,
+} from '../lib/page-helpers.js'
 
 const logger = createLogger('auth:choose-handle')
 
@@ -179,12 +185,11 @@ export function createChooseHandleRouter(
       : undefined
     const showRandomButton = result.flow.handleMode === 'picker-with-random'
 
-    // CSS injection for trusted clients — clientId is already in the flow row
+    // Branding injection for trusted clients — clientId is already in the flow row
     const clientId = result.flow.clientId
-    const customCss = clientId
-      ? (await resolveClientBranding(clientId, ctx.config.trustedClients))
-          .customCss
-      : null
+    const branding = clientId
+      ? await resolveClientBranding(clientId, ctx.config.trustedClients)
+      : { customCss: null, customFaviconUrl: null, customFaviconUrlDark: null }
 
     res
       .type('html')
@@ -194,7 +199,9 @@ export function createChooseHandleRouter(
           error,
           res.locals.csrfToken,
           showRandomButton,
-          customCss,
+          branding.customCss,
+          branding.customFaviconUrl,
+          branding.customFaviconUrlDark,
         ),
       )
   })
@@ -220,11 +227,10 @@ export function createChooseHandleRouter(
 
     const showRandomButton = flow.handleMode === 'picker-with-random'
 
-    // CSS injection for trusted clients
-    const customCss = flow.clientId
-      ? (await resolveClientBranding(flow.clientId, ctx.config.trustedClients))
-          .customCss
-      : null
+    // Branding injection for trusted clients — clientId is already in the flow row
+    const branding = flow.clientId
+      ? await resolveClientBranding(flow.clientId, ctx.config.trustedClients)
+      : { customCss: null, customFaviconUrl: null, customFaviconUrlDark: null }
 
     // Guard: if PDS account already exists, bounce back to /auth/complete
     // (mirrors the same check in the GET handler — prevents signing a
@@ -270,7 +276,9 @@ export function createChooseHandleRouter(
             'Invalid handle format. Use 5-20 lowercase letters, numbers, or hyphens.',
             res.locals.csrfToken,
             showRandomButton,
-            customCss,
+            branding.customCss,
+            branding.customFaviconUrl,
+            branding.customFaviconUrlDark,
           ),
         )
       return
@@ -303,7 +311,9 @@ export function createChooseHandleRouter(
               'Could not verify handle availability. Please try again.',
               res.locals.csrfToken,
               showRandomButton,
-              customCss,
+              branding.customCss,
+              branding.customFaviconUrl,
+              branding.customFaviconUrlDark,
             ),
           )
         return
@@ -318,7 +328,9 @@ export function createChooseHandleRouter(
             'Could not verify handle availability. Please try again.',
             res.locals.csrfToken,
             showRandomButton,
-            customCss,
+            branding.customCss,
+            branding.customFaviconUrl,
+            branding.customFaviconUrlDark,
           ),
         )
       return
@@ -333,7 +345,9 @@ export function createChooseHandleRouter(
             'That handle is already taken.',
             res.locals.csrfToken,
             showRandomButton,
-            customCss,
+            branding.customCss,
+            branding.customFaviconUrl,
+            branding.customFaviconUrlDark,
           ),
         )
       return
@@ -437,6 +451,8 @@ export function renderChooseHandlePage(
   csrfToken?: string,
   showRandomButton?: boolean,
   customCss?: string | null,
+  customFaviconUrl?: string | null,
+  customFaviconUrlDark?: string | null,
 ): string {
   const errorHtml = error
     ? `<div class="error" id="error-msg">${escapeHtml(error)}</div>`
@@ -447,11 +463,14 @@ export function renderChooseHandlePage(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  ${renderFaviconTag(customFaviconUrl, customFaviconUrlDark)}
   <title>Choose your handle</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-    .container { background: white; border-radius: 12px; padding: 40px; max-width: max(420px, min(90vw, 600px)); width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .page-wrap { display: flex; flex-direction: column; align-items: stretch; max-width: max(420px, min(90vw, 600px)); width: 100%; }
+    ${POWERED_BY_CSS}
+    .container { background: white; border-radius: 12px; padding: 40px; width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
     h1 { font-size: 24px; margin-bottom: 8px; color: #111; }
     .subtitle { color: #666; margin-bottom: 24px; font-size: 15px; line-height: 1.5; }
     .field { margin-bottom: 16px; }
@@ -481,35 +500,38 @@ export function renderChooseHandlePage(
   </style>${renderOptionalStyleTag(customCss)}
 </head>
 <body>
-  <div class="container">
-    <h1>Choose your handle</h1>
-    <p class="subtitle">Your handle is your public username on the AT Protocol network.</p>
+  <div class="page-wrap">
+    <div class="container">
+      <h1>Choose your handle</h1>
+      <p class="subtitle">Your handle is your public username on the AT Protocol network.</p>
 
-    ${errorHtml}
+      ${errorHtml}
 
-    <form method="POST" action="/auth/choose-handle" id="handle-form">
-      <input type="hidden" name="csrf" value="${escapeHtml(csrfToken || '')}">
-      <div class="field">
-        <label for="handle-input">Handle</label>
-        <div class="handle-row">
-          <input
-            type="text"
-            id="handle-input"
-            name="handle"
-            placeholder="yourname"
-            autocomplete="off"
-            autocapitalize="none"
-            spellcheck="false"
-            minlength="5"
-            maxlength="20"
-          >
-          <span class="handle-suffix">.${escapeHtml(handleDomain)}</span>
+      <form method="POST" action="/auth/choose-handle" id="handle-form">
+        <input type="hidden" name="csrf" value="${escapeHtml(csrfToken || '')}">
+        <div class="field">
+          <label for="handle-input">Handle</label>
+          <div class="handle-row">
+            <input
+              type="text"
+              id="handle-input"
+              name="handle"
+              placeholder="yourname"
+              autocomplete="off"
+              autocapitalize="none"
+              spellcheck="false"
+              minlength="5"
+              maxlength="20"
+            >
+            <span class="handle-suffix">.${escapeHtml(handleDomain)}</span>
+          </div>
+          <div class="status" id="handle-status"></div>
         </div>
-        <div class="status" id="handle-status"></div>
-      </div>
-      ${showRandomButton ? `<button type="button" id="random-btn" class="btn-secondary">Generate random handle</button>` : ''}
-      <button type="submit" id="submit-btn" class="btn-primary">Create</button>
-    </form>
+        ${showRandomButton ? `<button type="button" id="random-btn" class="btn-secondary">Generate random handle</button>` : ''}
+        <button type="submit" id="submit-btn" class="btn-primary">Create</button>
+      </form>
+    </div>
+    ${POWERED_BY_HTML}
   </div>
 
   <script>
@@ -688,13 +710,5 @@ export function renderChooseHandlePage(
     })();
   </script>
 </body>
-</html>`
-}
-
-function renderError(message: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Error</title></head>
-<body><p style="color:red;padding:20px">${escapeHtml(message)}</p></body>
 </html>`
 }

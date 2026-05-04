@@ -55,11 +55,33 @@ export async function GET() {
     dpop_bound_access_tokens: true,
     brand_color: theme?.page.primary ?? '#2563eb',
     background_color: theme?.page.bg ?? '#f8f9fa',
+    // Custom OTP email template, served from this same origin. Only
+    // honoured by auth-service when this client_id is on
+    // PDS_OAUTH_TRUSTED_CLIENTS (see `buildClientBrandedEmail` in
+    // packages/auth-service/src/email/client-template.ts); untrusted
+    // clients get the default PDS template regardless.
+    email_template_uri: `${baseUrl}/email-template.html`,
+    email_subject_template: '{{code}} — your {{app_name}} code',
+    // Opt in to the auth-service login page's "Or sign in with
+    // ATProto/Bluesky" button. Submitting a handle redirects here with
+    // ?handle=<value>, which our /api/oauth/login route already handles
+    // (resolves handle → PDS → fresh PAR against that PDS).
+    epds_handle_login_url: `${baseUrl}/api/oauth/login`,
     ...(process.env.EPDS_SKIP_CONSENT_ON_SIGNUP === 'true' && {
       epds_skip_consent_on_signup: true,
     }),
     ...(theme && {
-      branding: { css: theme.injectedCss },
+      branding: {
+        css: theme.injectedCss,
+        // Same-origin favicons: served from this demo's PUBLIC_URL so they
+        // share an origin with `client_id` (auth-service rejects
+        // cross-origin favicons because the CSP img-src only widens to
+        // the client_id origin). Light + dark variants let auth-service
+        // emit two `<link rel="icon" media="(prefers-color-scheme: ...)">`
+        // tags so browsers pick the one that matches the user's OS theme.
+        favicon_url: `${baseUrl}/favicon-demo.svg`,
+        favicon_url_dark: `${baseUrl}/favicon-demo-dark.svg`,
+      },
     }),
   }
 

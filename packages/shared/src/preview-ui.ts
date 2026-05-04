@@ -18,13 +18,51 @@ export const PREVIEW_CLIENT_ID_INPUT_HTML = `<label for="client-id-input">Client
 /**
  * A single preview route, used by both services' index pages. `path` is
  * the route path (e.g. `/preview/login`); `query` is optional raw query
- * string appended as-is (e.g. `error=Handle+already+taken`).
+ * string appended as-is (e.g. `error=Handle+already+taken`); `controls`
+ * declares per-link form controls (number / checkbox / select) that
+ * bind to query params on the link so a single entry can cover what
+ * would otherwise be a matrix of variants.
  */
 export interface PreviewRoute {
   path: string
   query?: string
   label: string
+  controls?: readonly PreviewRouteControl[]
 }
+
+/**
+ * Inline form control rendered next to a preview-route link. Each
+ * control's current value is reflected as a query parameter on its
+ * link's href, live-updated as the user changes the control. Controls
+ * are independent across links; a `param` value on one link does not
+ * affect any other link.
+ */
+export type PreviewRouteControl =
+  | {
+      type: 'number'
+      param: string
+      label: string
+      min: number
+      max: number
+      default: number
+    }
+  | {
+      type: 'checkbox'
+      param: string
+      label: string
+      // When checked, the param is set to '1'; when unchecked, the
+      // param is removed from the URL. Default sets the initial state.
+      default: boolean
+    }
+  | {
+      type: 'select'
+      param: string
+      label: string
+      options: readonly { value: string; label: string }[]
+      // Default value MUST match one of the options. The empty string
+      // is treated as "param absent" — useful for "no error" defaults.
+      default: string
+    }
 
 /** Routes served by auth-service. */
 export const AUTH_PREVIEW_ROUTES: readonly PreviewRoute[] = [
@@ -32,44 +70,166 @@ export const AUTH_PREVIEW_ROUTES: readonly PreviewRoute[] = [
   { path: '/preview/login-otp', label: 'Login — OTP step' },
   {
     path: '/preview/choose-handle',
-    label: 'Choose handle (picker + random)',
-  },
-  {
-    path: '/preview/choose-handle',
-    query: 'error=Handle+already+taken',
-    label: 'Choose handle (picker + random, with error)',
-  },
-  {
-    path: '/preview/choose-handle-picker',
-    label: 'Choose handle (picker only)',
-  },
-  {
-    path: '/preview/choose-handle-picker',
-    query: 'error=Handle+already+taken',
-    label: 'Choose handle (picker only, with error)',
+    label: 'Choose handle',
+    // Single link covers the matrix that used to be 4 separate entries
+    // (picker vs picker+random × error none vs Handle taken). Mode
+    // dropdown defaults to Auto: no override emitted, server resolves
+    // from client_id metadata via the same `resolveHandleMode` chain
+    // real OAuth flows use (query > metadata > env default). Picking
+    // an explicit mode applies the same per-request override
+    // (?epds_handle_mode=) clients can use in production.
+    controls: [
+      {
+        type: 'select',
+        param: 'epds_handle_mode',
+        label: 'Mode',
+        options: [
+          { value: '', label: 'Auto (from client metadata)' },
+          { value: 'picker', label: 'Picker' },
+          { value: 'random', label: 'Random' },
+          { value: 'picker-with-random', label: 'Picker + random' },
+        ],
+        default: '',
+      },
+      {
+        type: 'select',
+        param: 'error',
+        label: 'Error',
+        options: [
+          { value: '', label: 'None' },
+          { value: 'Handle already taken', label: 'Handle already taken' },
+        ],
+        default: '',
+      },
+    ],
   },
   { path: '/preview/recovery', label: 'Recovery — email step' },
   { path: '/preview/recovery-otp', label: 'Recovery — OTP step' },
+  {
+    path: '/preview/emails/new-user',
+    label: 'Email — new-user welcome / verify',
+  },
+  {
+    path: '/preview/emails/returning-user',
+    label: 'Email — returning-user sign-in OTP',
+  },
+  {
+    path: '/preview/emails/recovery',
+    label: 'Email — backup email verification',
+  },
 ] as const
 
 /** Routes served by pds-core. */
 export const PDS_PREVIEW_ROUTES: readonly PreviewRoute[] = [
   { path: '/preview/consent', label: 'Consent page' },
+  {
+    path: '/preview/chooser',
+    label: 'Account chooser',
+    controls: [
+      {
+        type: 'number',
+        param: 'numAccounts',
+        label: 'Accounts',
+        // Min matches the server-side clamp in preview-chooser.ts: 0
+        // would render an empty __sessions array and let the upstream
+        // SPA fall through to its no-session welcome view.
+        min: 1,
+        max: 10,
+        default: 1,
+      },
+      // The handle-mode is normally resolved from client metadata in
+      // production; a per-request override (?epds_handle_mode=) is
+      // available to clients and the preview exposes the same
+      // override here. "Auto" = no override emitted, server resolves
+      // from the client_id field above (or env default).
+      {
+        type: 'select',
+        param: 'epds_handle_mode',
+        label: 'Handle mode',
+        options: [
+          { value: '', label: 'Auto (from client metadata)' },
+          { value: 'picker', label: 'Picker' },
+          { value: 'random', label: 'Random' },
+          { value: 'picker-with-random', label: 'Picker + random' },
+        ],
+        default: '',
+      },
+    ],
+  },
 ] as const
+
+function attrEscape(s: string): string {
+  return s
+    .replaceAll('&', '&amp;')
+    .replaceAll('"', '&quot;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+}
+
+function renderControl(
+  c: PreviewRouteControl,
+  linkId: string,
+  idx: number,
+): string {
+  // Each control carries data-preview-link-id (which link it binds to)
+  // and data-preview-param (which query param to write). The wire
+  // script reads these attributes; no per-control JS lives here.
+  const ctlId = `${linkId}-c${idx}`
+  const labelHtml = `<label class="preview-control" for="${ctlId}">${attrEscape(c.label)}: `
+  const dataAttrs = `data-preview-link-id="${linkId}" data-preview-param="${attrEscape(c.param)}"`
+  switch (c.type) {
+    case 'number':
+      return (
+        labelHtml +
+        `<input id="${ctlId}" type="number" min="${c.min}" max="${c.max}" value="${c.default}" ${dataAttrs}></label>`
+      )
+    case 'checkbox':
+      return (
+        labelHtml +
+        `<input id="${ctlId}" type="checkbox" ${c.default ? 'checked' : ''} ${dataAttrs}></label>`
+      )
+    case 'select': {
+      const opts = c.options
+        .map(
+          (o) =>
+            `<option value="${attrEscape(o.value)}"${o.value === c.default ? ' selected' : ''}>${attrEscape(o.label)}</option>`,
+        )
+        .join('')
+      return (
+        labelHtml +
+        `<select id="${ctlId}" ${dataAttrs}>${opts}</select></label>`
+      )
+    }
+  }
+}
 
 function renderRouteList(
   routes: readonly PreviewRoute[],
   baseUrl: string | null,
+  idPrefix: string,
 ): string {
   // baseUrl=null means same-origin (path-relative); non-null means
   // cross-origin (absolute). Either way the link gets `data-preview-link`
   // so the wire-links script rewrites it with `?client_id=` from the
   // current input. The script preserves the origin of cross-origin hrefs
   // so carrying the client_id across services works.
-  const items = routes.map((r) => {
+  //
+  // Routes with `controls` get a unique id so the wire script can find
+  // their bound form controls. Controls render inline next to the link.
+  const items = routes.map((r, i) => {
     const qs = r.query ? `?${r.query}` : ''
     const href = baseUrl ? `${baseUrl}${r.path}${qs}` : `${r.path}${qs}`
-    return `<li><a href="${href}" data-preview-link>${r.label}</a></li>`
+    const linkId = r.controls ? `${idPrefix}-${i}` : ''
+    const linkIdAttr = linkId ? ` id="${linkId}"` : ''
+    const controlsHtml = r.controls
+      ? ' <span class="preview-route-controls">' +
+        r.controls.map((c, i) => renderControl(c, linkId, i)).join(' ') +
+        '</span>'
+      : ''
+    // Each row is a flex container so the link sits on the left and the
+    // controls hug it on the same line; controls only wrap to a second
+    // line on narrow viewports.
+    return `<li><a href="${href}" data-preview-link${linkIdAttr}>${r.label}</a>${controlsHtml}</li>`
   })
   return items.join('\n    ')
 }
@@ -93,8 +253,10 @@ export function renderPreviewLinksSections(opts: {
 }): string {
   const authBase = opts.currentService === 'auth' ? null : opts.authPublicUrl
   const pdsBase = opts.currentService === 'pds' ? null : opts.pdsPublicUrl
-  const authList = renderRouteList(AUTH_PREVIEW_ROUTES, authBase)
-  const pdsList = renderRouteList(PDS_PREVIEW_ROUTES, pdsBase)
+  // Stable per-group ID prefixes so a control's data-preview-link-id
+  // points at exactly one element in the document.
+  const authList = renderRouteList(AUTH_PREVIEW_ROUTES, authBase, 'auth-rt')
+  const pdsList = renderRouteList(PDS_PREVIEW_ROUTES, pdsBase, 'pds-rt')
   // On each index page the sibling service's heading links to that
   // service's /preview index, so users can jump between the two
   // without hunting for the URL. Tag it with data-preview-link so the
@@ -110,13 +272,13 @@ export function renderPreviewLinksSections(opts: {
       : `<a href="${opts.pdsPublicUrl}/preview" data-preview-link>pds-core</a>`
   return `<section class="preview-group">
   <h2>${authHeading}</h2>
-  <ul>
+  <ul class="preview-routes preview-routes-auth">
     ${authList}
   </ul>
 </section>
 <section class="preview-group">
   <h2>${pdsHeading}</h2>
-  <ul>
+  <ul class="preview-routes preview-routes-pds">
     ${pdsList}
   </ul>
 </section>`
@@ -129,7 +291,33 @@ const PREVIEW_INDEX_STYLES = `body { font-family: -apple-system, BlinkMacSystemF
     code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 14px; }
     pre { background: #f0f0f0; padding: 10px 12px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
     pre code { background: none; padding: 0; font-size: 13px; }
-    ul { line-height: 2; }
+    /* Each route is a flex row: link on the left, controls hug it on the
+       same line, wrapping to a second line only on narrow viewports. */
+    .preview-routes { padding-left: 24px; margin: 4px 0; }
+    .preview-routes li {
+      display: flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 6px 12px;
+      padding: 3px 0;
+    }
+    .preview-route-controls {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .preview-route-controls .preview-control {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 4px;
+      margin: 0;
+      font-size: 12px;
+      font-weight: normal;
+      color: #555;
+    }
+    .preview-route-controls input[type="number"] { width: 52px; }
+    .preview-route-controls select,
+    .preview-route-controls input[type="number"] { font-size: 12px; padding: 1px 4px; }
     a { color: #0b5ed7; }
     label { display: block; margin: 16px 0 6px; font-weight: 500; }
     input[type="url"] { width: 100%; padding: 8px 10px; font-size: 14px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -229,8 +417,62 @@ export const PREVIEW_CLIENT_ID_SCRIPT_HTML = `<script>
 (function () {
   var STORAGE_KEY = 'epds:preview:client_id';
   var input = document.getElementById('client-id-input');
+  // Single shared link-rewriter so per-link controls and the
+  // client_id input both produce the same final href.
+  function applyAllToLinks() {
+    var pageOrigin = window.location.origin;
+    var clientIdValue = input ? input.value.trim() : '';
+    var links = document.querySelectorAll('a[data-preview-link]');
+    for (var i = 0; i < links.length; i++) {
+      var a = links[i];
+      var base = a.getAttribute('data-preview-href') || a.getAttribute('href');
+      a.setAttribute('data-preview-href', base);
+      var url = new URL(base, pageOrigin);
+      if (clientIdValue) url.searchParams.set('client_id', clientIdValue);
+      else url.searchParams.delete('client_id');
+      // Per-link controls bound to this <a> by id.
+      var id = a.getAttribute('id');
+      if (id) {
+        var ctls = document.querySelectorAll(
+          '[data-preview-link-id="' + id + '"][data-preview-param]'
+        );
+        for (var j = 0; j < ctls.length; j++) {
+          var c = ctls[j];
+          var p = c.getAttribute('data-preview-param');
+          var v = c.type === 'checkbox'
+            ? (c.checked ? '1' : '')
+            : String(c.value || '').trim();
+          if (v) url.searchParams.set(p, v);
+          else url.searchParams.delete(p);
+        }
+      }
+      var out = url.origin === pageOrigin
+        ? url.pathname + url.search
+        : url.toString();
+      a.setAttribute('href', out);
+    }
+  }
   if (input) wireClientIdInput(input);
   wireCacheStatus();
+  wirePreviewControls();
+
+  function wirePreviewControls() {
+    // Per-link form controls (number / checkbox / select) declared in
+    // PreviewRoute.controls. Each control carries:
+    //   data-preview-link-id  → id of its <a data-preview-link>
+    //   data-preview-param    → query-param name to write
+    // On change, re-apply every link so this control's value AND any
+    // active client_id land in the link's final href.
+    var controls = document.querySelectorAll('[data-preview-link-id][data-preview-param]');
+    for (var i = 0; i < controls.length; i++) {
+      var c = controls[i];
+      var ev = c.tagName === 'SELECT' || c.type === 'checkbox' ? 'change' : 'input';
+      c.addEventListener(ev, applyAllToLinks);
+    }
+    // Apply initial control values so a fresh page reflects them
+    // before the user touches anything.
+    applyAllToLinks();
+  }
 
   function escape(s) {
     return String(s)
@@ -242,27 +484,6 @@ export const PREVIEW_CLIENT_ID_SCRIPT_HTML = `<script>
   }
 
   function wireClientIdInput(input) {
-    function applyToLinks(value) {
-      var links = document.querySelectorAll('a[data-preview-link]');
-      var pageOrigin = window.location.origin;
-      for (var i = 0; i < links.length; i++) {
-        var a = links[i];
-        var base = a.getAttribute('data-preview-href') || a.getAttribute('href');
-        a.setAttribute('data-preview-href', base);
-        var url = new URL(base, pageOrigin);
-        if (value) {
-          url.searchParams.set('client_id', value);
-        } else {
-          url.searchParams.delete('client_id');
-        }
-        // Cross-origin links keep the explicit origin so the param
-        // carries across services; same-origin stays path-relative.
-        var out = url.origin === pageOrigin
-          ? url.pathname + url.search
-          : url.toString();
-        a.setAttribute('href', out);
-      }
-    }
 
     var validationBox = document.getElementById('validation');
     var validateToken = 0; // invalidate stale in-flight results
@@ -343,14 +564,14 @@ export const PREVIEW_CLIENT_ID_SCRIPT_HTML = `<script>
         initial = window.localStorage.getItem(STORAGE_KEY) || '';
       }
       input.value = initial;
-      applyToLinks(initial);
+      applyAllToLinks();
       // Ensure the address bar matches the input: covers the case where
       // the value came from localStorage and not the URL, so a reload
       // still carries the client_id.
       updateAddressBar(initial);
       if (initial) runValidation(initial); // no debounce on initial load
     } catch (_) {
-      applyToLinks('');
+      applyAllToLinks();
     }
 
     function updateAddressBar(v) {
@@ -372,7 +593,7 @@ export const PREVIEW_CLIENT_ID_SCRIPT_HTML = `<script>
         if (v) window.localStorage.setItem(STORAGE_KEY, v);
         else window.localStorage.removeItem(STORAGE_KEY);
       } catch (_) { /* ignore */ }
-      applyToLinks(v);
+      applyAllToLinks();
       updateAddressBar(v);
       scheduleValidation(v);
     });

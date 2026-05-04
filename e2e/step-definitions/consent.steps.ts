@@ -22,6 +22,7 @@ import {
 } from '../support/flows.js'
 import { sharedBrowser } from '../support/hooks.js'
 import { waitForEmail, extractOtp, clearMailpit } from '../support/mailpit.js'
+import { fillOtp } from '../support/otp.js'
 
 // Steps that drive the untrusted demo client start with an early
 // `if (!testEnv.demoUntrustedUrl) return 'pending'` guard. This is
@@ -255,7 +256,6 @@ When(
 
     const message = await waitForEmail(`to:${this.testEmail}`)
     const otp = await extractOtp(message.ID)
-    await page.fill('#code', otp)
-    await page.click('#form-verify-otp .btn-primary')
+    await fillOtp(page, otp)
   },
 )

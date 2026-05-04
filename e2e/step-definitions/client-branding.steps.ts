@@ -16,15 +16,19 @@ import { getPage, resetBrowserContext } from '../support/utils.js'
 import { sharedBrowser } from '../support/hooks.js'
 import { startSignUpAwaitingConsent } from '../support/flows.js'
 import { waitForEmail, extractOtp, clearMailpit } from '../support/mailpit.js'
+import { fillOtp } from '../support/otp.js'
 
 // A short, stable fragment from the demo's branding.css. Any substring that
 // only the injected CSS would produce works — we pick the dark body bg since
 // it's also what makes the visual difference in the comparison scenario.
 const INJECTED_CSS_SIGNATURE = 'body { background: #1a1208'
 
-// Default background declared in the auth-service login-page template when
-// no branding CSS is injected. Matches demo metadata's `background_color`.
-const DEFAULT_LOGIN_BG_RGB = 'rgb(248, 249, 250)' // #f8f9fa
+// Default page background the auth-service login-page renders when no
+// branding CSS is injected — the `--page-bg` CSS var's default value.
+// Since PR 110 the page no longer reads from client metadata's
+// `background_color`; only injected CSS (gated to trusted clients) can
+// retint it.
+const DEFAULT_LOGIN_BG_RGB = 'rgb(232, 232, 232)' // #E8E8E8
 
 async function waitForLoginPage(world: EpdsWorld): Promise<void> {
   const page = getPage(world)
@@ -185,8 +189,7 @@ When(
 
     const message = await waitForEmail(`to:${email}`)
     const otp = await extractOtp(message.ID)
-    await page.fill('#code', otp)
-    await page.click('#form-verify-otp .btn-primary')
+    await fillOtp(page, otp)
 
     // Wait for the choose-handle page — don't submit the handle form
     await page.waitForURL('**/auth/choose-handle', { timeout: 30_000 })
@@ -200,18 +203,99 @@ When(
 When(
   'a user navigates to the account recovery page via the trusted demo client',
   async function (this: EpdsWorld) {
-    // Navigate to the auth-service login page via the trusted demo,
-    // which creates an auth flow with the trusted client_id.
+    // First reach the auth-service login page via the trusted demo so the
+    // auth_flow cookie carries the trusted client_id — recovery's CSS
+    // injection keys off that cookie. Then navigate to /auth/recover
+    // directly: PR 110 removed the login page's #recovery-link, so the
+    // recovery flow is only reachable via direct URL now.
     await navigateToAuthLoginPage(this, testEnv.demoTrustedUrl)
-
     const page = getPage(this)
-    // The recovery link is visible when the OTP step is showing
-    await expect(page.locator('#recovery-link')).toBeVisible({
-      timeout: 10_000,
-    })
-    await page.click('#recovery-link')
-    // Wait for the recovery page to load
-    await page.waitForURL('**/auth/recover**', { timeout: 30_000 })
+    await page.goto(
+      `${testEnv.authUrl}/auth/recover?request_uri=urn:ietf:params:oauth:request_uri:placeholder`,
+    )
+  },
+)
+
+// ---------------------------------------------------------------------------
+// Favicon injection — trusted client's branding.favicon_url
+// ---------------------------------------------------------------------------
+
+// Default favicon links emitted by renderFaviconTag() when no custom
+// favicon is supplied. Mirrors the constants in the favicon unit test
+// and `e2e/step-definitions/favicon.steps.ts`.
+const DEFAULT_FAVICON_LIGHT =
+  '<link rel="icon" href="/static/favicon.svg" media="(prefers-color-scheme: light)" type="image/svg+xml">'
+const DEFAULT_FAVICON_DARK =
+  '<link rel="icon" href="/static/favicon-dark.svg" media="(prefers-color-scheme: dark)" type="image/svg+xml">'
+
+// Custom favicon paths served by the demo container (see
+// packages/demo/public/favicon-demo*.svg). The advertised
+// `branding.favicon_url` and `branding.favicon_url_dark` resolve to
+// ${PUBLIC_URL}/favicon-demo.svg and ${PUBLIC_URL}/favicon-demo-dark.svg,
+// so the rendered <link rel="icon" ...> tags contain these substrings on
+// trusted flows. Browsers may normalise href to the absolute form; the
+// path-only substring match is robust to that.
+const TRUSTED_CLIENT_FAVICON_PATH = '/favicon-demo.svg'
+const TRUSTED_CLIENT_FAVICON_DARK_PATH = '/favicon-demo-dark.svg'
+
+Then(
+  "the login page HTML contains the trusted client's custom favicon",
+  async function (this: EpdsWorld) {
+    await waitForLoginPage(this)
+    const html = await getPage(this).content()
+    expect(html).toContain(TRUSTED_CLIENT_FAVICON_PATH)
+    // When both light and dark are advertised, the light <link> carries
+    // the prefers-color-scheme: light media query — assert the gating is
+    // present so this step fails if the page emits a single bare <link>
+    // (which would happen if the dark URL silently dropped).
+    expect(html).toContain('media="(prefers-color-scheme: light)"')
+  },
+)
+
+Then(
+  "the login page HTML contains the trusted client's dark-theme favicon",
+  async function (this: EpdsWorld) {
+    await waitForLoginPage(this)
+    const html = await getPage(this).content()
+    expect(html).toContain(TRUSTED_CLIENT_FAVICON_DARK_PATH)
+    expect(html).toContain('media="(prefers-color-scheme: dark)"')
+  },
+)
+
+Then(
+  "the login page HTML does not contain the trusted client's custom favicon",
+  async function (this: EpdsWorld) {
+    await waitForLoginPage(this)
+    const html = await getPage(this).content()
+    expect(html).not.toContain(TRUSTED_CLIENT_FAVICON_PATH)
+  },
+)
+
+Then(
+  'the login page HTML does not contain the default ePDS favicon links',
+  async function (this: EpdsWorld) {
+    await waitForLoginPage(this)
+    const html = await getPage(this).content()
+    expect(html).not.toContain(DEFAULT_FAVICON_LIGHT)
+    expect(html).not.toContain(DEFAULT_FAVICON_DARK)
+  },
+)
+
+Then(
+  'the login page HTML contains the default ePDS favicon links',
+  async function (this: EpdsWorld) {
+    await waitForLoginPage(this)
+    const html = await getPage(this).content()
+    expect(html).toContain(DEFAULT_FAVICON_LIGHT)
+    expect(html).toContain(DEFAULT_FAVICON_DARK)
+  },
+)
+
+Then(
+  "the page HTML contains the trusted client's custom favicon",
+  async function (this: EpdsWorld) {
+    const html = await getPage(this).content()
+    expect(html).toContain(TRUSTED_CLIENT_FAVICON_PATH)
   },
 )
 
@@ -269,8 +353,7 @@ When(
 
     const message = await waitForEmail(`to:${this.testEmail}`)
     const otp = await extractOtp(message.ID)
-    await page.fill('#code', otp)
-    await page.click('#form-verify-otp .btn-primary')
+    await fillOtp(page, otp)
 
     // Wait for the consent screen's Authorize button — this is the
     // stock @atproto/oauth-provider consent UI served by pds-core at

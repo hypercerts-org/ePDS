@@ -32,12 +32,27 @@ BeforeAll(async function () {
   }
 })
 
-Before(async function (this: EpdsWorld) {
+Before(async function (this: EpdsWorld, scenario) {
   this.browser = sharedBrowser
   this.context = await sharedBrowser!.newContext()
   this.page = await this.context.newPage()
   this.page.setDefaultNavigationTimeout(30_000)
   this.page.setDefaultTimeout(15_000)
+  // Capture browser console + page errors per scenario for post-mortem
+  // debugging. Stream is reattached by resetBrowserContext so a context
+  // reset mid-scenario doesn't lose further messages.
+  const { createWriteStream } = await import('node:fs')
+  const { attachConsoleCapture } = await import('./utils.js')
+  const safeName = scenario.pickle.name
+    .replaceAll(/[^a-z0-9]+/gi, '-')
+    .replaceAll(/^-|-$/g, '')
+    .toLowerCase()
+    .slice(0, 100)
+  this.consoleCapture = createWriteStream(
+    `reports/screenshots/${safeName}.console.log`,
+    { flags: 'w' },
+  )
+  attachConsoleCapture(this.page, this.consoleCapture)
 })
 
 After(async function (this: EpdsWorld, scenario) {
@@ -51,9 +66,33 @@ After(async function (this: EpdsWorld, scenario) {
       path: `reports/screenshots/${safeName}.png`,
       fullPage: true,
     })
+    try {
+      const { writeFile } = await import('node:fs/promises')
+      const content = await this.page.content()
+      await writeFile(`reports/screenshots/${safeName}.html`, content)
+    } catch (err) {
+      // Best-effort: if page.content() or writeFile fails (closed context,
+      // disk error), log but don't fail the already-failing scenario.
+      console.warn(
+        `After hook: failed to capture page HTML for "${safeName}":`,
+        err,
+      )
+    }
   }
   if (this.secondaryContext) await this.secondaryContext.close()
   if (this.context) await this.context.close()
+
+  // Close the per-scenario console-capture stream so file descriptors
+  // don't leak across a long run and buffered output is flushed to
+  // disk before the next scenario starts. resetBrowserContext
+  // re-attaches THIS same stream to the new Page (see utils.ts) rather
+  // than creating a new one, so there is only ever one stream per
+  // scenario to close here.
+  const consoleCapture = this.consoleCapture
+  this.consoleCapture = undefined
+  if (consoleCapture) {
+    await new Promise<void>((resolve) => consoleCapture.end(resolve))
+  }
 
   // Clear emails sent to this scenario's test email so they don't bleed into the next scenario
   if (testEnv.mailpitPass && this.testEmail) {
