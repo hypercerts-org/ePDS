@@ -35,6 +35,36 @@ import { fillOtp } from '../support/otp.js'
 // Note: When('the user clicks {string}') lives in common.steps.ts — it is a
 // generic UI interaction step used here for "Authorize" and "Deny access" buttons.
 
+function requireScenarioEmail(world: EpdsWorld): string {
+  if (!world.testEmail) {
+    throw new Error(
+      'No test email set — "a returning user has a PDS account" step must run first',
+    )
+  }
+  return world.testEmail
+}
+
+function requireScenarioHandle(world: EpdsWorld): string {
+  if (!world.userHandle) {
+    throw new Error(
+      'No user handle set — "a returning user has a PDS account" step must run first',
+    )
+  }
+  return world.userHandle
+}
+
+function formatPublicHandle(handle: string): string {
+  return handle.startsWith('@') ? handle : `@${handle}`
+}
+
+function formatRawPublicHandle(handle: string): string {
+  return handle.startsWith('@') ? handle.slice(1) : handle
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 Then('a consent screen is displayed', async function (this: EpdsWorld) {
   const page = getPage(this)
 
@@ -100,6 +130,69 @@ When(
     if (!testEnv.demoUntrustedUrl) return 'pending'
     const page = getPage(this)
     await page.goto(testEnv.demoUntrustedUrl)
+  },
+)
+
+When(
+  'the untrusted demo client starts a new OAuth flow with random handle mode',
+  async function (this: EpdsWorld) {
+    if (!testEnv.demoUntrustedUrl) return 'pending'
+    const page = getPage(this)
+    const base = testEnv.demoUntrustedUrl.replace(/\/$/, '')
+    await page.goto(`${base}/flow3`)
+    await page.click('button[type=submit]')
+  },
+)
+
+Then(
+  'the consent page shows the email as the primary account identifier',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    await expect(page.getByText(requireScenarioEmail(this))).toBeVisible()
+  },
+)
+
+Then(
+  'the consent identity tooltip exposes the public AT Protocol handle',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    const publicHandle = formatPublicHandle(requireScenarioHandle(this))
+    const tooltipControl = page.getByRole('button', {
+      name: 'Identity information',
+    })
+
+    await expect(tooltipControl).toHaveAttribute('type', 'button')
+    await expect(tooltipControl).toHaveAttribute('aria-expanded', 'false')
+    const describedBy = await tooltipControl.getAttribute('aria-describedby')
+    expect(describedBy?.trim()).toBeTruthy()
+
+    await tooltipControl.click()
+    await expect(tooltipControl).toHaveAttribute('aria-expanded', 'true')
+
+    const tooltip = page.locator(`#${describedBy?.trim()}`)
+    await expect(tooltip).toHaveAttribute('role', 'tooltip')
+    await expect(tooltip).toBeVisible()
+    await expect(tooltip).toContainText('Public AT Protocol handle:')
+    await expect(tooltip).toContainText(publicHandle)
+  },
+)
+
+Then(
+  'the public handle is not shown as the primary consent identifier',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    const scenarioHandle = requireScenarioHandle(this)
+    const primaryHandlePatterns = [
+      formatPublicHandle(scenarioHandle),
+      formatRawPublicHandle(scenarioHandle),
+    ].map(
+      (publicHandle) =>
+        new RegExp(`\\byour\\s+${escapeRegex(publicHandle)}\\s+account\\b`),
+    )
+
+    for (const primaryHandlePattern of primaryHandlePatterns) {
+      await expect(page.getByText(primaryHandlePattern)).toHaveCount(0)
+    }
   },
 )
 

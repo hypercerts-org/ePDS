@@ -230,9 +230,12 @@ export function buildChooserEnrichmentScript(): string {
     icon.addEventListener('click', function(e) {
       e.preventDefault();
       e.stopPropagation();
-      pinned = tooltip.hidden;
+      pinned = !pinned;
       if (pinned) show();
-      else hide();
+      else {
+        tooltip.hidden = true;
+        icon.setAttribute('aria-expanded', 'false');
+      }
     });
 
     el.insertAdjacentElement('afterend', tooltip);
