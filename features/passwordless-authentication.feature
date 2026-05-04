@@ -337,6 +337,7 @@ Feature: Passwordless authentication via email OTP
     And the user enters the OTP code
     Then the response body is not raw JSON
     And the response body explains that sign-in timed out
+    And the page HTML contains the trusted client's custom CSS
 
   # --- Brute force protection ---
 
