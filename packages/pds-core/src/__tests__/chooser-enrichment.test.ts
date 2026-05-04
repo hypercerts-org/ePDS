@@ -62,8 +62,15 @@ class FakeElement {
   readonly dataset: Record<string, string> = {}
   readonly classList = new FakeClassList()
   readonly style: Record<string, string> = {}
+  id = ''
+  hidden = false
+  type = ''
   parentElement: FakeElement | null = null
   textContentOverride: string | null = null
+  private readonly eventListeners = new Map<
+    string,
+    Array<(event: FakeEvent) => void>
+  >()
 
   constructor(
     readonly tagName: string,
@@ -77,12 +84,30 @@ class FakeElement {
     this.childNodes.push(child)
   }
 
+  insertAdjacentElement(position: string, element: FakeElement): void {
+    if (position !== 'afterend' || !this.parentElement) return
+    const siblings = this.parentElement.childNodes
+    const index = siblings.indexOf(this)
+    if (index === -1) return
+    element.parentElement = this.parentElement
+    siblings.splice(index + 1, 0, element)
+  }
+
   set textContent(value: string) {
     this.textContentOverride = value
   }
 
   set className(value: string) {
     this.classList.set(value)
+  }
+
+  setAttribute(name: string, value: string): void {
+    this.attributes[name] = value
+    if (name === 'id') this.id = value
+  }
+
+  getAttribute(name: string): string | null {
+    return this.attributes[name] ?? null
   }
 
   get textContent(): string {
@@ -95,6 +120,17 @@ class FakeElement {
   }
 
   closest(selector: string): FakeElement | null {
+    if (selector === 'a') {
+      if (this.tagName === 'a') return this
+
+      let current = this.parentElement
+      while (current) {
+        if (current.tagName === 'a') return current
+        current = current.parentElement
+      }
+      return null
+    }
+
     if (selector !== '[role="button"][tabindex="0"]') return null
 
     if (this.attributes.role === 'button' && this.attributes.tabindex === '0') {
@@ -114,6 +150,20 @@ class FakeElement {
     return null
   }
 
+  addEventListener(event: string, listener: (event: FakeEvent) => void): void {
+    const listeners = this.eventListeners.get(event) ?? []
+    listeners.push(listener)
+    this.eventListeners.set(event, listeners)
+  }
+
+  dispatchEvent(eventName: string): FakeEvent {
+    const event = new FakeEvent()
+    for (const listener of this.eventListeners.get(eventName) ?? []) {
+      listener(event)
+    }
+    return event
+  }
+
   querySelectorAll(selector: string): FakeElement[] {
     const descendants = this.descendants()
     if (selector === 'button, a') {
@@ -123,6 +173,9 @@ class FakeElement {
     }
     if (selector === '[role="button"]') {
       return descendants.filter((el) => el.attributes.role === 'button')
+    }
+    if (selector === 'h2') {
+      return descendants.filter((el) => el.tagName === 'h2')
     }
     return []
   }
@@ -141,6 +194,22 @@ class FakeElement {
         ) ?? null
       )
     }
+    if (selector === 'meta[name="epds-handle-mode"]') {
+      return (
+        this.descendants().find(
+          (el) =>
+            el.tagName === 'meta' && el.attributes.name === 'epds-handle-mode',
+        ) ?? null
+      )
+    }
+    if (selector === 'meta[name="epds-auth-origin"]') {
+      return (
+        this.descendants().find(
+          (el) =>
+            el.tagName === 'meta' && el.attributes.name === 'epds-auth-origin',
+        ) ?? null
+      )
+    }
     return null
   }
 
@@ -156,6 +225,19 @@ class FakeElement {
     }
     visit(this)
     return result
+  }
+}
+
+class FakeEvent {
+  defaultPrevented = false
+  propagationStopped = false
+
+  preventDefault(): void {
+    this.defaultPrevented = true
+  }
+
+  stopPropagation(): void {
+    this.propagationStopped = true
   }
 }
 
@@ -184,8 +266,8 @@ class FakeDocument {
     return new FakeElement(tagName)
   }
 
-  querySelector(): null {
-    return null
+  querySelector(selector: string): FakeElement | null {
+    return this.root.querySelector(selector)
   }
 
   addEventListener(event: string, listener: () => void): void {
@@ -202,9 +284,19 @@ function appendText(parent: FakeElement, text: string): void {
   parent.appendChild(new FakeTextNode(text))
 }
 
-function runChooserEnrichmentScript(document: FakeDocument): void {
+function runChooserEnrichmentScript(
+  document: FakeDocument,
+  globals: {
+    __sessions?: unknown[]
+    __deviceSessions?: unknown[]
+  } = {},
+  location: { pathname: string; search?: string } = {
+    pathname: '/oauth/authorize',
+    search: '',
+  },
+): void {
   const fakeWindow: Record<string, unknown> = {
-    location: { search: '' },
+    location,
   }
   const sandbox = {
     document,
@@ -222,12 +314,14 @@ function runChooserEnrichmentScript(document: FakeDocument): void {
   }
 
   runInNewContext(buildChooserEnrichmentScript(), sandbox) // NOSONAR — test executes only the deterministic script generated in this repository.
-  fakeWindow.__sessions = [
+  fakeWindow.__sessions = globals.__sessions ?? [
     {
+      selected: true,
       account: {
         sub: 'did:plc:alice',
         email: 'alice@example.test',
         preferred_username: 'alice.test',
+        selected: true,
       },
     },
     {
@@ -238,7 +332,118 @@ function runChooserEnrichmentScript(document: FakeDocument): void {
       },
     },
   ]
+  if (globals.__deviceSessions) {
+    fakeWindow.__deviceSessions = globals.__deviceSessions
+  }
   document.dispatchDOMContentLoaded()
+}
+
+function createChooserRow(
+  document: FakeDocument,
+  identifierText: string,
+): { row: FakeElement; wrap: FakeElement; identifier: FakeElement } {
+  const row = new FakeElement('div', { role: 'button', tabindex: '0' })
+  const wrap = new FakeElement('span')
+  const identifier = new FakeElement('span')
+  appendText(identifier, identifierText)
+  wrap.appendChild(identifier)
+  row.appendChild(wrap)
+  document.root.appendChild(row)
+  return { row, wrap, identifier }
+}
+
+function createAccountListRow(
+  document: FakeDocument,
+  identifierText: string,
+  { emptyTitle = false }: { emptyTitle?: boolean } = {},
+): {
+  anchor: FakeElement
+  title?: FakeElement
+  wrap: FakeElement
+  identifier: FakeElement
+} {
+  const anchor = new FakeElement('a', {
+    href: '/account/did:plc:alice',
+    'aria-label': 'View and manage account for alice.test',
+  })
+  const wrap = new FakeElement('span')
+  const identifier = new FakeElement('span')
+  const title = emptyTitle ? new FakeElement('h2') : undefined
+
+  if (title) anchor.appendChild(title)
+  appendText(identifier, identifierText)
+  wrap.appendChild(identifier)
+  anchor.appendChild(wrap)
+  document.root.appendChild(anchor)
+  return { anchor, title, wrap, identifier }
+}
+
+function createAccountSelector(
+  document: FakeDocument,
+  identifierTexts: string[],
+): { button: FakeElement; identifiers: FakeElement[]; wrap: FakeElement } {
+  const button = new FakeElement('button', {
+    'aria-label': 'Select an account',
+  })
+  const wrap = new FakeElement('span')
+  const identifiers = identifierTexts.map((identifierText) => {
+    const identifier = new FakeElement('p')
+    appendText(identifier, identifierText)
+    wrap.appendChild(identifier)
+    return identifier
+  })
+  button.appendChild(wrap)
+  document.root.appendChild(button)
+  return { button, identifiers, wrap }
+}
+
+function createConsentIdentity(
+  document: FakeDocument,
+  textBefore: string,
+  identifierText: string,
+  textAfter: string,
+): { container: FakeElement; identifier: FakeElement } {
+  const container = new FakeElement('p')
+  appendText(container, textBefore)
+  const identifier = new FakeElement('b')
+  appendText(identifier, identifierText)
+  container.appendChild(identifier)
+  appendText(container, textAfter)
+  document.root.appendChild(container)
+  return { container, identifier }
+}
+
+function selectedAliceSession(preferredUsername = 'alice.test'): unknown[] {
+  return [
+    {
+      selected: true,
+      account: {
+        sub: 'did:plc:alice',
+        email: 'alice@example.test',
+        preferred_username: preferredUsername,
+        selected: true,
+      },
+    },
+  ]
+}
+
+function aliceDeviceSession(): unknown[] {
+  return [
+    {
+      account: {
+        sub: 'did:plc:alice',
+        email: 'alice@example.test',
+        preferred_username: 'alice.test',
+      },
+      selected: true,
+    },
+  ]
+}
+
+function appendHandleModeMeta(document: FakeDocument, mode: string): void {
+  document.root.appendChild(
+    new FakeElement('meta', { name: 'epds-handle-mode', content: mode }),
+  )
 }
 
 describe('buildChooserEnrichmentScript account row scoping', () => {
@@ -261,13 +466,11 @@ describe('buildChooserEnrichmentScript account row scoping', () => {
 
   it('enriches a chooser-like account row', () => {
     const document = new FakeDocument()
-    const row = new FakeElement('div', { role: 'button', tabindex: '0' })
-    const wrap = new FakeElement('span')
-    const handle = new FakeElement('span')
-    appendText(handle, 'alice.test')
-    wrap.appendChild(handle)
-    row.appendChild(wrap)
-    document.root.appendChild(row)
+    const {
+      row,
+      wrap,
+      identifier: handle,
+    } = createChooserRow(document, 'alice.test')
 
     runChooserEnrichmentScript(document)
 
@@ -280,6 +483,248 @@ describe('buildChooserEnrichmentScript account row scoping', () => {
     expect(emailLabel).toBeInstanceOf(FakeElement)
     expect(emailLabel?.textContent).toBe('alice@example.test')
     expect(handle.classList.contains('epds-handle-label')).toBe(true)
+    expect(handle.style.display).toBeUndefined()
+    expect(row.getAttribute('aria-label')).toBe('Sign in as alice@example.test')
+  })
+
+  it('uses email as the visible random-mode identifier and describes the hidden handle', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'random')
+    const {
+      row,
+      wrap,
+      identifier: handle,
+    } = createChooserRow(document, 'alice.test')
+
+    runChooserEnrichmentScript(document)
+
+    const emailLabel = wrap.childNodes.find(
+      (child) =>
+        child instanceof FakeElement &&
+        child.classList.contains('epds-email-label'),
+    ) as FakeElement | undefined
+    const handleDescription = row.childNodes.find(
+      (child) =>
+        child instanceof FakeElement &&
+        child.classList.contains('epds-hidden-handle-description'),
+    ) as FakeElement | undefined
+
+    expect(emailLabel?.textContent).toBe('alice@example.test')
+    expect(handle.style.display).toBe('none')
+    expect(handleDescription?.textContent).toBe('Underlying handle: alice.test')
+    expect(row.getAttribute('aria-describedby')).toBe(handleDescription?.id)
+    expect(emailLabel?.getAttribute('title')).toBeNull()
+    expect(row.getAttribute('aria-label')).toBe('Sign in as alice@example.test')
+  })
+
+  it('does not hide random-mode handles outside oauth authorize', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'random')
+    const { wrap, identifier, anchor } = createAccountListRow(
+      document,
+      'alice.test',
+    )
+
+    runChooserEnrichmentScript(
+      document,
+      {},
+      { pathname: '/account', search: '' },
+    )
+
+    expect(wrap.textContent).toContain('alice@example.test')
+    expect(identifier.style.display).toBeUndefined()
+    expect(anchor.getAttribute('aria-label')).toBe(
+      'View and manage account for alice@example.test (@alice.test)',
+    )
+  })
+
+  it('uses an empty account-list title slot for the email on account pages', () => {
+    const document = new FakeDocument()
+    const { title, identifier, anchor } = createAccountListRow(
+      document,
+      'alice.test',
+      { emptyTitle: true },
+    )
+
+    runChooserEnrichmentScript(
+      document,
+      {},
+      { pathname: '/account', search: '' },
+    )
+
+    expect(title?.textContent).toBe('alice@example.test')
+    expect(identifier.textContent).toBe('alice.test')
+    expect(identifier.style.display).toBeUndefined()
+    expect(anchor.getAttribute('aria-label')).toBe(
+      'View and manage account for alice@example.test (@alice.test)',
+    )
+  })
+
+  it('leaves non-account links on account pages untouched', () => {
+    const document = new FakeDocument()
+    const anotherAccount = new FakeElement('a', {
+      href: '/account/login',
+      'aria-label': 'Sign in with another account',
+    })
+    appendText(anotherAccount, 'Sign in with another account')
+    document.root.appendChild(anotherAccount)
+    const terms = new FakeElement('a', { href: '/terms' })
+    appendText(terms, 'Terms')
+    document.root.appendChild(terms)
+    const prose = new FakeElement('p')
+    appendText(prose, 'Manage alice.test from this page.')
+    document.root.appendChild(prose)
+
+    runChooserEnrichmentScript(
+      document,
+      {},
+      { pathname: '/account', search: '' },
+    )
+
+    expect(anotherAccount.textContent).toBe('Sign in with another account')
+    expect(terms.textContent).toBe('Terms')
+    expect(prose.textContent).toBe('Manage alice.test from this page.')
+    expect(document.root.textContent).not.toContain('alice@example.test')
+  })
+
+  it('adds email next to the current account selector handle on account detail pages', () => {
+    const document = new FakeDocument()
+    const { button, identifiers, wrap } = createAccountSelector(document, [
+      'alice.test',
+    ])
+
+    runChooserEnrichmentScript(
+      document,
+      { __sessions: [], __deviceSessions: aliceDeviceSession() },
+      { pathname: '/account/did:plc:alice', search: '' },
+    )
+
+    expect(identifiers[0].textContent).toBe('alice.test')
+    expect(identifiers[0].style.display).toBeUndefined()
+    expect(wrap.textContent).toContain('alice@example.test')
+    expect(button.getAttribute('aria-label')).toBe(
+      'Select account alice@example.test (@alice.test)',
+    )
+  })
+
+  it('collapses duplicate current account selector handle lines to email plus handle', () => {
+    const document = new FakeDocument()
+    const { button, identifiers } = createAccountSelector(document, [
+      'alice.test',
+      'alice.test',
+    ])
+
+    runChooserEnrichmentScript(
+      document,
+      { __sessions: [], __deviceSessions: aliceDeviceSession() },
+      { pathname: '/account/did:plc:alice', search: '' },
+    )
+
+    expect(identifiers[0].textContent).toBe('alice@example.test')
+    expect(identifiers[1].textContent).toBe('alice.test')
+    expect(button.textContent).toBe('alice@example.testalice.test')
+    expect(button.getAttribute('aria-label')).toBe(
+      'Select account alice@example.test (@alice.test)',
+    )
+  })
+
+  it('keeps the current account selector handle visible when account pages use random mode', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'random')
+    const { identifiers, wrap } = createAccountSelector(document, [
+      'alice.test',
+    ])
+
+    runChooserEnrichmentScript(
+      document,
+      { __sessions: [], __deviceSessions: aliceDeviceSession() },
+      { pathname: '/account/did:plc:alice', search: '' },
+    )
+
+    expect(identifiers[0].textContent).toBe('alice.test')
+    expect(identifiers[0].style.display).toBeUndefined()
+    expect(wrap.textContent).toContain('alice@example.test')
+  })
+
+  it('does not enrich non-selector controls on account detail pages', () => {
+    const document = new FakeDocument()
+    createAccountSelector(document, ['alice.test'])
+    const connectedApp = new FakeElement('button', {
+      'aria-label': 'Open app settings',
+    })
+    appendText(connectedApp, 'alice.test')
+    document.root.appendChild(connectedApp)
+    const signOut = new FakeElement('button', { 'aria-label': 'Sign out' })
+    appendText(signOut, 'Sign out alice.test')
+    document.root.appendChild(signOut)
+    const breadcrumb = new FakeElement('a', { href: '/account' })
+    appendText(breadcrumb, 'alice.test')
+    document.root.appendChild(breadcrumb)
+
+    runChooserEnrichmentScript(
+      document,
+      { __sessions: [], __deviceSessions: aliceDeviceSession() },
+      { pathname: '/account/did:plc:alice', search: '' },
+    )
+
+    expect(connectedApp.textContent).toBe('alice.test')
+    expect(signOut.textContent).toBe('Sign out alice.test')
+    expect(breadcrumb.textContent).toBe('alice.test')
+  })
+
+  it('enriches exact at-prefixed handle matches', () => {
+    const document = new FakeDocument()
+    const { wrap, identifier } = createChooserRow(document, '@alice.test')
+
+    runChooserEnrichmentScript(document)
+
+    expect(wrap.textContent).toContain('alice@example.test')
+    expect(identifier.classList.contains('epds-handle-label')).toBe(true)
+  })
+
+  it('enriches exact DID matches', () => {
+    const document = new FakeDocument()
+    const { wrap, identifier } = createChooserRow(document, 'did:plc:alice')
+
+    runChooserEnrichmentScript(document)
+
+    expect(wrap.textContent).toContain('alice@example.test')
+    expect(identifier.classList.contains('epds-handle-label')).toBe(true)
+  })
+
+  it('enriches rows from captured device sessions', () => {
+    const document = new FakeDocument()
+    const { wrap, identifier } = createChooserRow(document, 'carol.test')
+
+    runChooserEnrichmentScript(document, {
+      __sessions: [],
+      __deviceSessions: [
+        {
+          account: {
+            sub: 'did:plc:carol',
+            email: 'carol@example.test',
+            preferred_username: 'carol.test',
+          },
+          selected: true,
+        },
+      ],
+    })
+
+    expect(wrap.textContent).toContain('carol@example.test')
+    expect(identifier.classList.contains('epds-handle-label')).toBe(true)
+  })
+
+  it('does not enrich substring-only chooser row prose', () => {
+    const document = new FakeDocument()
+    const { wrap, identifier } = createChooserRow(
+      document,
+      'Signed in as alice.test',
+    )
+
+    runChooserEnrichmentScript(document)
+
+    expect(wrap.textContent).not.toContain('alice@example.test')
+    expect(identifier.classList.contains('epds-handle-label')).toBe(false)
   })
 
   it('enriches multiple chooser-like account rows', () => {
@@ -301,6 +746,161 @@ describe('buildChooserEnrichmentScript account row scoping', () => {
     expect(rows[1].wrap.textContent).toContain('bob@example.test')
     expect(rows[0].handle.classList.contains('epds-handle-label')).toBe(true)
     expect(rows[1].handle.classList.contains('epds-handle-label')).toBe(true)
+  })
+})
+
+describe('buildChooserEnrichmentScript consent identity enrichment', () => {
+  it('keeps the picker consent handle visible and adds an accessible email tooltip', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'picker')
+    const { container, identifier } = createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'alice.test',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(document)
+
+    const icon = container.childNodes.find(
+      (child) =>
+        child instanceof FakeElement &&
+        child.classList.contains('epds-identity-info-icon'),
+    ) as FakeElement | undefined
+    const tooltip = container.childNodes.find(
+      (child) =>
+        child instanceof FakeElement &&
+        child.classList.contains('epds-identity-tooltip'),
+    ) as FakeElement | undefined
+
+    expect(identifier.textContent).toBe('alice.test')
+    expect(icon).toBeInstanceOf(FakeElement)
+    expect(icon?.tagName).toBe('button')
+    expect(icon?.getAttribute('aria-describedby')).toBe(tooltip?.id)
+    expect(tooltip?.textContent).toBe(
+      'This handle is associated with alice@example.test.',
+    )
+  })
+
+  it('treats picker-with-random and default consent like picker consent', () => {
+    for (const mode of ['picker-with-random', null]) {
+      const document = new FakeDocument()
+      if (mode) appendHandleModeMeta(document, mode)
+      const { container, identifier } = createConsentIdentity(
+        document,
+        'Example App wants to access your ',
+        'alice.test',
+        ' account',
+      )
+
+      runChooserEnrichmentScript(document, {
+        __sessions: selectedAliceSession(),
+      })
+
+      expect(identifier.textContent).toBe('alice.test')
+      expect(container.textContent).toContain(
+        'This handle is associated with alice@example.test.',
+      )
+    }
+  })
+
+  it('shows the email for random consent and exposes the public handle in the tooltip', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'random')
+    const { container, identifier } = createConsentIdentity(
+      document,
+      'Grant access to your ',
+      '@alice.test',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(document, {
+      __sessions: selectedAliceSession('@alice.test'),
+    })
+
+    expect(identifier.textContent).toBe('alice@example.test')
+    expect(container.textContent).toContain(
+      'Public AT Protocol handle: @alice.test. Handles are public account names used by AT Protocol apps.',
+    )
+    expect(container.textContent).not.toContain('@@alice.test')
+  })
+
+  it('leaves generic and legal consent paragraphs untouched', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'picker')
+    const legal = new FakeElement('p')
+    appendText(
+      legal,
+      'By clicking Authorize, you confirm that alice.test is your account.',
+    )
+    document.root.appendChild(legal)
+    const unrelated = createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'bob.test',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(document, { __sessions: selectedAliceSession() })
+
+    expect(document.root.textContent).not.toContain('This handle is associated')
+    expect(unrelated.identifier.textContent).toBe('bob.test')
+  })
+
+  it('opens the tooltip on hover/focus and toggles it on click/tap', () => {
+    const document = new FakeDocument()
+    const { container } = createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'alice.test',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(document, { __sessions: selectedAliceSession() })
+
+    const icon = container.childNodes.find(
+      (child) =>
+        child instanceof FakeElement &&
+        child.classList.contains('epds-identity-info-icon'),
+    ) as FakeElement
+    const tooltip = container.childNodes.find(
+      (child) =>
+        child instanceof FakeElement &&
+        child.classList.contains('epds-identity-tooltip'),
+    ) as FakeElement
+
+    expect(tooltip.hidden).toBe(true)
+    icon.dispatchEvent('mouseenter')
+    expect(tooltip.hidden).toBe(false)
+    icon.dispatchEvent('mouseleave')
+    expect(tooltip.hidden).toBe(true)
+    icon.dispatchEvent('focus')
+    expect(tooltip.hidden).toBe(false)
+    icon.dispatchEvent('blur')
+    expect(tooltip.hidden).toBe(true)
+    const click = icon.dispatchEvent('click')
+    expect(click.defaultPrevented).toBe(true)
+    expect(tooltip.hidden).toBe(false)
+    icon.dispatchEvent('click')
+    expect(tooltip.hidden).toBe(true)
+  })
+
+  it('does not apply consent tooltip behavior on account pages', () => {
+    const document = new FakeDocument()
+    createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'alice.test',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(
+      document,
+      { __sessions: selectedAliceSession() },
+      { pathname: '/account', search: '' },
+    )
+
+    expect(document.root.textContent).not.toContain('This handle is associated')
   })
 })
 
@@ -662,13 +1262,15 @@ describe('buildChooserEnrichmentScript handle-mode hiding (HYPER-268 Layer 4)', 
     expect(script).toContain('querySelector(\'meta[name="epds-handle-mode"]\')')
   })
 
-  it("hides the handle span and sets a title tooltip when mode is 'random'", () => {
+  it("hides the handle span and adds an accessible description when mode is 'random'", () => {
     const script = buildChooserEnrichmentScript()
-    // Hiding strategy: display:none on the handle element + title
-    // attribute on the email label carrying the original handle text.
-    expect(script).toContain("hideHandle = handleMode === 'random'")
+    // Hiding strategy: display:none on the handle element plus an
+    // aria-describedby target carrying the original handle text.
+    expect(script).toContain(
+      "hideHandle = handleMode === 'random' && isOauthAuthorizePage()",
+    )
     expect(script).toContain("m.el.style.display = 'none'")
-    expect(script).toContain('label.title = ownText')
+    expect(script).toContain("appendAriaReference(row, 'aria-describedby'")
   })
 
   it('leaves the handle visible for picker / picker-with-random', () => {
