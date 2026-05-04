@@ -122,6 +122,28 @@ describe('createPreviewChooserHandler', () => {
       expect(res.body).toContain(`function readHandleMode()`)
     })
 
+    it('places the enrichment script before __sessions hydration and includes fixture identities', async () => {
+      const handler = createPreviewChooserHandler(makeDeps())!
+      const res = mockRes()
+      await handler({ query: { numAccounts: '2' } }, res)
+      const scriptIndex = res.body!.indexOf('function readHandleMode()')
+      const hydrationIndex = res.body!.indexOf('window["__sessions"]')
+
+      expect(scriptIndex).toBeGreaterThan(-1)
+      expect(hydrationIndex).toBeGreaterThan(-1)
+      expect(scriptIndex).toBeLessThan(hydrationIndex)
+      expect(res.body).toContain(
+        String.raw`\"preferred_username\":\"alice.preview.example\"`,
+      )
+      expect(res.body).toContain(
+        String.raw`\"email\":\"alice@preview.example\"`,
+      )
+      expect(res.body).toContain(
+        String.raw`\"preferred_username\":\"bob.preview.example\"`,
+      )
+      expect(res.body).toContain(String.raw`\"email\":\"bob@preview.example\"`)
+    })
+
     it('reads the override from ?epds_handle_mode (production param name)', async () => {
       const handler = createPreviewChooserHandler(makeDeps())!
       const res = mockRes()

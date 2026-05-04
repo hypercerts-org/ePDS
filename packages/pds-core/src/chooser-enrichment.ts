@@ -244,11 +244,43 @@ export function buildChooserEnrichmentScript(): string {
     if (!parent) return false;
     var tagName = (el.tagName || '').toLowerCase();
     if (tagName !== 'b' && tagName !== 'strong') return false;
-    return true;
+    return hasApprovedConsentIdentityContext(el, parent);
+  }
+
+  function normalizeConsentContextText(text) {
+    return (text || '').replace(/\\s+/g, ' ').trim();
+  }
+
+  function textAroundChild(parent, child) {
+    var before = '';
+    var after = '';
+    var seenChild = false;
+    for (var i = 0; i < parent.childNodes.length; i++) {
+      var node = parent.childNodes[i];
+      if (node === child) {
+        seenChild = true;
+        continue;
+      }
+      var text = node.nodeType === Node.TEXT_NODE ? node.data : (node.textContent || '');
+      if (seenChild) after += text;
+      else before += text;
+    }
+    return {
+      before: normalizeConsentContextText(before),
+      after: normalizeConsentContextText(after),
+    };
+  }
+
+  function hasApprovedConsentIdentityContext(el, parent) {
+    var context = textAroundChild(parent, el);
+    if (context.after !== 'account') return false;
+    if (context.before === 'Grant access to your') return true;
+    if (context.before === 'wants to access your') return true;
+    return /^.+ wants to access your$/.test(context.before);
   }
 
   function enrichConsentIdentity(accounts, handleMode) {
-    if (!isOauthAuthorizePage()) return;
+    if (!isConsentLikePage()) return;
     var selected = selectedAccount(accounts);
     var consentAccounts = selected ? [selected] : accounts;
     var root = document.getElementById('root');
@@ -280,6 +312,22 @@ export function buildChooserEnrichmentScript(): string {
 
   function isOauthAuthorizePage() {
     return window.location && window.location.pathname === '/oauth/authorize';
+  }
+
+  function isPreviewChooserPage() {
+    return window.location && window.location.pathname === '/preview/chooser';
+  }
+
+  function isPreviewConsentPage() {
+    return window.location && window.location.pathname === '/preview/consent';
+  }
+
+  function isChooserLikePage() {
+    return isOauthAuthorizePage() || isPreviewChooserPage();
+  }
+
+  function isConsentLikePage() {
+    return isOauthAuthorizePage() || isPreviewConsentPage() || isPreviewChooserPage();
   }
 
   function isAccountPage() {
@@ -373,11 +421,11 @@ export function buildChooserEnrichmentScript(): string {
   // via a MutationObserver because the SPA hydrates/re-renders after
   // initial HTML delivery.
   function enrich() {
-    if (!isOauthAuthorizePage() && !isAccountPage()) return;
+    if (!isChooserLikePage() && !isPreviewConsentPage() && !isAccountPage()) return;
     var accounts = buildAccounts();
     if (!accounts.length) return;
     var handleMode = readHandleMode();
-    var hideHandle = handleMode === 'random' && isOauthAuthorizePage();
+    var hideHandle = handleMode === 'random' && isChooserLikePage();
 
     enrichConsentIdentity(accounts, handleMode);
 

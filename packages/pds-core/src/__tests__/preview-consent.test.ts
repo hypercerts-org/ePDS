@@ -80,6 +80,62 @@ describe('createPreviewConsentHandler', () => {
       expect(res.body).toContain('/@atproto/oauth-provider/~assets/')
     })
 
+    it('injects handle-mode meta and enrichment script before __sessions hydration', async () => {
+      const handler = createPreviewConsentHandler({
+        trustedClients: [],
+        resolveClientMetadata: () => Promise.resolve({}),
+        getClientCss: () => null,
+        logger: mockLogger(),
+      })!
+      const res = mockRes()
+      await handler({ query: {} }, res)
+      const handleModeIndex = res.body!.indexOf(
+        '<meta name="epds-handle-mode" content="picker-with-random">',
+      )
+      const enrichmentIndex = res.body!.indexOf('function readHandleMode()')
+      const hydrationIndex = res.body!.indexOf('window["__sessions"]')
+
+      expect(handleModeIndex).toBeGreaterThan(-1)
+      expect(enrichmentIndex).toBeGreaterThan(-1)
+      expect(hydrationIndex).toBeGreaterThan(-1)
+      expect(handleModeIndex).toBeLessThan(enrichmentIndex)
+      expect(enrichmentIndex).toBeLessThan(hydrationIndex)
+    })
+
+    it('hydrates the selected preview session with handle and email', async () => {
+      const handler = createPreviewConsentHandler({
+        trustedClients: [],
+        resolveClientMetadata: () => Promise.resolve({}),
+        getClientCss: () => null,
+        logger: mockLogger(),
+      })!
+      const res = mockRes()
+      await handler({ query: {} }, res)
+
+      expect(res.body).toContain(String.raw`\"selected\":true`)
+      expect(res.body).toContain(
+        String.raw`\"preferred_username\":\"alice.preview.example\"`,
+      )
+      expect(res.body).toContain(
+        String.raw`\"email\":\"alice@preview.example\"`,
+      )
+    })
+
+    it('supports ?epds_handle_mode=random for consent preview', async () => {
+      const handler = createPreviewConsentHandler({
+        trustedClients: [],
+        resolveClientMetadata: () => Promise.resolve({}),
+        getClientCss: () => null,
+        logger: mockLogger(),
+      })!
+      const res = mockRes()
+      await handler({ query: { epds_handle_mode: 'random' } }, res)
+
+      expect(res.body).toContain(
+        '<meta name="epds-handle-mode" content="random">',
+      )
+    })
+
     it('resolves client metadata and injects CSS for custom client_id', async () => {
       const trusted = 'https://trusted.example/client-metadata.json'
       const resolveClientMetadata = vi.fn(() =>
