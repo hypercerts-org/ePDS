@@ -9,6 +9,7 @@
 
 import { Given, Then, When } from '@cucumber/cucumber'
 import { expect } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import type { EpdsWorld } from '../support/world.js'
 import { testEnv } from '../support/env.js'
 import {
@@ -63,6 +64,29 @@ function formatRawPublicHandle(handle: string): string {
 
 function escapeRegex(value: string): string {
   return value.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)
+}
+
+async function openIdentityTooltip(page: Page): Promise<Locator> {
+  const tooltipControl = page
+    .getByRole('main')
+    .getByRole('button', { name: 'Identity information' })
+
+  await expect(tooltipControl).toHaveAttribute('type', 'button')
+  await expect(tooltipControl).toHaveAttribute('aria-expanded', 'false')
+  const describedBy = await tooltipControl.getAttribute('aria-describedby')
+  expect(describedBy?.trim()).toBeTruthy()
+  if (!describedBy?.trim()) {
+    throw new Error('Expected aria-describedby to reference a tooltip')
+  }
+  const [tooltipId] = describedBy.trim().split(/\s+/)
+
+  await tooltipControl.click()
+  await expect(tooltipControl).toHaveAttribute('aria-expanded', 'true')
+
+  const tooltip = page.locator(`#${tooltipId}`)
+  await expect(tooltip).toHaveAttribute('role', 'tooltip')
+  await expect(tooltip).toBeVisible()
+  return tooltip
 }
 
 Then('a consent screen is displayed', async function (this: EpdsWorld) {
@@ -169,25 +193,7 @@ Then(
   async function (this: EpdsWorld) {
     const page = getPage(this)
     const publicHandle = formatPublicHandle(requireScenarioHandle(this))
-    const tooltipControl = page
-      .getByRole('main')
-      .getByRole('button', { name: 'Identity information' })
-
-    await expect(tooltipControl).toHaveAttribute('type', 'button')
-    await expect(tooltipControl).toHaveAttribute('aria-expanded', 'false')
-    const describedBy = await tooltipControl.getAttribute('aria-describedby')
-    expect(describedBy?.trim()).toBeTruthy()
-    if (!describedBy?.trim()) {
-      throw new Error('Expected aria-describedby to reference a tooltip')
-    }
-    const [tooltipId] = describedBy.trim().split(/\s+/)
-
-    await tooltipControl.click()
-    await expect(tooltipControl).toHaveAttribute('aria-expanded', 'true')
-
-    const tooltip = page.locator(`#${tooltipId}`)
-    await expect(tooltip).toHaveAttribute('role', 'tooltip')
-    await expect(tooltip).toBeVisible()
+    const tooltip = await openIdentityTooltip(page)
     await expect(tooltip).toContainText('Public AT Protocol handle:')
     await expect(tooltip).toContainText(publicHandle)
   },
@@ -198,25 +204,7 @@ Then(
   async function (this: EpdsWorld) {
     const page = getPage(this)
     const scenarioEmail = requireScenarioEmail(this)
-    const tooltipControl = page
-      .getByRole('main')
-      .getByRole('button', { name: 'Identity information' })
-
-    await expect(tooltipControl).toHaveAttribute('type', 'button')
-    await expect(tooltipControl).toHaveAttribute('aria-expanded', 'false')
-    const describedBy = await tooltipControl.getAttribute('aria-describedby')
-    expect(describedBy?.trim()).toBeTruthy()
-    if (!describedBy?.trim()) {
-      throw new Error('Expected aria-describedby to reference a tooltip')
-    }
-    const [tooltipId] = describedBy.trim().split(/\s+/)
-
-    await tooltipControl.click()
-    await expect(tooltipControl).toHaveAttribute('aria-expanded', 'true')
-
-    const tooltip = page.locator(`#${tooltipId}`)
-    await expect(tooltip).toHaveAttribute('role', 'tooltip')
-    await expect(tooltip).toBeVisible()
+    const tooltip = await openIdentityTooltip(page)
     await expect(tooltip).toContainText('This handle is associated with')
     await expect(tooltip).toContainText(scenarioEmail)
   },

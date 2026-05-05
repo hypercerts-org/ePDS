@@ -133,6 +133,23 @@ function verifySignedCallbackUrl(url: URL): boolean {
   )
 }
 
+async function fetchCompleteRedirect(handleMode: HandleMode | null) {
+  const app = await startApp(makeCtx(handleMode), makeAuth())
+  try {
+    const res = await fetch(`${app.baseUrl}/auth/complete`, {
+      redirect: 'manual',
+      headers: { cookie: `${AUTH_FLOW_COOKIE}=flow-1` },
+    })
+
+    expect(res.status).toBe(303)
+    const url = parseRedirect(res)
+    expect(url.pathname).toBe('/oauth/epds-callback')
+    return url
+  } finally {
+    await app.close()
+  }
+}
+
 describe('auth-service epds-callback handle mode threading', () => {
   let priorEnv: { pdsInternalUrl?: string; internalSecret?: string }
 
@@ -179,42 +196,16 @@ describe('auth-service epds-callback handle mode threading', () => {
 
   it('includes the stored canonical handle mode for random-mode new users', async () => {
     mocks.getDidByEmail.mockResolvedValue(null)
-    const app = await startApp(makeCtx('random'), makeAuth())
-    try {
-      const res = await fetch(`${app.baseUrl}/auth/complete`, {
-        redirect: 'manual',
-        headers: { cookie: `${AUTH_FLOW_COOKIE}=flow-1` },
-      })
-
-      expect(res.status).toBe(303)
-      const url = parseRedirect(res)
-      expect(url.pathname).toBe('/oauth/epds-callback')
-      expect(url.searchParams.get('epds_handle_mode')).toBe('random')
-      expect(url.searchParams.has('handle')).toBe(false)
-      expect(verifySignedCallbackUrl(url)).toBe(true)
-    } finally {
-      await app.close()
-    }
+    const url = await fetchCompleteRedirect('random')
+    expect(url.searchParams.get('epds_handle_mode')).toBe('random')
+    expect(url.searchParams.has('handle')).toBe(false)
+    expect(verifySignedCallbackUrl(url)).toBe(true)
   })
 
   it('includes the stored canonical handle mode for existing users', async () => {
     mocks.getDidByEmail.mockResolvedValue(randomBytes(16).toString('hex'))
-    const app = await startApp(makeCtx('picker-with-random'), makeAuth())
-    try {
-      const res = await fetch(`${app.baseUrl}/auth/complete`, {
-        redirect: 'manual',
-        headers: { cookie: `${AUTH_FLOW_COOKIE}=flow-1` },
-      })
-
-      expect(res.status).toBe(303)
-      const url = parseRedirect(res)
-      expect(url.pathname).toBe('/oauth/epds-callback')
-      expect(url.searchParams.get('epds_handle_mode')).toBe(
-        'picker-with-random',
-      )
-    } finally {
-      await app.close()
-    }
+    const url = await fetchCompleteRedirect('picker-with-random')
+    expect(url.searchParams.get('epds_handle_mode')).toBe('picker-with-random')
   })
 
   it('includes the stored canonical handle mode for chosen-handle callbacks', async () => {

@@ -404,7 +404,7 @@ export function createChooseHandleRouter(
       approved: '1',
       new_account: '1',
       handle: normalizedLocal,
-      ...(flow.handleMode ? { epds_handle_mode: flow.handleMode } : {}),
+      epds_handle_mode: flow.handleMode ?? '',
     }
     if (flow.clientId) callbackParams.client_id = flow.clientId
     const { sig, ts } = signCallback(
