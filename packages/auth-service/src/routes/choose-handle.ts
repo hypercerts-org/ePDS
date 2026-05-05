@@ -411,6 +411,7 @@ export function createChooseHandleRouter(
       ctx.config.epdsCallbackSecret,
     )
     const params = new URLSearchParams({ ...callbackParams, ts, sig })
+    if (flow.handleMode) params.set('epds_handle_mode', flow.handleMode)
 
     logger.info(
       { email, flowId, fullHandle },

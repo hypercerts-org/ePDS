@@ -284,16 +284,85 @@ function appendText(parent: FakeElement, text: string): void {
   parent.appendChild(new FakeTextNode(text))
 }
 
+const DEFAULT_CHOOSER_LOCATION = {
+  pathname: '/oauth/authorize',
+  search: '',
+}
+
+const ALICE_ASSOCIATED_TOOLTIP =
+  'This handle is associated with alice@example.test.'
+const ASSOCIATED_TOOLTIP_PREFIX = 'This handle is associated'
+const ALICE_PUBLIC_HANDLE_TOOLTIP =
+  'Public AT Protocol handle: @alice.test. Handles are public account names used by AT Protocol apps.'
+const EMAIL_LABEL_CLASS = 'epds-email-label'
+const HIDDEN_HANDLE_DESCRIPTION_CLASS = 'epds-hidden-handle-description'
+const IDENTITY_INFO_ICON_CLASS = 'epds-identity-info-icon'
+const IDENTITY_TOOLTIP_CLASS = 'epds-identity-tooltip'
+
+function findChildWithClass(
+  parent: FakeElement,
+  className: string,
+): FakeElement | undefined {
+  return parent.childNodes.find(
+    (child) =>
+      child instanceof FakeElement && child.classList.contains(className),
+  ) as FakeElement | undefined
+}
+
+function findEmailLabel(parent: FakeElement): FakeElement | undefined {
+  return findChildWithClass(parent, EMAIL_LABEL_CLASS)
+}
+
+function findHiddenHandleDescription(
+  parent: FakeElement,
+): FakeElement | undefined {
+  return findChildWithClass(parent, HIDDEN_HANDLE_DESCRIPTION_CLASS)
+}
+
+function findDescendantsWithClass(
+  parent: FakeElement,
+  className: string,
+): FakeElement[] {
+  return parent.descendants().filter((el) => el.classList.contains(className))
+}
+
+function expectConsentTooltip(
+  container: FakeElement,
+  expectedText: string,
+): void {
+  const icon = findChildWithClass(container, IDENTITY_INFO_ICON_CLASS)
+  const tooltip = findChildWithClass(container, IDENTITY_TOOLTIP_CLASS)
+
+  expect(icon).toBeInstanceOf(FakeElement)
+  expect(icon?.tagName).toBe('button')
+  expect(icon?.getAttribute('aria-describedby')).toBe(tooltip?.id)
+  expect(tooltip?.textContent).toBe(expectedText)
+}
+
+function expectConsentTooltipTexts(
+  document: FakeDocument,
+  expectedTexts: string[],
+): void {
+  const icons = findDescendantsWithClass(
+    document.root,
+    IDENTITY_INFO_ICON_CLASS,
+  )
+  const tooltips = findDescendantsWithClass(
+    document.root,
+    IDENTITY_TOOLTIP_CLASS,
+  )
+
+  expect(icons).toHaveLength(expectedTexts.length)
+  expect(tooltips.map((tooltip) => tooltip.textContent)).toEqual(expectedTexts)
+}
+
 function runChooserEnrichmentScript(
   document: FakeDocument,
   globals: {
     __sessions?: unknown[]
     __deviceSessions?: unknown[]
   } = {},
-  location: { pathname: string; search?: string } = {
-    pathname: '/oauth/authorize',
-    search: '',
-  },
+  location: { pathname: string; search?: string } = DEFAULT_CHOOSER_LOCATION,
 ): void {
   const fakeWindow: Record<string, unknown> = {
     location,
@@ -414,22 +483,83 @@ function createConsentIdentity(
   return { container, identifier }
 }
 
+function createPreviewChooserConsentIdentities(
+  document: FakeDocument,
+  mode: string,
+): {
+  sidebar: { container: FakeElement; identifier: FakeElement }
+  mainCard: { container: FakeElement; identifier: FakeElement }
+} {
+  appendHandleModeMeta(document, mode)
+
+  return {
+    sidebar: createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'alice.test',
+      ' account',
+    ),
+    mainCard: createConsentIdentity(
+      document,
+      'wants to access your ',
+      'alice.test',
+      ' account',
+    ),
+  }
+}
+
+function runPreviewChooserConsentEnrichment(
+  document: FakeDocument,
+  mode: string,
+): void {
+  runChooserEnrichmentScript(
+    document,
+    { __sessions: selectedAliceSession() },
+    {
+      pathname: '/preview/chooser',
+      search: `?epds_handle_mode=${mode}`,
+    },
+  )
+}
+
+function expectArbitraryConsentProseUntouched({
+  prefix,
+  identifierText,
+  suffix,
+  tagName,
+  expectedText,
+}: {
+  prefix: string
+  identifierText: string
+  suffix: string
+  tagName?: string
+  expectedText: string
+}): void {
+  const document = new FakeDocument()
+  appendHandleModeMeta(document, 'picker')
+  const { container, identifier } = createConsentIdentity(
+    document,
+    prefix,
+    identifierText,
+    suffix,
+    tagName,
+  )
+
+  runChooserEnrichmentScript(document, { __sessions: selectedAliceSession() })
+
+  expect(identifier.textContent).toBe(identifierText)
+  expect(container.textContent).toBe(expectedText)
+  expect(container.textContent).not.toContain(ASSOCIATED_TOOLTIP_PREFIX)
+}
+
 function findConsentIdentityTooltip(container: FakeElement): {
   icon: FakeElement
   tooltip: FakeElement
 } {
-  const icon = container.childNodes.find(
-    (child) =>
-      child instanceof FakeElement &&
-      child.classList.contains('epds-identity-info-icon'),
-  ) as FakeElement
-  const tooltip = container.childNodes.find(
-    (child) =>
-      child instanceof FakeElement &&
-      child.classList.contains('epds-identity-tooltip'),
-  ) as FakeElement
+  const icon = findChildWithClass(container, IDENTITY_INFO_ICON_CLASS)
+  const tooltip = findChildWithClass(container, IDENTITY_TOOLTIP_CLASS)
 
-  return { icon, tooltip }
+  return { icon: icon as FakeElement, tooltip: tooltip as FakeElement }
 }
 
 function selectedAliceSession(preferredUsername = 'alice.test'): unknown[] {
@@ -493,11 +623,7 @@ describe('buildChooserEnrichmentScript account row scoping', () => {
 
     runChooserEnrichmentScript(document)
 
-    const emailLabel = wrap.childNodes.find(
-      (child) =>
-        child instanceof FakeElement &&
-        child.classList.contains('epds-email-label'),
-    ) as FakeElement | undefined
+    const emailLabel = findEmailLabel(wrap)
 
     expect(emailLabel).toBeInstanceOf(FakeElement)
     expect(emailLabel?.textContent).toBe('alice@example.test')
@@ -538,16 +664,8 @@ describe('buildChooserEnrichmentScript account row scoping', () => {
 
     runChooserEnrichmentScript(document)
 
-    const emailLabel = wrap.childNodes.find(
-      (child) =>
-        child instanceof FakeElement &&
-        child.classList.contains('epds-email-label'),
-    ) as FakeElement | undefined
-    const handleDescription = row.childNodes.find(
-      (child) =>
-        child instanceof FakeElement &&
-        child.classList.contains('epds-hidden-handle-description'),
-    ) as FakeElement | undefined
+    const emailLabel = findEmailLabel(wrap)
+    const handleDescription = findHiddenHandleDescription(row)
 
     expect(emailLabel?.textContent).toBe('alice@example.test')
     expect(handle.style.display).toBe('none')
@@ -572,16 +690,8 @@ describe('buildChooserEnrichmentScript account row scoping', () => {
       { pathname: '/preview/chooser', search: '' },
     )
 
-    const emailLabel = wrap.childNodes.find(
-      (child) =>
-        child instanceof FakeElement &&
-        child.classList.contains('epds-email-label'),
-    ) as FakeElement | undefined
-    const handleDescription = row.childNodes.find(
-      (child) =>
-        child instanceof FakeElement &&
-        child.classList.contains('epds-hidden-handle-description'),
-    ) as FakeElement | undefined
+    const emailLabel = findEmailLabel(wrap)
+    const handleDescription = findHiddenHandleDescription(row)
 
     expect(emailLabel?.textContent).toBe('alice@example.test')
     expect(handle.style.display).toBe('none')
@@ -834,24 +944,8 @@ describe('buildChooserEnrichmentScript consent identity enrichment', () => {
 
     runChooserEnrichmentScript(document)
 
-    const icon = container.childNodes.find(
-      (child) =>
-        child instanceof FakeElement &&
-        child.classList.contains('epds-identity-info-icon'),
-    ) as FakeElement | undefined
-    const tooltip = container.childNodes.find(
-      (child) =>
-        child instanceof FakeElement &&
-        child.classList.contains('epds-identity-tooltip'),
-    ) as FakeElement | undefined
-
     expect(identifier.textContent).toBe('alice.test')
-    expect(icon).toBeInstanceOf(FakeElement)
-    expect(icon?.tagName).toBe('button')
-    expect(icon?.getAttribute('aria-describedby')).toBe(tooltip?.id)
-    expect(tooltip?.textContent).toBe(
-      'This handle is associated with alice@example.test.',
-    )
+    expectConsentTooltip(container, ALICE_ASSOCIATED_TOOLTIP)
   })
 
   it('enriches client-wants-access consent identity copy', () => {
@@ -870,9 +964,7 @@ describe('buildChooserEnrichmentScript consent identity enrichment', () => {
     })
 
     expect(identifier.textContent).toBe('alice.test')
-    expect(container.textContent).toContain(
-      'This handle is associated with alice@example.test.',
-    )
+    expect(container.textContent).toContain(ALICE_ASSOCIATED_TOOLTIP)
   })
 
   it('enriches upstream main-card consent identity copy without same-paragraph client name', () => {
@@ -892,15 +984,13 @@ describe('buildChooserEnrichmentScript consent identity enrichment', () => {
     const iconIndex = container.childNodes.findIndex(
       (child) =>
         child instanceof FakeElement &&
-        child.classList.contains('epds-identity-info-icon'),
+        child.classList.contains(IDENTITY_INFO_ICON_CLASS),
     )
     const identifierIndex = container.childNodes.indexOf(identifier)
 
     expect(identifier.textContent).toBe('alice.test')
     expect(iconIndex).toBe(identifierIndex + 1)
-    expect(container.textContent).toContain(
-      'This handle is associated with alice@example.test.',
-    )
+    expect(container.textContent).toContain(ALICE_ASSOCIATED_TOOLTIP)
   })
 
   it('enriches sidebar and main-card consent identities on the same page', () => {
@@ -925,19 +1015,11 @@ describe('buildChooserEnrichmentScript consent identity enrichment', () => {
       { pathname: '/preview/consent', search: '' },
     )
 
-    const icons = document.root
-      .descendants()
-      .filter((el) => el.classList.contains('epds-identity-info-icon'))
-    const tooltips = document.root
-      .descendants()
-      .filter((el) => el.classList.contains('epds-identity-tooltip'))
-
     expect(sidebar.identifier.textContent).toBe('alice.test')
     expect(mainCard.identifier.textContent).toBe('alice.test')
-    expect(icons).toHaveLength(2)
-    expect(tooltips.map((tooltip) => tooltip.textContent)).toEqual([
-      'This handle is associated with alice@example.test.',
-      'This handle is associated with alice@example.test.',
+    expectConsentTooltipTexts(document, [
+      ALICE_ASSOCIATED_TOOLTIP,
+      ALICE_ASSOCIATED_TOOLTIP,
     ])
   })
 
@@ -957,9 +1039,7 @@ describe('buildChooserEnrichmentScript consent identity enrichment', () => {
       })
 
       expect(identifier.textContent).toBe('alice.test')
-      expect(container.textContent).toContain(
-        'This handle is associated with alice@example.test.',
-      )
+      expect(container.textContent).toContain(ALICE_ASSOCIATED_TOOLTIP)
     }
   })
 
@@ -978,9 +1058,7 @@ describe('buildChooserEnrichmentScript consent identity enrichment', () => {
     })
 
     expect(identifier.textContent).toBe('alice@example.test')
-    expect(container.textContent).toContain(
-      'Public AT Protocol handle: @alice.test. Handles are public account names used by AT Protocol apps.',
-    )
+    expect(container.textContent).toContain(ALICE_PUBLIC_HANDLE_TOOLTIP)
     expect(container.textContent).not.toContain('@@alice.test')
   })
 
@@ -1001,90 +1079,40 @@ describe('buildChooserEnrichmentScript consent identity enrichment', () => {
     )
 
     expect(identifier.textContent).toBe('alice.test')
-    expect(container.textContent).toContain(
-      'This handle is associated with alice@example.test.',
-    )
+    expect(container.textContent).toContain(ALICE_ASSOCIATED_TOOLTIP)
   })
 
   it('enriches preview chooser consent state in picker-with-random mode', () => {
     const document = new FakeDocument()
-    appendHandleModeMeta(document, 'picker-with-random')
-    const sidebar = createConsentIdentity(
+    const { sidebar, mainCard } = createPreviewChooserConsentIdentities(
       document,
-      'Grant access to your ',
-      'alice.test',
-      ' account',
-    )
-    const mainCard = createConsentIdentity(
-      document,
-      'wants to access your ',
-      'alice.test',
-      ' account',
+      'picker-with-random',
     )
 
-    runChooserEnrichmentScript(
-      document,
-      { __sessions: selectedAliceSession() },
-      {
-        pathname: '/preview/chooser',
-        search: '?epds_handle_mode=picker-with-random',
-      },
-    )
-
-    const icons = document.root
-      .descendants()
-      .filter((el) => el.classList.contains('epds-identity-info-icon'))
-    const tooltips = document.root
-      .descendants()
-      .filter((el) => el.classList.contains('epds-identity-tooltip'))
+    runPreviewChooserConsentEnrichment(document, 'picker-with-random')
 
     expect(sidebar.identifier.textContent).toBe('alice.test')
     expect(mainCard.identifier.textContent).toBe('alice.test')
-    expect(icons).toHaveLength(2)
-    expect(tooltips.map((tooltip) => tooltip.textContent)).toEqual([
-      'This handle is associated with alice@example.test.',
-      'This handle is associated with alice@example.test.',
+    expectConsentTooltipTexts(document, [
+      ALICE_ASSOCIATED_TOOLTIP,
+      ALICE_ASSOCIATED_TOOLTIP,
     ])
   })
 
   it('uses email as the visible preview chooser consent identity in random mode', () => {
     const document = new FakeDocument()
-    appendHandleModeMeta(document, 'random')
-    const sidebar = createConsentIdentity(
+    const { sidebar, mainCard } = createPreviewChooserConsentIdentities(
       document,
-      'Grant access to your ',
-      'alice.test',
-      ' account',
-    )
-    const mainCard = createConsentIdentity(
-      document,
-      'wants to access your ',
-      'alice.test',
-      ' account',
+      'random',
     )
 
-    runChooserEnrichmentScript(
-      document,
-      { __sessions: selectedAliceSession() },
-      {
-        pathname: '/preview/chooser',
-        search: '?epds_handle_mode=random',
-      },
-    )
-
-    const icons = document.root
-      .descendants()
-      .filter((el) => el.classList.contains('epds-identity-info-icon'))
-    const tooltips = document.root
-      .descendants()
-      .filter((el) => el.classList.contains('epds-identity-tooltip'))
+    runPreviewChooserConsentEnrichment(document, 'random')
 
     expect(sidebar.identifier.textContent).toBe('alice@example.test')
     expect(mainCard.identifier.textContent).toBe('alice@example.test')
-    expect(icons).toHaveLength(2)
-    expect(tooltips.map((tooltip) => tooltip.textContent)).toEqual([
-      'Public AT Protocol handle: @alice.test. Handles are public account names used by AT Protocol apps.',
-      'Public AT Protocol handle: @alice.test. Handles are public account names used by AT Protocol apps.',
+    expectConsentTooltipTexts(document, [
+      ALICE_PUBLIC_HANDLE_TOOLTIP,
+      ALICE_PUBLIC_HANDLE_TOOLTIP,
     ])
   })
 
@@ -1105,9 +1133,7 @@ describe('buildChooserEnrichmentScript consent identity enrichment', () => {
     )
 
     expect(identifier.textContent).toBe('alice@example.test')
-    expect(container.textContent).toContain(
-      'Public AT Protocol handle: @alice.test. Handles are public account names used by AT Protocol apps.',
-    )
+    expect(container.textContent).toContain(ALICE_PUBLIC_HANDLE_TOOLTIP)
   })
 
   it('leaves generic and legal consent paragraphs untouched', () => {
@@ -1128,47 +1154,28 @@ describe('buildChooserEnrichmentScript consent identity enrichment', () => {
 
     runChooserEnrichmentScript(document, { __sessions: selectedAliceSession() })
 
-    expect(document.root.textContent).not.toContain('This handle is associated')
+    expect(document.root.textContent).not.toContain(ASSOCIATED_TOOLTIP_PREFIX)
     expect(unrelated.identifier.textContent).toBe('bob.test')
   })
 
   it('leaves arbitrary bold selected-account legal copy untouched', () => {
-    const document = new FakeDocument()
-    appendHandleModeMeta(document, 'picker')
-    const { container, identifier } = createConsentIdentity(
-      document,
-      'By clicking Authorize, ',
-      'alice.test',
-      ' confirms access.',
-    )
-
-    runChooserEnrichmentScript(document, { __sessions: selectedAliceSession() })
-
-    expect(identifier.textContent).toBe('alice.test')
-    expect(container.textContent).toBe(
-      'By clicking Authorize, alice.test confirms access.',
-    )
-    expect(container.textContent).not.toContain('This handle is associated')
+    expectArbitraryConsentProseUntouched({
+      prefix: 'By clicking Authorize, ',
+      identifierText: 'alice.test',
+      suffix: ' confirms access.',
+      expectedText: 'By clicking Authorize, alice.test confirms access.',
+    })
   })
 
   it('leaves arbitrary strong selected-account technical prose untouched', () => {
-    const document = new FakeDocument()
-    appendHandleModeMeta(document, 'picker')
-    const { container, identifier } = createConsentIdentity(
-      document,
-      'Technical details for ',
-      'alice.test',
-      ' may include OAuth scopes.',
-      'strong',
-    )
-
-    runChooserEnrichmentScript(document, { __sessions: selectedAliceSession() })
-
-    expect(identifier.textContent).toBe('alice.test')
-    expect(container.textContent).toBe(
-      'Technical details for alice.test may include OAuth scopes.',
-    )
-    expect(container.textContent).not.toContain('This handle is associated')
+    expectArbitraryConsentProseUntouched({
+      prefix: 'Technical details for ',
+      identifierText: 'alice.test',
+      suffix: ' may include OAuth scopes.',
+      tagName: 'strong',
+      expectedText:
+        'Technical details for alice.test may include OAuth scopes.',
+    })
   })
 
   it('opens the tooltip on hover/focus and toggles it on click/tap', () => {
@@ -1257,7 +1264,7 @@ describe('buildChooserEnrichmentScript consent identity enrichment', () => {
       { pathname: '/account', search: '' },
     )
 
-    expect(document.root.textContent).not.toContain('This handle is associated')
+    expect(document.root.textContent).not.toContain(ASSOCIATED_TOOLTIP_PREFIX)
   })
 })
 
@@ -1689,6 +1696,92 @@ describe('createChooserEnrichmentMiddleware handle-mode meta (HYPER-268 Layer 4)
     expect(written).toContain('<meta name="epds-handle-mode" content="random">')
   })
 
+  it('resolves client metadata handle mode from request_uri when client_id is absent', async () => {
+    const resolveClientIdFromRequestUri = vi
+      .fn()
+      .mockResolvedValue('https://demo.example/client')
+    const resolveClientMetadata = vi
+      .fn()
+      .mockResolvedValue({ epds_handle_mode: 'random' as const })
+
+    const written = await captureWrittenHtml(
+      {
+        resolveClientMetadata,
+        resolveClientIdFromRequestUri,
+      },
+      { request_uri: 'urn:ietf:params:oauth:request_uri:req-123' },
+    )
+
+    expect(resolveClientIdFromRequestUri).toHaveBeenCalledWith(
+      'urn:ietf:params:oauth:request_uri:req-123',
+    )
+    expect(resolveClientMetadata).toHaveBeenCalledWith(
+      'https://demo.example/client',
+    )
+    expect(written).toContain('<meta name="epds-handle-mode" content="random">')
+  })
+
+  it('keeps explicit query handle mode ahead of request_uri metadata', async () => {
+    const resolveClientIdFromRequestUri = vi
+      .fn()
+      .mockResolvedValue('https://demo.example/client')
+    const resolveClientMetadata = vi
+      .fn()
+      .mockResolvedValue({ epds_handle_mode: 'random' as const })
+
+    const written = await captureWrittenHtml(
+      {
+        resolveClientMetadata,
+        resolveClientIdFromRequestUri,
+      },
+      {
+        epds_handle_mode: 'picker',
+        request_uri: 'urn:ietf:params:oauth:request_uri:req-123',
+      },
+    )
+
+    expect(resolveClientIdFromRequestUri).not.toHaveBeenCalled()
+    expect(resolveClientMetadata).not.toHaveBeenCalled()
+    expect(written).toContain('<meta name="epds-handle-mode" content="picker">')
+  })
+
+  it('degrades silently when request_uri client-id resolution rejects', async () => {
+    const written = await captureWrittenHtml(
+      {
+        resolveClientMetadata: vi.fn(),
+        resolveClientIdFromRequestUri: () =>
+          Promise.reject(new Error('request expired')),
+      },
+      { request_uri: 'urn:ietf:params:oauth:request_uri:req-123' },
+    )
+
+    expect(written).toContain(
+      '<meta name="epds-handle-mode" content="picker-with-random">',
+    )
+  })
+
+  it('degrades silently when request_uri metadata lookup rejects', async () => {
+    const resolveClientMetadata = vi
+      .fn()
+      .mockRejectedValue(new Error('metadata unavailable'))
+
+    const written = await captureWrittenHtml(
+      {
+        resolveClientMetadata,
+        resolveClientIdFromRequestUri: () =>
+          Promise.resolve('https://demo.example/client'),
+      },
+      { request_uri: 'urn:ietf:params:oauth:request_uri:req-123' },
+    )
+
+    expect(resolveClientMetadata).toHaveBeenCalledWith(
+      'https://demo.example/client',
+    )
+    expect(written).toContain(
+      '<meta name="epds-handle-mode" content="picker-with-random">',
+    )
+  })
+
   it('ignores invalid handle modes from metadata (fall through to fallback)', async () => {
     const written = await captureWrittenHtml(
       {
@@ -1705,9 +1798,29 @@ describe('createChooserEnrichmentMiddleware handle-mode meta (HYPER-268 Layer 4)
     )
   })
 
-  it('degrades silently when the metadata resolver rejects', async () => {
+  it('ignores invalid request_uri metadata handle modes through the shared resolver', async () => {
     const written = await captureWrittenHtml(
       {
+        resolveClientMetadata: () =>
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- deliberate bad value
+          Promise.resolve({ epds_handle_mode: 'garbage' as any }),
+        resolveClientIdFromRequestUri: () =>
+          Promise.resolve('https://demo.example/client'),
+      },
+      { request_uri: 'urn:ietf:params:oauth:request_uri:req-123' },
+    )
+
+    expect(written).toContain(
+      '<meta name="epds-handle-mode" content="picker-with-random">',
+    )
+  })
+
+  it('logs and falls back when the metadata resolver rejects', async () => {
+    const debug = vi.fn()
+
+    const written = await captureWrittenHtml(
+      {
+        logger: { debug },
         resolveClientMetadata: () => Promise.reject(new Error('network error')),
       },
       { client_id: 'https://demo.example/client' },
@@ -1715,6 +1828,14 @@ describe('createChooserEnrichmentMiddleware handle-mode meta (HYPER-268 Layer 4)
     // Falls back to the default — no network means no upgrade.
     expect(written).toContain(
       '<meta name="epds-handle-mode" content="picker-with-random">',
+    )
+    expect(debug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        err: expect.any(Error),
+        queryMode: undefined,
+        requestUri: undefined,
+      }),
+      'chooser-enrichment: failed to resolve handle mode from OAuth request context',
     )
   })
 })
