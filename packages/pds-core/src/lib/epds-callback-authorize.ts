@@ -9,7 +9,14 @@ export function resolveCallbackHandleMode(
     : undefined
 }
 
-export function buildEpdsCallbackAuthorizeUrl(opts: {
+/**
+ * Builds the post-/oauth/epds-callback redirect back to stock /oauth/authorize.
+ * This differs from auth-service callback builders, which create signed
+ * auth-service -> pds-core /oauth/epds-callback URLs. It is extracted from the
+ * old inline construction so epds_handle_mode forwarding and sanitization can be
+ * unit-tested.
+ */
+export function buildPostCallbackAuthorizeUrl(opts: {
   pdsUrl: string
   requestUri: string
   clientId: string

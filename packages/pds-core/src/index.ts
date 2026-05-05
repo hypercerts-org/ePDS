@@ -66,7 +66,7 @@ import { createAuthUiGuard, parsePromptTokens } from './auth-ui-guard.js'
 import { loadDeviceAccountEmails } from './lib/device-accounts.js'
 import { handleCallbackError } from './lib/epds-callback-error.js'
 import { installTestHooks } from './lib/test-hooks.js'
-import { buildEpdsCallbackAuthorizeUrl } from './lib/epds-callback-authorize.js'
+import { buildPostCallbackAuthorizeUrl } from './lib/epds-callback-authorize.js'
 
 const logger = createLogger('pds-core')
 
@@ -595,7 +595,7 @@ async function main() {
       // - Checks checkConsentRequired() against actual OAuth scopes
       // - Auto-approves if no consent needed (SSO match, previously authorized scopes)
       // - Renders the upstream consent UI (consent-view.tsx) if consent is required
-      const authorizeUrl = buildEpdsCallbackAuthorizeUrl({
+      const authorizeUrl = buildPostCallbackAuthorizeUrl({
         pdsUrl,
         requestUri,
         clientId,

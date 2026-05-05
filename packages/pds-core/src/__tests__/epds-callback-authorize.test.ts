@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { buildEpdsCallbackAuthorizeUrl } from '../lib/epds-callback-authorize.js'
+import { buildPostCallbackAuthorizeUrl } from '../lib/epds-callback-authorize.js'
 
-describe('buildEpdsCallbackAuthorizeUrl', () => {
+describe('buildPostCallbackAuthorizeUrl', () => {
   it('preserves a valid display-only epds_handle_mode on the final authorize redirect', () => {
-    const url = buildEpdsCallbackAuthorizeUrl({
+    const url = buildPostCallbackAuthorizeUrl({
       pdsUrl: 'https://pds.example',
       requestUri: 'urn:ietf:params:oauth:request_uri:req-123',
       clientId: 'https://app.example/client.json',
@@ -21,7 +21,7 @@ describe('buildEpdsCallbackAuthorizeUrl', () => {
   })
 
   it('drops invalid epds_handle_mode values from the final authorize redirect', () => {
-    const url = buildEpdsCallbackAuthorizeUrl({
+    const url = buildPostCallbackAuthorizeUrl({
       pdsUrl: 'https://pds.example',
       requestUri: 'urn:ietf:params:oauth:request_uri:req-123',
       clientId: 'https://app.example/client.json',

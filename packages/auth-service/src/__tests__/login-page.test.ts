@@ -562,11 +562,11 @@ describe('renderLoginPage sign-in error copy', () => {
 })
 
 describe('renderLoginPage email form readiness gate', () => {
-  it('renders the email OTP form as not ready until JavaScript enables it', () => {
+  it('renders the email OTP form without a readiness dataset marker', () => {
     const html = renderDefault()
-    expect(html).toContain(
-      '<form id="form-send-otp" data-epds-login-ready="false">',
-    )
+    expect(html).toContain('<form id="form-send-otp">')
+    expect(html).not.toContain('data-epds-login-ready')
+    expect(html).not.toContain('epdsLoginReady')
   })
 
   it('renders the email submit button disabled with the existing label', () => {
@@ -576,17 +576,13 @@ describe('renderLoginPage email form readiness gate', () => {
     )
   })
 
-  it('marks the form ready and enables the button after handler setup', () => {
+  it('enables the button after handler setup', () => {
     const html = renderDefault()
     const lastHandlerIdx = html.lastIndexOf("addEventListener('click'")
-    const readyIdx = html.indexOf(
-      "sendOtpForm.dataset.epdsLoginReady = 'true';",
-    )
-    const enableIdx = html.indexOf('sendOtpBtn.disabled = false;', readyIdx)
+    const enableIdx = html.indexOf('sendOtpBtn.disabled = false;')
 
     expect(lastHandlerIdx).toBeGreaterThan(0)
-    expect(readyIdx).toBeGreaterThan(lastHandlerIdx)
-    expect(enableIdx).toBeGreaterThan(readyIdx)
+    expect(enableIdx).toBeGreaterThan(lastHandlerIdx)
   })
 
   it('does not use a blind timer for readiness', () => {

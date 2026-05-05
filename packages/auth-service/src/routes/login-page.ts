@@ -694,7 +694,7 @@ export function renderLoginPage(opts: {
 
     <!-- Step 1: Email entry (calls better-auth sendOtp) -->
     <div id="step-email" class="step-email${opts.initialStep === 'otp' ? ' hidden' : ''}">
-      <form id="form-send-otp" data-epds-login-ready="false">
+      <form id="form-send-otp">
         <div class="field">
           <label for="email">Enter your email address</label>
           <input type="email" id="email" name="email" required autofocus
@@ -710,9 +710,10 @@ export function renderLoginPage(opts: {
         <div id="flash-slot-email">${opts.initialStep === 'otp' ? '' : flashRegionHtml}</div>
         <button type="submit" class="btn-primary" disabled>Continue</button>
       </form>
-      <noscript><div class="flash-msg error">JavaScript is required to sign in with email.</div></noscript>
       ${handleLoginButtonHtml}
     </div>
+
+    <noscript><div class="flash-msg error">JavaScript is required to sign in with email.</div></noscript>
 
     <!-- Step 2: OTP entry (calls better-auth verifyOtp) -->
     <div id="step-otp" class="step-otp${opts.initialStep === 'otp' ? ' active' : ''}">
@@ -1492,7 +1493,8 @@ export function renderLoginPage(opts: {
         clearOtpBoxes();
       });
 
-      sendOtpForm.dataset.epdsLoginReady = 'true';
+      // Enable only after the submit handler is installed. This avoids a race mostly
+      // seen in fast e2e runs where the button is clicked before JS is ready.
       sendOtpBtn.disabled = false;
 
       // Pillar 1: If login_hint was provided, the OTP step is already visible
