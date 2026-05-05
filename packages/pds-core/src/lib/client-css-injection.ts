@@ -9,6 +9,7 @@ import {
 
 type LoggerLike = {
   info: (obj: object, msg: string) => void
+  error: (obj: object, msg: string) => void
   warn: (obj: object, msg: string) => void
   debug: (obj: object, msg: string) => void
 }
@@ -167,7 +168,7 @@ export function createClientCssInjectionMiddleware({
         resolveClientIdFromRequestUri,
       )
     } catch (err) {
-      logger.warn(
+      logger.error(
         { err, requestUri: query.request_uri },
         'CSS middleware: failed to resolve client_id from request_uri',
       )

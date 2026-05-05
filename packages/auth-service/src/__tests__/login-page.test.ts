@@ -561,6 +561,40 @@ describe('renderLoginPage sign-in error copy', () => {
   })
 })
 
+describe('renderLoginPage email form readiness gate', () => {
+  it('renders the email OTP form as not ready until JavaScript enables it', () => {
+    const html = renderDefault()
+    expect(html).toContain(
+      '<form id="form-send-otp" data-epds-login-ready="false">',
+    )
+  })
+
+  it('renders the email submit button disabled with the existing label', () => {
+    const html = renderDefault()
+    expect(html).toMatch(
+      /<button type="submit" class="btn-primary" disabled>Continue<\/button>/,
+    )
+  })
+
+  it('marks the form ready and enables the button after handler setup', () => {
+    const html = renderDefault()
+    const lastHandlerIdx = html.lastIndexOf("addEventListener('click'")
+    const readyIdx = html.indexOf(
+      "sendOtpForm.dataset.epdsLoginReady = 'true';",
+    )
+    const enableIdx = html.indexOf('sendOtpBtn.disabled = false;', readyIdx)
+
+    expect(lastHandlerIdx).toBeGreaterThan(0)
+    expect(readyIdx).toBeGreaterThan(lastHandlerIdx)
+    expect(enableIdx).toBeGreaterThan(readyIdx)
+  })
+
+  it('does not use a blind timer for readiness', () => {
+    const html = renderDefault()
+    expect(html).not.toMatch(/set(?:Timeout|Interval)\s*\(/)
+  })
+})
+
 describe('renderLoginPage OTP verify-form double-submit latch (regression)', () => {
   it('declares the verifying flag at IIFE scope so input/paste/submit handlers share it', () => {
     const html = renderDefault()

@@ -73,6 +73,17 @@ Feature: OAuth consent screen
     Then a consent screen is displayed
 
   @untrusted-client @email
+  Scenario: Default picker consent tooltip shows email associated with the public handle
+    Given a returning user has a PDS account
+    When the untrusted demo client initiates an OAuth login
+    And the user enters the test email on the login page
+    And an OTP email arrives in the mail trap
+    And the user enters the OTP code
+    Then a consent screen is displayed
+    And it identifies the untrusted demo client by its URL host
+    And the consent identity tooltip exposes the account email
+
+  @untrusted-client @email
   Scenario: Random-handle consent shows email with public handle in identity tooltip
     Given a returning user has a PDS account
     When the untrusted demo client starts a new OAuth flow with random handle mode
