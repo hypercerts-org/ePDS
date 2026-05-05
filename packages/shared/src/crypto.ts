@@ -73,13 +73,15 @@ export interface CallbackParams {
   approved: string
   new_account: string
   handle?: string // only set for new account creation with chosen handle
+  epds_handle_mode?: string
 }
 
 /**
  * Sign the epds-callback redirect parameters with HMAC-SHA256.
  * Returns the hex signature and the Unix timestamp (seconds) used.
  *
- * Payload: request_uri, email, approved, new_account, handle (empty string when absent), and ts joined by newlines.
+ * Payload: request_uri, email, approved, new_account, handle (empty string when absent),
+ * epds_handle_mode (empty string when absent), and ts joined by newlines.
  * A timestamp is included so signatures expire (see verifyCallback).
  * handle uses empty string as sentinel when absent so existing flows still produce valid signatures.
  */
@@ -94,6 +96,7 @@ export function signCallback(
     params.approved,
     params.new_account,
     params.handle ?? '', // empty string when absent
+    params.epds_handle_mode ?? '', // empty string when absent
     ts,
   ].join('\n')
   const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex')
@@ -126,6 +129,7 @@ export function verifyCallback(
     params.approved,
     params.new_account,
     params.handle ?? '', // empty string when absent — matches signCallback sentinel
+    params.epds_handle_mode ?? '', // empty string when absent — matches signCallback sentinel
     ts,
   ].join('\n')
   const expected = crypto

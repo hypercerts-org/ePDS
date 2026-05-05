@@ -174,13 +174,13 @@ export function createCompleteRouter(
           email,
           approved: '1',
           new_account: '1',
+          epds_handle_mode: flow.handleMode,
         }
         const { sig, ts } = signCallback(
           callbackParams,
           ctx.config.epdsCallbackSecret,
         )
         const params = new URLSearchParams({ ...callbackParams, ts, sig })
-        params.set('epds_handle_mode', flow.handleMode)
         logger.info(
           { email, flowId },
           'New user (random mode): skipping handle picker, redirecting to epds-callback',
@@ -218,13 +218,13 @@ export function createCompleteRouter(
       email,
       approved: '1',
       new_account: '0',
+      ...(flow.handleMode ? { epds_handle_mode: flow.handleMode } : {}),
     }
     const { sig, ts } = signCallback(
       callbackParams,
       ctx.config.epdsCallbackSecret,
     )
     const params = new URLSearchParams({ ...callbackParams, ts, sig })
-    if (flow.handleMode) params.set('epds_handle_mode', flow.handleMode)
     const redirectUrl = `${ctx.config.pdsPublicUrl}/oauth/epds-callback?${params.toString()}`
 
     logger.info(
