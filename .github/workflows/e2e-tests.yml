@@ -72,7 +72,18 @@ jobs:
     #
     # `always()` is needed because `gate` is skipped on non-PR
     # events, and GitHub would otherwise cascade-skip this job.
-    if: always() && (needs.gate.outputs.relevant == 'true' || github.event_name != 'pull_request')
+    #
+    # Skip the changesets/action "Version Packages" PR (head ref
+    # `changeset-release/main`): no Railway preview is provisioned
+    # for that bot-generated branch, so the "Find Railway preview
+    # deployment" step would always fail with "No Railway
+    # deployments exist for PR #N preview at all". A skipped *job*
+    # still reports conclusion=skipped to branch protection, which
+    # is treated as passing — same pattern as the `gate` job above.
+    if: >-
+      always() &&
+      github.event.pull_request.head.ref != 'changeset-release/main' &&
+      (needs.gate.outputs.relevant == 'true' || github.event_name != 'pull_request')
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     permissions:

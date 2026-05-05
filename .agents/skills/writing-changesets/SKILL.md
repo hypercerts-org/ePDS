@@ -390,8 +390,10 @@ fixable error, not silently-missing release notes.
 ## Publishing
 
 See `docs/PUBLISHING.md` for how changesets are consumed at
-release time and how the manual-dispatch release workflow produces
-the git tag and GitHub Release.
+release time and how the release workflow (manual phase 1 to open
+the Release PR, automatic phase 2 to tag + publish the GitHub
+Release on Release-PR merge) produces the git tag and GitHub
+Release.
 
 ## Key files
 

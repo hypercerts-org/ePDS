@@ -48,6 +48,14 @@ export interface ClientMetadata {
   background_color?: string
   branding?: ClientBranding
   /**
+   * The OAuth client's pre-registered redirect URIs. Standard OAuth 2.0
+   * field — the OAuth flow uses redirect_uris[0] when something fails
+   * upstream of the PAR row (so we cannot consult the dead PAR's own
+   * redirect_uri) and we still need to return the user to the client
+   * with an OAuth-spec error per RFC 6749 §4.1.2.1.
+   */
+  redirect_uris?: string[]
+  /**
    * ePDS extension — declares the default handle assignment mode for new users.
    * Accepted values: 'random' | 'picker' | 'picker-with-random'.
    * Validated against VALID_HANDLE_MODES by the login-page handler before being

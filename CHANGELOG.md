@@ -1,5 +1,27 @@
 # ePDS
 
+## 0.6.2
+
+### Who should read this release
+
+- **End users:**
+  - [Sign-in pages no longer strand users on a "session expired" dead end, and Resend no longer offers codes that won't work.](#v0.6.2-sign-in-pages-no-longer-strand-users-on-a-session-expired)
+  - [Slow sign-ins are less likely to time out before you finish entering your code.](#v0.6.2-slow-sign-ins-are-less-likely-to-time-out-before-you-finish)
+
+### Patch Changes
+
+- <a id="v0.6.2-sign-in-pages-no-longer-strand-users-on-a-session-expired"></a> [#154](https://github.com/hypercerts-org/ePDS/pull/154) [`2e4d327`](https://github.com/hypercerts-org/ePDS/commit/2e4d327f01e6983ac8946cb7dff1e998edae8e34) Thanks [@aspiers](https://github.com/aspiers)! - Sign-in pages no longer strand users on a "session expired" dead end, and Resend no longer offers codes that won't work.
+
+  **Affects:** End users
+
+  **End users:** if your sign-in times out (you closed the tab and came back, or your wait was longer than the page can keep alive in the background), you are now taken back to the app you were signing in to so it can offer you a retry. The page also no longer offers Resend in the rare case where the new code wouldn't work — instead it tells you the sign-in has timed out and gives you a Start over button. No more typing a fresh code that fails. If for some reason the automatic return is not possible, the page shows a "Return to sign in" button so you can get back to the app yourself in one click.
+
+- <a id="v0.6.2-slow-sign-ins-are-less-likely-to-time-out-before-you-finish"></a> [#154](https://github.com/hypercerts-org/ePDS/pull/154) [`b1fc940`](https://github.com/hypercerts-org/ePDS/commit/b1fc9400e55b661cfbd992d6f72261936ec1df5c) Thanks [@aspiers](https://github.com/aspiers)! - Slow sign-ins are less likely to time out before you finish entering your code.
+
+  **Affects:** End users
+
+  **End users:** if you take a few minutes to find your sign-in code in your inbox before entering it, you will no longer be bounced to a "session expired" page when you submit it. Closing the tab or walking away for a long stretch can still expire the flow, in which case the existing error pages still apply — but reading email at human speed should not.
+
 ## 0.6.1
 
 ### Who should read this release

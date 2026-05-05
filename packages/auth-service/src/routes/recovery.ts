@@ -27,6 +27,7 @@ import {
 } from '../lib/page-helpers.js'
 import { renderError } from '../lib/render-error.js'
 import { AUTH_FLOW_COOKIE, AUTH_FLOW_TTL_MS } from '../lib/auth-flow.js'
+import { heartbeatEnabledFor } from './login-page.js'
 
 const logger = createLogger('auth:recovery')
 
@@ -93,6 +94,7 @@ export function createRecoveryRouter(
         customFaviconUrl,
         customFaviconUrlDark,
         backUri,
+        heartbeatEnabled: heartbeatEnabledFor(req),
       }),
     )
   })
@@ -114,6 +116,7 @@ export function createRecoveryRouter(
           customFaviconUrl,
           customFaviconUrlDark,
           backUri,
+          heartbeatEnabled: heartbeatEnabledFor(req),
         }),
       )
       return
@@ -129,6 +132,7 @@ export function createRecoveryRouter(
           customFaviconUrl,
           customFaviconUrlDark,
           backUri,
+          heartbeatEnabled: heartbeatEnabledFor(req),
         }),
       )
       return
@@ -146,13 +150,18 @@ export function createRecoveryRouter(
         if (!flowId || !existingFlow) {
           const { randomBytes } = await import('node:crypto')
           flowId = randomBytes(16).toString('hex')
+          // Recover the original OAuth client_id by looking up the live
+          // auth_flow row keyed by this request_uri (the login page
+          // populated it on the parent flow). Falls back to null when
+          // the parent flow has expired or never existed — the rest of
+          // the clean-exit pipeline already handles a null clientId
+          // gracefully (text-only fallback page), so missing clientId
+          // is graceful degradation rather than a breakage.
+          const parentFlow = ctx.db.getAuthFlowByRequestUri(requestUri)
           ctx.db.createAuthFlow({
             flowId,
             requestUri,
-            // Recovery flows always start with null clientId — the prior OAuth
-            // flow's clientId is not recoverable here since getAuthFlow filters
-            // expired rows and we have no peek accessor.
-            clientId: null,
+            clientId: parentFlow?.clientId ?? null,
             // handleMode omitted — recovery flows don't go through handle assignment
             expiresAt: Date.now() + AUTH_FLOW_TTL_MS,
           })
@@ -181,6 +190,7 @@ export function createRecoveryRouter(
             customFaviconUrl,
             customFaviconUrlDark,
             backUri,
+            heartbeatEnabled: heartbeatEnabledFor(req),
           }),
         )
       } catch (err) {
@@ -197,6 +207,7 @@ export function createRecoveryRouter(
             customFaviconUrl,
             customFaviconUrlDark,
             backUri,
+            heartbeatEnabled: heartbeatEnabledFor(req),
           }),
         )
       }
@@ -213,6 +224,7 @@ export function createRecoveryRouter(
           customFaviconUrl,
           customFaviconUrlDark,
           backUri,
+          heartbeatEnabled: heartbeatEnabledFor(req),
         }),
       )
     }
@@ -275,6 +287,7 @@ export function createRecoveryRouter(
           customFaviconUrl,
           customFaviconUrlDark,
           backUri,
+          heartbeatEnabled: heartbeatEnabledFor(req),
         }),
       )
     }
@@ -291,11 +304,28 @@ export function renderRecoveryForm(opts: {
   customFaviconUrl?: string | null
   customFaviconUrlDark?: string | null
   backUri?: string | null
+  /**
+   * Forwarded test-only flag: when the request's heartbeat was
+   * disabled via `?no_heartbeat=1` (gated by `EPDS_TEST_HOOKS=1`),
+   * propagate it as a hidden field so the OTP-form re-render after
+   * the email submit still sees it. Production callers leave this
+   * undefined; the field is only emitted when the flag was actually
+   * set, so this stays a no-op outside tests.
+   */
+  heartbeatEnabled?: boolean
 }): string {
   const requestUriForBack = opts.backUri ?? opts.requestUri
   const backHref = requestUriForBack
     ? `/oauth/authorize?request_uri=${encodeURIComponent(requestUriForBack)}`
     : '/oauth/authorize'
+  // Only emit the hidden field when heartbeat is explicitly OFF — the
+  // field is functionless in production and would just clutter the
+  // form. heartbeatEnabledFor() reads body.no_heartbeat === '1' so
+  // the field carries the literal '1' to disable.
+  const noHeartbeatField =
+    opts.heartbeatEnabled === false
+      ? '<input type="hidden" name="no_heartbeat" value="1">'
+      : ''
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -314,6 +344,7 @@ export function renderRecoveryForm(opts: {
       <form method="POST" action="/auth/recover">
         <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
         <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
+        ${noHeartbeatField}
         <div class="field">
           <label for="email">Backup email address</label>
           <input type="email" id="email" name="email" required autofocus
@@ -325,6 +356,33 @@ export function renderRecoveryForm(opts: {
     </div>
     ${POWERED_BY_HTML}
   </div>
+  <script>
+    (function() {
+      // PAR heartbeat for the email-input recovery page — same shape
+      // as the OTP form and recovery OTP form. A user who lands on
+      // /auth/recover and then pauses (rummaging for a backup email
+      // address, switching tabs, fishing through a different inbox)
+      // would otherwise let the parent OAuth flow's PAR die before
+      // they even submit the email. Stops on form submit / unload /
+      // when the server reports the auth_flow or PAR is gone.
+      if (!${JSON.stringify(opts.heartbeatEnabled !== false)}) return;
+      var handle = null;
+      function ping() {
+        fetch('/auth/ping', { credentials: 'include', cache: 'no-store' })
+          .then(function(r) { return r.json(); })
+          .then(function(body) {
+            if (body && body.ok === false && body.reason !== 'transient') stop();
+          })
+          .catch(function() {});
+      }
+      function stop() { if (handle !== null) { clearInterval(handle); handle = null; } }
+      handle = setInterval(ping, 3 * 60 * 1000);
+      window.addEventListener('beforeunload', stop);
+      Array.prototype.forEach.call(document.querySelectorAll('form'), function(form) {
+        form.addEventListener('submit', stop);
+      });
+    })();
+  </script>
 </body>
 </html>`
 }
@@ -340,6 +398,12 @@ export function renderRecoveryOtpForm(opts: {
   customFaviconUrl?: string | null
   customFaviconUrlDark?: string | null
   backUri?: string | null
+  /**
+   * When true, the page polls /auth/ping every 3 min to slide the
+   * upstream PAR's inactivity timer while the user reads their
+   * recovery email. Mirror of the OTP-form heartbeat in login-page.
+   */
+  heartbeatEnabled: boolean
 }): string {
   const maskedEmail = maskEmail(opts.email)
   const requestUriForBack = opts.backUri ?? opts.requestUri
@@ -347,6 +411,14 @@ export function renderRecoveryOtpForm(opts: {
     ? `/oauth/authorize?request_uri=${encodeURIComponent(requestUriForBack)}`
     : '/oauth/authorize'
   const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
+  // Forward the heartbeat-disabled flag through Resend (POST
+  // /auth/recover) so the re-rendered OTP form keeps it disabled.
+  // Verify (POST /auth/recover/verify) doesn't re-render this form,
+  // so the flag is irrelevant there. Field is only emitted when
+  // heartbeat is explicitly off — production calls leave it absent.
+  const noHeartbeatField = opts.heartbeatEnabled
+    ? ''
+    : '<input type="hidden" name="no_heartbeat" value="1">'
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -367,6 +439,7 @@ export function renderRecoveryOtpForm(opts: {
         <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
         <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
         <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
+        ${noHeartbeatField}
         <div class="field">
           <input type="text" id="code" name="code" required autofocus
                  aria-label="One-time code"
@@ -387,12 +460,38 @@ export function renderRecoveryOtpForm(opts: {
         <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
         <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
         <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
+        ${noHeartbeatField}
         <button type="submit" class="btn-secondary">Resend code</button>
       </form>
       <a href="${backHref}" class="btn-secondary">Back to sign in</a>
     </div>
     ${POWERED_BY_HTML}
   </div>
+  <script>
+    (function() {
+      // PAR heartbeat — see packages/auth-service/src/routes/heartbeat.ts.
+      // Mirrors the login-page OTP heartbeat. Stops on form submit /
+      // unload / when the server reports the auth_flow or PAR is gone.
+      if (!${JSON.stringify(opts.heartbeatEnabled)}) return;
+      var handle = null;
+      function ping() {
+        fetch('/auth/ping', { credentials: 'include', cache: 'no-store' })
+          .then(function(r) { return r.json(); })
+          .then(function(body) {
+            // Only terminal reasons stop the loop; 'transient' (5xx /
+            // network blip) keeps polling so the next tick recovers.
+            if (body && body.ok === false && body.reason !== 'transient') stop();
+          })
+          .catch(function() {});
+      }
+      function stop() { if (handle !== null) { clearInterval(handle); handle = null; } }
+      handle = setInterval(ping, 3 * 60 * 1000);
+      window.addEventListener('beforeunload', stop);
+      Array.prototype.forEach.call(document.querySelectorAll('form'), function(form) {
+        form.addEventListener('submit', stop);
+      });
+    })();
+  </script>
 </body>
 </html>`
 }

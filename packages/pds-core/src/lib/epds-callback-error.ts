@@ -26,6 +26,11 @@
  */
 import type { Response } from 'express'
 import type { Logger } from 'pino'
+import {
+  resolveClientMetadata,
+  resolveStartOverHref,
+  type RenderErrorOptions,
+} from '@certified-app/shared'
 
 /** Decoded view of a thrown error for response shaping. */
 export interface CallbackErrorClassification {
@@ -80,21 +85,161 @@ export interface HandleCallbackErrorOpts {
   /** state stashed from Step 2's requestManager.get(); preserved on the
    * redirect for CSRF round-trip. */
   capturedState: string | undefined
+  /**
+   * OAuth client_id, signed and forwarded by auth-service in the
+   * /oauth/epds-callback URL. Used as a last-resort fallback when
+   * `capturedRedirectUri` is absent — the catch block resolves the
+   * client's published metadata to recover `redirect_uris[0]` so the
+   * user can still bounce back to the OAuth client (with `error` and
+   * `error_description`) instead of stranding them on a static page.
+   * The original `state` lives in the dead PAR and is unrecoverable
+   * here; clients treat the missing `state` as an anonymous error.
+   */
+  signedClientId?: string
   /** Issuer identifier per RFC 9207, set on the redirect. */
   pdsUrl: string
   logger: Pick<Logger, 'error' | 'warn'>
   /** Renders the styled HTML fallback page. Injected so tests can
    * assert on the rendered string without pulling in the real
-   * renderer. */
-  renderError: (message: string) => string
+   * renderer. Accepts the same options object the shared
+   * `renderError` exports so the HTML fallback can render a
+   * "Return to sign in" button when we know which OAuth client the
+   * user came from but couldn't construct a valid redirect target
+   * (metadata missing, redirect_uris empty / unparseable). */
+  renderError: (message: string, options?: RenderErrorOptions) => string
 }
 
-export function handleCallbackError(opts: HandleCallbackErrorOpts): void {
+/**
+ * Tier 1a: try to issue an RFC 6749 §4.1.2.1 redirect using the
+ * `redirect_uri` captured from a successful Step-2 read of the
+ * upstream PAR row. Preserves the original `state`. Returns true
+ * when a redirect was emitted; false when `capturedRedirectUri` is
+ * absent or unparseable (caller should fall through to Tier 1b).
+ */
+function tryRedirectFromCapturedUri(args: {
+  res: Response
+  capturedRedirectUri: string | undefined
+  capturedState: string | undefined
+  pdsUrl: string
+  code: 'access_denied' | 'server_error'
+  description: string
+  logger: Pick<Logger, 'error' | 'warn'>
+}): boolean {
+  if (args.res.headersSent || !args.capturedRedirectUri) return false
+  // The redirect_uri was captured from a successful Step-2 read of
+  // the upstream PAR row, and @atproto/oauth-provider validates the
+  // URL at PAR creation, so this is essentially defensive — but the
+  // catch block exists precisely to spare the user a 500. If
+  // `new URL()` ever does throw (upstream invariant changes,
+  // test-only hook injects garbage, etc.), log it and let the caller
+  // fall through to the next tier rather than crashing the error
+  // handler itself.
+  let errorUrl: URL
+  try {
+    errorUrl = new URL(args.capturedRedirectUri)
+  } catch (urlErr) {
+    args.logger.error(
+      { err: urlErr, capturedRedirectUri: args.capturedRedirectUri },
+      'ePDS callback: captured redirect_uri is not a valid URL — falling back to HTML error page',
+    )
+    return false
+  }
+  // Cache-Control: no-store on the redirect so a browser or
+  // intermediary doesn't preserve the per-attempt `state` /
+  // error_description query params (would leak across users on a
+  // shared cache) and doesn't replay a stale 303 on refresh, which
+  // would skip the user past a fresh sign-in attempt.
+  args.res.setHeader('Cache-Control', 'no-store')
+  errorUrl.searchParams.set('error', args.code)
+  errorUrl.searchParams.set('error_description', args.description)
+  errorUrl.searchParams.set('iss', args.pdsUrl)
+  if (args.capturedState) errorUrl.searchParams.set('state', args.capturedState)
+  args.res.redirect(303, errorUrl.toString())
+  return true
+}
+
+/**
+ * Tier 1b: try to issue an RFC 6749 §4.1.2.1 redirect using
+ * `redirect_uris[0]` resolved from the signed `client_id`'s
+ * published OAuth metadata. Used when Step 2 itself threw so we
+ * never captured the PAR's redirect_uri / state.
+ *
+ * RFC 6749 §4.1.2.1 *requires* `state` in the error response when it
+ * was present in the authorization request. We omit it here because
+ * the original `state` value lived in the now-deleted PAR row and
+ * is unrecoverable — this is a pragmatic degradation, not
+ * spec-permitted behaviour. Spec-compliant OAuth clients have to
+ * tolerate uncorrelated error responses anyway (cross-device resume,
+ * browser session loss), so an "anonymous error, restart" outcome
+ * is universally recoverable on the client side. We chose redirect
+ * over stranding on a static page because the user gets back to the
+ * client's UI in either case, and the client at least sees the
+ * specific error code and description.
+ *
+ * `signedClientId` rode along on the HMAC-signed callback URL so a
+ * tampered value cannot redirect a victim's flow at a different
+ * OAuth client. Returns true when a redirect was emitted; false
+ * when no redirect could be constructed (caller should fall through
+ * to the styled HTML page).
+ */
+async function tryRedirectFromSignedClient(args: {
+  res: Response
+  signedClientId: string | undefined
+  pdsUrl: string
+  code: 'access_denied' | 'server_error'
+  description: string
+  logger: Pick<Logger, 'error' | 'warn'>
+}): Promise<boolean> {
+  if (args.res.headersSent || !args.signedClientId) return false
+  let fallbackRedirect: string | undefined
+  try {
+    const metadata = await resolveClientMetadata(args.signedClientId)
+    fallbackRedirect = metadata.redirect_uris?.[0]
+  } catch (lookupErr) {
+    args.logger.warn(
+      { err: lookupErr, signedClientId: args.signedClientId },
+      'ePDS callback: client metadata lookup failed — falling back to HTML error page',
+    )
+    return false
+  }
+  if (!fallbackRedirect) {
+    args.logger.warn(
+      { signedClientId: args.signedClientId },
+      'ePDS callback: client metadata has no usable redirect_uris — falling back to HTML error page',
+    )
+    return false
+  }
+  let errorUrl: URL
+  try {
+    errorUrl = new URL(fallbackRedirect)
+  } catch (urlErr) {
+    args.logger.error(
+      {
+        err: urlErr,
+        signedClientId: args.signedClientId,
+        fallbackRedirect,
+      },
+      'ePDS callback: client metadata redirect_uri is not a valid URL — falling back to HTML error page',
+    )
+    return false
+  }
+  args.res.setHeader('Cache-Control', 'no-store')
+  errorUrl.searchParams.set('error', args.code)
+  errorUrl.searchParams.set('error_description', args.description)
+  errorUrl.searchParams.set('iss', args.pdsUrl)
+  args.res.redirect(303, errorUrl.toString())
+  return true
+}
+
+export async function handleCallbackError(
+  opts: HandleCallbackErrorOpts,
+): Promise<void> {
   const {
     res,
     err,
     capturedRedirectUri,
     capturedState,
+    signedClientId,
     pdsUrl,
     logger,
     renderError,
@@ -113,38 +258,31 @@ export function handleCallbackError(opts: HandleCallbackErrorOpts): void {
     logger.error({ err }, 'ePDS callback error')
   }
 
-  if (!res.headersSent && capturedRedirectUri) {
-    // The redirect_uri was captured from a successful Step-2 read of
-    // the upstream PAR row, and @atproto/oauth-provider validates the
-    // URL at PAR creation, so this is essentially defensive — but the
-    // catch block exists precisely to spare the user a 500. If
-    // `new URL()` ever does throw (upstream invariant changes,
-    // test-only hook injects garbage, etc.), log it and fall through
-    // to the HTML fallback rather than crashing the error handler
-    // itself.
-    let errorUrl: URL | null = null
-    try {
-      errorUrl = new URL(capturedRedirectUri)
-    } catch (urlErr) {
-      logger.error(
-        { err: urlErr, capturedRedirectUri },
-        'ePDS callback: captured redirect_uri is not a valid URL — falling back to HTML error page',
-      )
-    }
-    if (errorUrl) {
-      // Cache-Control: no-store on the redirect so a browser or
-      // intermediary doesn't preserve the per-attempt `state` /
-      // error_description query params (would leak across users on a
-      // shared cache) and doesn't replay a stale 303 on refresh,
-      // which would skip the user past a fresh sign-in attempt.
-      res.setHeader('Cache-Control', 'no-store')
-      errorUrl.searchParams.set('error', code)
-      errorUrl.searchParams.set('error_description', description)
-      errorUrl.searchParams.set('iss', pdsUrl)
-      if (capturedState) errorUrl.searchParams.set('state', capturedState)
-      res.redirect(303, errorUrl.toString())
-      return
-    }
+  if (
+    tryRedirectFromCapturedUri({
+      res,
+      capturedRedirectUri,
+      capturedState,
+      pdsUrl,
+      code,
+      description,
+      logger,
+    })
+  ) {
+    return
+  }
+
+  if (
+    await tryRedirectFromSignedClient({
+      res,
+      signedClientId,
+      pdsUrl,
+      code,
+      description,
+      logger,
+    })
+  ) {
+    return
   }
 
   if (!res.headersSent) {
@@ -152,9 +290,24 @@ export function handleCallbackError(opts: HandleCallbackErrorOpts): void {
     // produced from per-request state, so a cached copy is at best
     // misleading on a later attempt.
     res.setHeader('Cache-Control', 'no-store')
+    // Best-effort Start Over CTA: when we know which OAuth client
+    // initiated the flow (signedClientId), resolve a sign-in entry
+    // URL from its published metadata so the styled fallback isn't
+    // a true dead end. Auth-service does the same thing in
+    // lib/clean-exit.ts. Returns null when no clientId is in scope
+    // or metadata can't be resolved — the page degrades to text-only
+    // in that case.
+    const startOverHref = signedClientId
+      ? await resolveStartOverHref(signedClientId, logger)
+      : null
     res
       .status(isExpired ? 400 : 500)
       .type('html')
-      .send(renderError(description))
+      .send(
+        renderError(description, {
+          startOverHref: startOverHref ?? undefined,
+          startOverLabel: 'Return to sign in',
+        }),
+      )
   }
 }
