@@ -9,7 +9,7 @@ import {
 } from '../lib/client-css-injection.js'
 
 function mockLogger() {
-  return { info: vi.fn(), warn: vi.fn(), debug: vi.fn() }
+  return { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }
 }
 
 describe('shouldInjectClientCss', () => {

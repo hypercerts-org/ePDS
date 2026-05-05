@@ -145,12 +145,8 @@ Then(
   async function (this: EpdsWorld) {
     const page = getPage(this)
     const scenarioEmail = requireScenarioEmail(this)
-    const grantAccessText = new RegExp(
-      String.raw`\bGrant\s+access\s+to\s+your\b`,
-    )
-    const accountCardText = new RegExp(
-      String.raw`\bwants\s+to\s+access\s+your\b`,
-    )
+    const grantAccessText = /\bGrant\s+access\s+to\s+your\b/
+    const accountCardText = /\bwants\s+to\s+access\s+your\b/
     const grantAccessParagraph = page.getByText(grantAccessText).first()
     const accountCard = page
       .getByRole('main')
@@ -190,6 +186,35 @@ Then(
     await expect(tooltip).toBeVisible()
     await expect(tooltip).toContainText('Public AT Protocol handle:')
     await expect(tooltip).toContainText(publicHandle)
+  },
+)
+
+Then(
+  'the consent identity tooltip exposes the account email',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    const scenarioEmail = requireScenarioEmail(this)
+    const tooltipControl = page
+      .getByRole('main')
+      .getByRole('button', { name: 'Identity information' })
+
+    await expect(tooltipControl).toHaveAttribute('type', 'button')
+    await expect(tooltipControl).toHaveAttribute('aria-expanded', 'false')
+    const describedBy = await tooltipControl.getAttribute('aria-describedby')
+    expect(describedBy?.trim()).toBeTruthy()
+    if (!describedBy?.trim()) {
+      throw new Error('Expected aria-describedby to reference a tooltip')
+    }
+    const [tooltipId] = describedBy.trim().split(/\s+/)
+
+    await tooltipControl.click()
+    await expect(tooltipControl).toHaveAttribute('aria-expanded', 'true')
+
+    const tooltip = page.locator(`#${tooltipId}`)
+    await expect(tooltip).toHaveAttribute('role', 'tooltip')
+    await expect(tooltip).toBeVisible()
+    await expect(tooltip).toContainText('This handle is associated with')
+    await expect(tooltip).toContainText(scenarioEmail)
   },
 )
 

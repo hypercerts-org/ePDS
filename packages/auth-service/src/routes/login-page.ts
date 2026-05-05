@@ -614,15 +614,16 @@ export function renderLoginPage(opts: {
 
     <!-- Step 1: Email entry (calls better-auth sendOtp) -->
     <div id="step-email" class="step-email${opts.initialStep === 'otp' ? ' hidden' : ''}">
-      <form id="form-send-otp">
+      <form id="form-send-otp" data-epds-login-ready="false">
         <div class="field">
           <label for="email">Enter your email address</label>
           <input type="email" id="email" name="email" required autofocus
                  placeholder="you@example.com"
                  value="${escapeHtml(opts.loginHint)}">
         </div>
-        <button type="submit" class="btn-primary">Continue</button>
+        <button type="submit" class="btn-primary" disabled>Continue</button>
       </form>
+      <noscript><div class="flash-msg error">JavaScript is required to sign in with email.</div></noscript>
       ${handleLoginButtonHtml}
     </div>
 
@@ -681,6 +682,7 @@ export function renderLoginPage(opts: {
       var otpSubtitle = document.getElementById('otp-subtitle');
       var otpEmailInput = document.getElementById('otp-email');
       var atprotoBtn = document.querySelector('.btn-atproto');
+      var sendOtpForm = document.getElementById('form-send-otp');
       var emailInput = document.getElementById('email');
       var emailLabel = document.querySelector('label[for="email"]');
       var sendOtpBtn = document.querySelector('#form-send-otp button[type=submit]');
@@ -852,7 +854,7 @@ export function renderLoginPage(opts: {
       }
 
       // Form: send OTP (email mode) or hand off to client (handle mode)
-      document.getElementById('form-send-otp').addEventListener('submit', async function(e) {
+      sendOtpForm.addEventListener('submit', async function(e) {
         e.preventDefault();
         clearError();
         var raw = emailInput.value.trim();
@@ -942,6 +944,9 @@ export function renderLoginPage(opts: {
         showEmailStep();
         clearOtpBoxes();
       });
+
+      sendOtpForm.dataset.epdsLoginReady = 'true';
+      sendOtpBtn.disabled = false;
 
       // Pillar 1: If login_hint was provided, the OTP step is already visible
       // server-side — no DOM transition needed.
