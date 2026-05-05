@@ -25,6 +25,10 @@ import type {
   ResolveClientMetadataOptions,
 } from '@certified-app/shared'
 import { resolveHandleMode, VALID_HANDLE_MODES } from '@certified-app/shared'
+import {
+  resolveOAuthClientIdFromQuery,
+  type ResolveClientIdFromRequestUri,
+} from './lib/oauth-request-context.js'
 
 /**
  * Build the post-hydration enrichment script injected into `/account*`
@@ -43,7 +47,7 @@ import { resolveHandleMode, VALID_HANDLE_MODES } from '@certified-app/shared'
  *     this runs in a plain `<script>` tag.
  */
 export function buildChooserEnrichmentScript(): string {
-  return `(function(){
+  return String.raw`(function(){
   // Capture upstream's hydration data before the SPA reads it and unsets
   // the global. Two different globals carry the same account array shape
   // depending on which upstream route is rendering:
@@ -186,7 +190,7 @@ export function buildChooserEnrichmentScript(): string {
 
   function appendAriaReference(el, attr, id) {
     var current = el.getAttribute(attr) || '';
-    var refs = current ? current.split(/\\s+/) : [];
+    var refs = current ? current.split(/\s+/) : [];
     for (var i = 0; i < refs.length; i++) {
       if (refs[i] === id) return;
     }
@@ -251,7 +255,7 @@ export function buildChooserEnrichmentScript(): string {
   }
 
   function normalizeConsentContextText(text) {
-    return (text || '').replace(/\\s+/g, ' ').trim();
+    return (text || '').replace(/\s+/g, ' ').trim();
   }
 
   function textAroundChild(parent, child) {
@@ -800,6 +804,11 @@ export interface ChooserEnrichmentDeps {
     clientId: string,
     options?: ResolveClientMetadataOptions,
   ) => Promise<ClientMetadata>
+  /** Resolve client_id from a PAR request_uri when the current OAuth
+   *  page URL does not carry a direct client_id. Passed in from pds-core
+   *  startup so this middleware can use the provider request manager
+   *  without depending on provider internals or persisted request tables. */
+  resolveClientIdFromRequestUri?: ResolveClientIdFromRequestUri
   /** Auth-service origin (e.g. "https://auth.example") used by the
    *  injected script's "Another account" rebind to hard-navigate to
    *  the email form instead of letting upstream's SPA swap to its
@@ -807,6 +816,10 @@ export interface ChooserEnrichmentDeps {
    *  <meta name="epds-auth-origin"> tag per request. Empty string
    *  disables the rebind. */
   authOrigin?: string
+  /** Optional structured logger for fallback diagnostics. */
+  logger?: {
+    debug: (bindings: Record<string, unknown>, message: string) => void
+  }
 }
 
 /**
@@ -834,7 +847,12 @@ const DEFAULT_CHOOSER_ENRICHMENT_DEPS: ChooserEnrichmentDeps = {
 export function createChooserEnrichmentMiddleware(
   deps: ChooserEnrichmentDeps = DEFAULT_CHOOSER_ENRICHMENT_DEPS,
 ) {
-  const { resolveClientMetadata: resolveMeta, authOrigin = '' } = deps
+  const {
+    resolveClientMetadata: resolveMeta,
+    resolveClientIdFromRequestUri,
+    authOrigin = '',
+    logger,
+  } = deps
 
   const enrichmentJs = buildChooserEnrichmentScript()
   const enrichmentScriptHash = sha256Base64(enrichmentJs)
@@ -868,29 +886,36 @@ export function createChooserEnrichmentMiddleware(
     // can run in the same call stack as next() and beat the microtask.
     // On a warm cache the resolver is effectively synchronous; on
     // cache miss we pay the network fetch here, matching auth-
-    // service's safeResolveClientMetadata contract. Failure degrades
-    // silently to the query/env-derived fallback.
+    // service's safeResolveClientMetadata contract. Failure logs at
+    // debug and falls back to the query/env-derived mode.
     const query = req.query ?? {}
-    const clientId =
-      typeof query.client_id === 'string' ? query.client_id : undefined
     const queryMode =
       typeof query.epds_handle_mode === 'string'
         ? query.epds_handle_mode
         : undefined
     let metaMode: string | undefined
-    if (clientId) {
+    const hasValidQueryMode =
+      typeof queryMode === 'string' &&
+      (VALID_HANDLE_MODES as readonly string[]).includes(queryMode)
+    if (!hasValidQueryMode) {
       try {
-        const meta = await resolveMeta(clientId)
-        const raw = meta.epds_handle_mode
-        if (
-          typeof raw === 'string' &&
-          (VALID_HANDLE_MODES as readonly string[]).includes(raw)
-        ) {
-          metaMode = raw
+        const clientId = await resolveOAuthClientIdFromQuery(
+          query,
+          resolveClientIdFromRequestUri,
+        )
+        if (clientId) {
+          const meta = await resolveMeta(clientId)
+          const raw = meta.epds_handle_mode
+          if (typeof raw === 'string') metaMode = raw
         }
-      } catch {
-        // Degrade silently: metaMode stays undefined so resolveHandleMode
-        // falls through to the query value or the env default.
+      } catch (err) {
+        logger?.debug(
+          { err, requestUri: query.request_uri, queryMode },
+          'chooser-enrichment: failed to resolve handle mode from OAuth request context',
+        )
+        // Failed request_uri or metadata lookups leave metaMode
+        // undefined, so resolveHandleMode falls through to the query
+        // value or the env default.
       }
     }
     const handleMode = resolveHandleMode(queryMode, metaMode)

@@ -425,6 +425,7 @@ type HiddenHandleDescriptionRow = {
     text: string
   }[]
   emailTitle: string | null
+  hiddenHandleText: string
   rowIndex: number
 }
 
@@ -446,9 +447,10 @@ Then(
             if (!row || !handleLabel) return null
 
             const handleIsHidden =
-              window.getComputedStyle(handleLabel).display === 'none'
+              globalThis.getComputedStyle(handleLabel).display === 'none'
             if (!handleIsHidden) return null
 
+            const hiddenHandleText = handleLabel.textContent?.trim() ?? ''
             const describedBy = row.getAttribute('aria-describedby')
             const descriptionIds =
               describedBy?.trim().split(/\s+/).filter(Boolean) ?? []
@@ -468,6 +470,7 @@ Then(
               describedBy,
               descriptions,
               emailTitle: emailLabel.getAttribute('title'),
+              hiddenHandleText,
               rowIndex,
             }
           })
@@ -496,9 +499,13 @@ Then(
         prefixIndex,
         `Row ${row.rowIndex}: expected hidden-handle description to contain "${prefix}", got "${descriptionText}"`,
       ).toBeGreaterThanOrEqual(0)
+      const describedHiddenHandle = descriptionText
+        .slice(prefixIndex + prefix.length)
+        .trim()
       expect(
-        descriptionText.slice(prefixIndex + prefix.length).trim().length,
-      ).toBeGreaterThan(0)
+        describedHiddenHandle,
+        `Row ${row.rowIndex}: expected hidden-handle description suffix to match the hidden handle text`,
+      ).toBe(row.hiddenHandleText)
 
       expect(
         row.emailTitle,

@@ -62,7 +62,7 @@ function formatRawPublicHandle(handle: string): string {
 }
 
 function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return value.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)
 }
 
 Then('a consent screen is displayed', async function (this: EpdsWorld) {
@@ -144,7 +144,23 @@ Then(
   'the consent page shows the email as the primary account identifier',
   async function (this: EpdsWorld) {
     const page = getPage(this)
-    await expect(page.getByText(requireScenarioEmail(this))).toBeVisible()
+    const scenarioEmail = requireScenarioEmail(this)
+    const grantAccessText = new RegExp(
+      String.raw`\bGrant\s+access\s+to\s+your\b`,
+    )
+    const accountCardText = new RegExp(
+      String.raw`\bwants\s+to\s+access\s+your\b`,
+    )
+    const grantAccessParagraph = page.getByText(grantAccessText).first()
+    const accountCard = page
+      .getByRole('main')
+      .getByText(accountCardText)
+      .first()
+
+    await expect(grantAccessParagraph).toBeVisible()
+    await expect(grantAccessParagraph).toContainText(scenarioEmail)
+    await expect(accountCard).toBeVisible()
+    await expect(accountCard).toContainText(scenarioEmail)
   },
 )
 
@@ -153,19 +169,23 @@ Then(
   async function (this: EpdsWorld) {
     const page = getPage(this)
     const publicHandle = formatPublicHandle(requireScenarioHandle(this))
-    const tooltipControl = page.getByRole('button', {
-      name: 'Identity information',
-    })
+    const tooltipControl = page
+      .getByRole('main')
+      .getByRole('button', { name: 'Identity information' })
 
     await expect(tooltipControl).toHaveAttribute('type', 'button')
     await expect(tooltipControl).toHaveAttribute('aria-expanded', 'false')
     const describedBy = await tooltipControl.getAttribute('aria-describedby')
     expect(describedBy?.trim()).toBeTruthy()
+    if (!describedBy?.trim()) {
+      throw new Error('Expected aria-describedby to reference a tooltip')
+    }
+    const [tooltipId] = describedBy.trim().split(/\s+/)
 
     await tooltipControl.click()
     await expect(tooltipControl).toHaveAttribute('aria-expanded', 'true')
 
-    const tooltip = page.locator(`#${describedBy?.trim()}`)
+    const tooltip = page.locator(`#${tooltipId}`)
     await expect(tooltip).toHaveAttribute('role', 'tooltip')
     await expect(tooltip).toBeVisible()
     await expect(tooltip).toContainText('Public AT Protocol handle:')
@@ -183,7 +203,9 @@ Then(
       formatRawPublicHandle(scenarioHandle),
     ].map(
       (publicHandle) =>
-        new RegExp(`\\byour\\s+${escapeRegex(publicHandle)}\\s+account\\b`),
+        new RegExp(
+          String.raw`\byour\s+${escapeRegex(publicHandle)}\s+account\b`,
+        ),
     )
 
     for (const primaryHandlePattern of primaryHandlePatterns) {

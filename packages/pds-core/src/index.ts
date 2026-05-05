@@ -66,6 +66,7 @@ import { createAuthUiGuard, parsePromptTokens } from './auth-ui-guard.js'
 import { loadDeviceAccountEmails } from './lib/device-accounts.js'
 import { handleCallbackError } from './lib/epds-callback-error.js'
 import { installTestHooks } from './lib/test-hooks.js'
+import { buildEpdsCallbackAuthorizeUrl } from './lib/epds-callback-authorize.js'
 
 const logger = createLogger('pds-core')
 
@@ -590,9 +591,12 @@ async function main() {
       // - Checks checkConsentRequired() against actual OAuth scopes
       // - Auto-approves if no consent needed (SSO match, previously authorized scopes)
       // - Renders the upstream consent UI (consent-view.tsx) if consent is required
-      const authorizeUrl = new URL('/oauth/authorize', pdsUrl)
-      authorizeUrl.searchParams.set('request_uri', requestUri)
-      authorizeUrl.searchParams.set('client_id', clientId)
+      const authorizeUrl = buildEpdsCallbackAuthorizeUrl({
+        pdsUrl,
+        requestUri,
+        clientId,
+        handleMode: req.query.epds_handle_mode,
+      })
 
       res.setHeader('Cache-Control', 'no-store')
       res.redirect(303, authorizeUrl.toString())
@@ -772,19 +776,21 @@ async function main() {
     .map((s) => s.trim())
     .filter(Boolean)
 
+  const resolveClientIdFromRequestUri = provider
+    ? async (requestUri: string) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
+        const requestData = await (provider.requestManager as any).get(
+          requestUri,
+        )
+        return requestData?.clientId as string | undefined
+      }
+    : undefined
+
   installCssInjectionMiddleware(pds.app, stack, {
     trustedClients,
     resolveClientMetadata,
     getClientCss,
-    resolveClientIdFromRequestUri: provider
-      ? async (requestUri: string) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
-          const requestData = await (provider.requestManager as any).get(
-            requestUri,
-          )
-          return requestData?.clientId as string | undefined
-        }
-      : undefined,
+    resolveClientIdFromRequestUri,
     logger,
   })
 
@@ -862,6 +868,7 @@ async function main() {
 
   const chooserEnrichmentMiddleware = createChooserEnrichmentMiddleware({
     resolveClientMetadata,
+    resolveClientIdFromRequestUri,
     authOrigin,
   })
 

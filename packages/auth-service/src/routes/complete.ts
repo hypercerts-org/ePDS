@@ -35,6 +35,35 @@ const logger = createLogger('auth:complete')
 
 const AUTH_FLOW_COOKIE = 'epds_auth_flow'
 
+async function resolveCompleteIdentity(
+  email: string,
+  flowId: string,
+  ctx: AuthServiceContext,
+  pdsUrl: string,
+  internalSecret: string,
+): Promise<{ email: string; did: string | null }> {
+  const did = await getDidByEmail(email, pdsUrl, internalSecret)
+  if (did) return { email, did }
+
+  // Recovery path: session email is a backup email, not a primary. Resolve
+  // the backup-email -> DID mapping (auth-service-owned) and then DID ->
+  // primary email via pds-core's internal API, so the downstream callback
+  // signs the user's real account email, not the recovery address.
+  const recovered = await resolveRecoveryEmail(
+    email,
+    ctx,
+    pdsUrl,
+    internalSecret,
+  )
+  if (!recovered) return { email, did: null }
+
+  logger.info(
+    { flowId, did: recovered.did },
+    'Recovery: translated backup email to primary email via DID',
+  )
+  return { email: recovered.email, did: recovered.did }
+}
+
 export function createCompleteRouter(
   ctx: AuthServiceContext,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth instance has no exported type
@@ -97,31 +126,16 @@ export function createCompleteRouter(
       return
     }
 
-    let email = session.user.email.toLowerCase()
+    const sessionEmail = session.user.email.toLowerCase()
 
     // Step 4: Check whether this is a new user (no PDS account for email).
-    let did = await getDidByEmail(email, pdsUrl, internalSecret)
-
-    // Recovery path: session email is a backup email, not a primary. Resolve
-    // the backup-email → DID mapping (auth-service-owned) and then DID →
-    // primary email via pds-core's internal API, so the downstream callback
-    // signs the user's real account email, not the recovery address.
-    if (!did) {
-      const recovered = await resolveRecoveryEmail(
-        email,
-        ctx,
-        pdsUrl,
-        internalSecret,
-      )
-      if (recovered) {
-        logger.info(
-          { flowId, did: recovered.did },
-          'Recovery: translated backup email to primary email via DID',
-        )
-        email = recovered.email
-        did = recovered.did
-      }
-    }
+    const { email, did } = await resolveCompleteIdentity(
+      sessionEmail,
+      flowId,
+      ctx,
+      pdsUrl,
+      internalSecret,
+    )
 
     const isNewAccount = !did
 
@@ -166,6 +180,7 @@ export function createCompleteRouter(
           ctx.config.epdsCallbackSecret,
         )
         const params = new URLSearchParams({ ...callbackParams, ts, sig })
+        params.set('epds_handle_mode', flow.handleMode)
         logger.info(
           { email, flowId },
           'New user (random mode): skipping handle picker, redirecting to epds-callback',
@@ -209,6 +224,7 @@ export function createCompleteRouter(
       ctx.config.epdsCallbackSecret,
     )
     const params = new URLSearchParams({ ...callbackParams, ts, sig })
+    if (flow.handleMode) params.set('epds_handle_mode', flow.handleMode)
     const redirectUrl = `${ctx.config.pdsPublicUrl}/oauth/epds-callback?${params.toString()}`
 
     logger.info(
