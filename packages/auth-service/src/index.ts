@@ -15,6 +15,7 @@ import { createAccountLoginRouter } from './routes/account-login.js'
 import { createAccountSettingsRouter } from './routes/account-settings.js'
 import { createCompleteRouter } from './routes/complete.js'
 import { createChooseHandleRouter } from './routes/choose-handle.js'
+import { createHeartbeatRouter } from './routes/heartbeat.js'
 import { createPreviewRouter } from './routes/preview.js'
 import { createPreviewEmailsRouter } from './routes/preview-emails.js'
 import { createRootRouter } from './routes/root.js'
@@ -94,6 +95,7 @@ export function createAuthService(config: AuthServiceConfig): {
   app.use(createAccountSettingsRouter(ctx, betterAuthInstance))
   app.use(createCompleteRouter(ctx, betterAuthInstance))
   app.use(createChooseHandleRouter(ctx, betterAuthInstance))
+  app.use(createHeartbeatRouter(ctx))
   app.use(createPreviewRouter(ctx))
   app.use(createPreviewEmailsRouter(ctx))
 

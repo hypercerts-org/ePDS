@@ -205,6 +205,7 @@ async function main() {
     const approvedStr = req.query.approved as string
     const newAccountStr = req.query.new_account as string
     const handleParam = req.query.handle as string | undefined
+    const clientIdParam = req.query.client_id as string | undefined
     const handleModeParam = req.query.epds_handle_mode as string | undefined
     const signatureValid = verifyCallback(
       {
@@ -213,6 +214,7 @@ async function main() {
         approved: approvedStr,
         new_account: newAccountStr,
         handle: handleParam,
+        client_id: clientIdParam,
         epds_handle_mode: handleModeParam,
       },
       ts,
@@ -608,11 +610,12 @@ async function main() {
         'ePDS callback: redirecting to stock /oauth/authorize for consent/approval',
       )
     } catch (err) {
-      handleCallbackError({
+      await handleCallbackError({
         res,
         err,
         capturedRedirectUri,
         capturedState,
+        signedClientId: clientIdParam,
         pdsUrl,
         logger,
         renderError,
