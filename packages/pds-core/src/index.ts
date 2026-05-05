@@ -206,6 +206,7 @@ async function main() {
     const newAccountStr = req.query.new_account as string
     const handleParam = req.query.handle as string | undefined
     const clientIdParam = req.query.client_id as string | undefined
+    const handleModeParam = req.query.epds_handle_mode as string | undefined
     const signatureValid = verifyCallback(
       {
         request_uri: requestUri,
@@ -214,6 +215,7 @@ async function main() {
         new_account: newAccountStr,
         handle: handleParam,
         client_id: clientIdParam,
+        epds_handle_mode: handleModeParam,
       },
       ts,
       sig,

@@ -182,6 +182,7 @@ describe('signCallback / verifyCallback', () => {
       params.new_account,
       '', // handle sentinel (absent)
       '', // client_id sentinel (absent)
+      '', // epds_handle_mode sentinel (absent)
       staleTs,
     ].join('\n')
     const { createHmac } = await import('node:crypto')
@@ -198,6 +199,7 @@ describe('signCallback / verifyCallback', () => {
       params.new_account,
       '', // handle sentinel (absent)
       '', // client_id sentinel (absent)
+      '', // epds_handle_mode sentinel (absent)
       futureTs,
     ].join('\n')
     const { createHmac } = await import('node:crypto')
@@ -296,6 +298,37 @@ describe('signCallback / verifyCallback with handle', () => {
     const tamperedParams: CallbackParams = {
       ...params,
       handle: 'evil.pds.example.com',
+    }
+    expect(verifyCallback(tamperedParams, ts, sig, secret)).toBe(false)
+  })
+
+  it('signs and verifies callback with epds_handle_mode param', () => {
+    const secret = 'test-secret'
+    const params: CallbackParams = {
+      request_uri: 'urn:ietf:params:oauth:request_uri:test',
+      email: 'alice@example.com',
+      approved: '1',
+      new_account: '1',
+      handle: 'alice',
+      epds_handle_mode: 'picker',
+    }
+    const { sig, ts } = signCallback(params, secret)
+    expect(verifyCallback(params, ts, sig, secret)).toBe(true)
+  })
+
+  it('rejects tampered epds_handle_mode', () => {
+    const secret = 'test-secret'
+    const params: CallbackParams = {
+      request_uri: 'urn:ietf:params:oauth:request_uri:test',
+      email: 'alice@example.com',
+      approved: '1',
+      new_account: '1',
+      epds_handle_mode: 'picker',
+    }
+    const { sig, ts } = signCallback(params, secret)
+    const tamperedParams: CallbackParams = {
+      ...params,
+      epds_handle_mode: 'random',
     }
     expect(verifyCallback(tamperedParams, ts, sig, secret)).toBe(false)
   })

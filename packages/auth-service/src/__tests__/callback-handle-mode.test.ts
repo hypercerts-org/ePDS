@@ -3,7 +3,11 @@ import type { AddressInfo } from 'node:net'
 import express from 'express'
 import cookieParser from 'cookie-parser'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { HandleMode } from '@certified-app/shared'
+import {
+  verifyCallback,
+  type CallbackParams,
+  type HandleMode,
+} from '@certified-app/shared'
 import type { AuthServiceContext } from '../context.js'
 import { createChooseHandleRouter } from '../routes/choose-handle.js'
 import { createCompleteRouter } from '../routes/complete.js'
@@ -107,6 +111,28 @@ function normalizeFetchUrl(input: Parameters<typeof fetch>[0]): URL {
   return new URL(input.url)
 }
 
+function verifySignedCallbackUrl(url: URL): boolean {
+  const callbackParams: CallbackParams = {
+    request_uri: url.searchParams.get('request_uri') ?? '',
+    email: url.searchParams.get('email') ?? '',
+    approved: url.searchParams.get('approved') ?? '',
+    new_account: url.searchParams.get('new_account') ?? '',
+    ...(url.searchParams.has('handle')
+      ? { handle: url.searchParams.get('handle') ?? '' }
+      : {}),
+    ...(url.searchParams.has('epds_handle_mode')
+      ? { epds_handle_mode: url.searchParams.get('epds_handle_mode') ?? '' }
+      : {}),
+  }
+
+  return verifyCallback(
+    callbackParams,
+    url.searchParams.get('ts') ?? '',
+    url.searchParams.get('sig') ?? '',
+    'test-callback-secret',
+  )
+}
+
 describe('auth-service epds-callback handle mode threading', () => {
   let priorEnv: { pdsInternalUrl?: string; internalSecret?: string }
 
@@ -165,6 +191,7 @@ describe('auth-service epds-callback handle mode threading', () => {
       expect(url.pathname).toBe('/oauth/epds-callback')
       expect(url.searchParams.get('epds_handle_mode')).toBe('random')
       expect(url.searchParams.has('handle')).toBe(false)
+      expect(verifySignedCallbackUrl(url)).toBe(true)
     } finally {
       await app.close()
     }

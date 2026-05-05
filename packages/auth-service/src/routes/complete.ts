@@ -57,6 +57,10 @@ const AUTH_FLOW_COOKIE = 'epds_auth_flow'
  * the same `params.handle ?? ''` shape; the sentinel is pinned by
  * tests in packages/shared/src/__tests__/crypto.test.ts.
  *
+ * `epds_handle_mode` is signed too rather than appended afterwards, so
+ * the browser cannot flip the chooser/consent presentation mode on the
+ * hop to pds-core without invalidating the signature.
+ *
  * Exported so it can be unit-tested without standing up the full
  * /auth/complete route.
  */
@@ -76,9 +80,9 @@ export function buildEpdsCallbackUrl(args: {
     new_account: args.isNewAccount ? '1' : '0',
   }
   if (args.flowClientId) callbackParams.client_id = args.flowClientId
+  if (args.handleMode) callbackParams.epds_handle_mode = args.handleMode
   const { sig, ts } = signCallback(callbackParams, args.epdsCallbackSecret)
   const params = new URLSearchParams({ ...callbackParams, ts, sig })
-  if (args.handleMode) params.set('epds_handle_mode', args.handleMode)
   return `${args.pdsPublicUrl}/oauth/epds-callback?${params.toString()}`
 }
 
