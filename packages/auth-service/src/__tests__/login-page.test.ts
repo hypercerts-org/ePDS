@@ -430,6 +430,7 @@ describe('renderLoginPage handle login button', () => {
       pdsPublicUrl: 'https://pds.example.com',
       otpLength: 6,
       otpCharset: 'numeric',
+      heartbeatEnabled: false,
     })
   }
 
@@ -516,6 +517,7 @@ function renderDefault(): string {
     pdsPublicUrl: 'https://pds.example.com',
     otpLength: 6,
     otpCharset: 'numeric',
+    heartbeatEnabled: false,
   })
 }
 
@@ -570,7 +572,168 @@ describe('renderLoginPage OTP verify-form double-submit latch (regression)', () 
     const branchEnd = html.indexOf('verifying = false;', branchStart)
     expect(branchEnd).toBeGreaterThan(branchStart)
     const branch = html.slice(branchStart, branchEnd)
-    expect(branch).toContain('showError(result.error);')
+    // Either the plain showError or the inline-action variant is fine
+    // (both surface the message to the user); just assert SOME error
+    // surface is invoked.
+    expect(branch).toMatch(/showError(?:WithAction)?\(/)
     expect(branch).toContain('clearOtpBoxes();')
+  })
+})
+
+describe('renderLoginPage inline Resend action on expired OTP', () => {
+  // The OTP-expired error used to surface only as "OTP expired" /
+  // "Invalid or expired code" text inside the error banner. Users
+  // missed the separate Resend button below the form. The inline
+  // action button surfaces "Send a new code" right next to the
+  // error message and triggers the same Resend flow.
+
+  it('declares showErrorWithAction with a textContent-only label sink', () => {
+    const html = renderDefault()
+    expect(html).toContain('function showErrorWithAction(')
+    // The label is set via .textContent, never via innerHTML — a
+    // reflected error string that happened to look like HTML must
+    // not be able to inject script tags.
+    const fnStart = html.indexOf('function showErrorWithAction(')
+    expect(fnStart).toBeGreaterThan(0)
+    const fnEnd = html.indexOf('function clearError', fnStart)
+    expect(fnEnd).toBeGreaterThan(fnStart)
+    const fnBody = html.slice(fnStart, fnEnd)
+    expect(fnBody).toContain('btn.textContent = actionLabel')
+    expect(fnBody).not.toContain('innerHTML')
+  })
+
+  it('detects OTP-expired errors via a substring-stable regex', () => {
+    const html = renderDefault()
+    // The detection must catch:
+    //   - better-auth's "Invalid or expired code"
+    //   - auth-service's "OTP expired"
+    //   - any future wording with "expir" or "too long" in it
+    expect(html).toMatch(/var isExpired = \/expir\|too long\/i\.test/)
+  })
+
+  it('renders the inline action with the "Send a new code" label and triggers the Resend button', () => {
+    const html = renderDefault()
+    // The inline action label and the click target must be present.
+    expect(html).toContain("'Send a new code'")
+    expect(html).toContain("document.getElementById('btn-resend').click()")
+  })
+
+  it('falls back to the plain showError on non-expired errors', () => {
+    const html = renderDefault()
+    // The non-expired branch must NOT route through
+    // showErrorWithAction (otherwise an "Invalid code" message
+    // would carry an inappropriate "Send a new code" link).
+    expect(html).toMatch(
+      /if \(isExpired\) \{[\s\S]*?\} else \{[\s\S]*?showError\(result\.error\);\s*\}/,
+    )
+  })
+})
+
+describe('renderLoginPage flow-aborted notice + reactive abort gates', () => {
+  // The proactive notice fires when /auth/ping reports the flow is
+  // unrecoverable (par_expired / flow_expired / no_cookie). It
+  // disables every form control and shows a Start over button that
+  // navigates to /auth/abort. The reactive gates (Resend click,
+  // Verify submit) ping /auth/ping just-in-time and bail to
+  // /auth/abort if the flow is dead — defence in depth on top of
+  // the proactive notice.
+
+  it('inlines /auth/abort as the Start over destination', () => {
+    const html = renderDefault()
+    expect(html).toContain("'/auth/abort'")
+  })
+
+  it('declares showFlowAbortedNotice as idempotent (flowAborted flag)', () => {
+    const html = renderDefault()
+    // The idempotence guard prevents duplicate banners if both the
+    // proactive heartbeat tick AND a reactive gate fire the notice.
+    expect(html).toContain('var flowAborted = false')
+    expect(html).toMatch(
+      /function showFlowAbortedNotice\(\)\s*\{\s*if \(flowAborted\) return;/,
+    )
+  })
+
+  it('disables every form control when the notice fires', () => {
+    const html = renderDefault()
+    const fnStart = html.indexOf('function showFlowAbortedNotice()')
+    expect(fnStart).toBeGreaterThan(0)
+    const fnEnd = html.indexOf('function abortIfFlowDead', fnStart)
+    expect(fnEnd).toBeGreaterThan(fnStart)
+    const fnBody = html.slice(fnStart, fnEnd)
+    // OTP boxes, Resend, Back, and Verify must all get disabled —
+    // anything left enabled would let the user click into a path
+    // that silently fails.
+    expect(fnBody).toMatch(/otpBoxes\[i\]\.disabled = true/)
+    expect(fnBody).toMatch(/resendBtn\.disabled = true/)
+    expect(fnBody).toMatch(/backBtn\.disabled = true/)
+    expect(fnBody).toMatch(/verifyBtn\.disabled = true/)
+  })
+
+  it('renders the Start over button with a textContent label sink', () => {
+    const html = renderDefault()
+    const fnStart = html.indexOf('function showFlowAbortedNotice()')
+    const fnEnd = html.indexOf('function abortIfFlowDead', fnStart)
+    const fnBody = html.slice(fnStart, fnEnd)
+    expect(fnBody).toContain("startOverBtn.textContent = 'Start over'")
+    // No innerHTML — same XSS guard as the inline-action button.
+    expect(fnBody).not.toContain('innerHTML')
+  })
+
+  it('triggers the proactive notice when the heartbeat reports a non-transient ok:false', () => {
+    const html = renderDefault()
+    // The pingHeartbeat handler must call showFlowAbortedNotice
+    // when reason !== 'transient'. Transient failures must not
+    // trigger the notice. Substring-based slicing rather than a
+    // greedy regex (.*?) so Sonar doesn't flag this as ReDoS.
+    const guardIdx = html.indexOf(
+      "if (body && body.ok === false && body.reason !== 'transient')",
+    )
+    expect(guardIdx).toBeGreaterThan(0)
+    // The two effects (stop pinging, show the notice) must both
+    // appear after the guard. Use a bounded slice to keep the
+    // assertion linear.
+    const branchSlice = html.slice(guardIdx, guardIdx + 600)
+    expect(branchSlice).toContain('stopHeartbeat();')
+    expect(branchSlice).toContain('showFlowAbortedNotice();')
+  })
+
+  it('gates the Resend click on abortIfFlowDead', () => {
+    const html = renderDefault()
+    // The Resend click handler must call abortIfFlowDead and
+    // bail if it returns true.
+    const handlerStart = html.indexOf("'btn-resend').addEventListener")
+    expect(handlerStart).toBeGreaterThan(0)
+    const handlerEnd = html.indexOf(
+      "'btn-back').addEventListener",
+      handlerStart,
+    )
+    expect(handlerEnd).toBeGreaterThan(handlerStart)
+    const handlerBody = html.slice(handlerStart, handlerEnd)
+    expect(handlerBody).toMatch(/if \(await abortIfFlowDead\(\)\) return/)
+    // The abort gate must run BEFORE sendOtp — calling sendOtp
+    // first would issue an OTP that cannot be used.
+    const gateIdx = handlerBody.indexOf('abortIfFlowDead')
+    const sendIdx = handlerBody.indexOf('sendOtp(currentEmail)')
+    expect(gateIdx).toBeGreaterThan(0)
+    expect(sendIdx).toBeGreaterThan(gateIdx)
+  })
+
+  it('gates the Verify submit on abortIfFlowDead', () => {
+    const html = renderDefault()
+    // Verify gate runs BEFORE verifyOtp — same reason: don't
+    // consume the OTP if the flow can't complete anyway.
+    const handlerStart = html.indexOf("'form-verify-otp').addEventListener")
+    expect(handlerStart).toBeGreaterThan(0)
+    const handlerEnd = html.indexOf(
+      "'btn-resend').addEventListener",
+      handlerStart,
+    )
+    expect(handlerEnd).toBeGreaterThan(handlerStart)
+    const handlerBody = html.slice(handlerStart, handlerEnd)
+    expect(handlerBody).toMatch(/if \(await abortIfFlowDead\(\)\) return/)
+    const gateIdx = handlerBody.indexOf('abortIfFlowDead')
+    const verifyIdx = handlerBody.indexOf('verifyOtp(currentEmail, otp)')
+    expect(gateIdx).toBeGreaterThan(0)
+    expect(verifyIdx).toBeGreaterThan(gateIdx)
   })
 })

@@ -181,6 +181,7 @@ describe('signCallback / verifyCallback', () => {
       params.approved,
       params.new_account,
       '', // handle sentinel (absent)
+      '', // client_id sentinel (absent)
       staleTs,
     ].join('\n')
     const { createHmac } = await import('node:crypto')
@@ -196,6 +197,7 @@ describe('signCallback / verifyCallback', () => {
       params.approved,
       params.new_account,
       '', // handle sentinel (absent)
+      '', // client_id sentinel (absent)
       futureTs,
     ].join('\n')
     const { createHmac } = await import('node:crypto')
@@ -296,5 +298,76 @@ describe('signCallback / verifyCallback with handle', () => {
       handle: 'evil.pds.example.com',
     }
     expect(verifyCallback(tamperedParams, ts, sig, secret)).toBe(false)
+  })
+})
+
+describe('signCallback / verifyCallback with client_id', () => {
+  const secret = 'test-secret-32bytes-padding-here'
+
+  it('signs and verifies callback with a client_id', () => {
+    const params: CallbackParams = {
+      request_uri: 'urn:ietf:params:oauth:request_uri:test',
+      email: 'alice@example.com',
+      approved: '1',
+      new_account: '0',
+      client_id: 'https://demo.example.com/client-metadata.json',
+    }
+    const { sig, ts } = signCallback(params, secret)
+    expect(verifyCallback(params, ts, sig, secret)).toBe(true)
+  })
+
+  it('rejects tampered client_id (attacker cannot redirect victim flow at a different OAuth client)', () => {
+    const params: CallbackParams = {
+      request_uri: 'urn:ietf:params:oauth:request_uri:test',
+      email: 'alice@example.com',
+      approved: '1',
+      new_account: '0',
+      client_id: 'https://demo.example.com/client-metadata.json',
+    }
+    const { sig, ts } = signCallback(params, secret)
+    const tampered: CallbackParams = {
+      ...params,
+      client_id: 'https://attacker.example.com/client-metadata.json',
+    }
+    expect(verifyCallback(tampered, ts, sig, secret)).toBe(false)
+  })
+
+  it('client_id sentinel: omitting and undefined produce the same signature', () => {
+    // Mirrors the handle sentinel contract — an absent client_id and
+    // an explicit client_id:undefined must both verify against the
+    // same signature, so a caller that forgets to set the field
+    // doesn't accidentally invalidate everything.
+    const baseParams: CallbackParams = {
+      request_uri: 'urn:ietf:params:oauth:request_uri:test',
+      email: 'alice@example.com',
+      approved: '1',
+      new_account: '0',
+    }
+    const withUndefined: CallbackParams = {
+      ...baseParams,
+      client_id: undefined,
+    }
+    const { sig, ts } = signCallback(baseParams, secret)
+    expect(verifyCallback(withUndefined, ts, sig, secret)).toBe(true)
+    const { sig: sig2, ts: ts2 } = signCallback(withUndefined, secret)
+    expect(verifyCallback(baseParams, ts2, sig2, secret)).toBe(true)
+  })
+
+  it('a sig produced WITH a client_id does not verify WITHOUT one', () => {
+    const withClient: CallbackParams = {
+      request_uri: 'urn:ietf:params:oauth:request_uri:test',
+      email: 'alice@example.com',
+      approved: '1',
+      new_account: '0',
+      client_id: 'https://demo.example.com/client-metadata.json',
+    }
+    const { sig, ts } = signCallback(withClient, secret)
+    const withoutClient: CallbackParams = {
+      request_uri: withClient.request_uri,
+      email: withClient.email,
+      approved: withClient.approved,
+      new_account: withClient.new_account,
+    }
+    expect(verifyCallback(withoutClient, ts, sig, secret)).toBe(false)
   })
 })

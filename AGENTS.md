@@ -425,7 +425,9 @@ GitHub Release per release.
   good and bad summaries, and the plain-language rule in detail.
 - **Cutting a release:** `docs/PUBLISHING.md` documents the release workflow
   for maintainers — the two-phase "Version Packages PR" → "tag + GitHub
-  Release" flow via `.github/workflows/release.yml`.
+  Release" flow via `.github/workflows/release.yml`. Phase 1 is triggered
+  manually (`workflow_dispatch`); phase 2 fires automatically when the
+  Release PR (head branch `changeset-release/main`) is merged into `main`.
 
 ## Key Gotchas
 

@@ -22,13 +22,14 @@ import {
   escapeHtml,
   signCallback,
   validateLocalPart,
+  type CallbackParams,
   type HandleMode,
 } from '@certified-app/shared'
 import { fromNodeHeaders } from 'better-auth/node'
+import { cleanExit } from '../lib/clean-exit.js'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
 import { pingParRequest } from '../lib/ping-par-request.js'
 import { requireInternalEnv } from '../lib/require-internal-env.js'
-import { renderError } from '../lib/render-error.js'
 import { resolveClientBranding } from '../lib/client-metadata.js'
 import {
   renderOptionalStyleTag,
@@ -71,10 +72,16 @@ export function createChooseHandleRouter(
     const flowId = req.cookies[AUTH_FLOW_COOKIE] as string | undefined
     if (!flowId) {
       logger.warn('No epds_auth_flow cookie on choose-handle')
-      res
-        .status(400)
-        .type('html')
-        .send(renderError('Session expired, please start over'))
+      // No clientId in scope; clean-exit falls through to a Start
+      // Over page with no recoverable button.
+      await cleanExit({
+        res,
+        clientId: null,
+        pdsUrl,
+        code: 'access_denied',
+        description:
+          'Your sign-in took too long to complete. Please start sign-in again.',
+      })
       return null
     }
 
@@ -83,10 +90,14 @@ export function createChooseHandleRouter(
     if (!flow) {
       logger.warn({ flowId }, 'auth_flow not found or expired on choose-handle')
       res.clearCookie(AUTH_FLOW_COOKIE)
-      res
-        .status(400)
-        .type('html')
-        .send(renderError('Session expired, please start over'))
+      await cleanExit({
+        res,
+        clientId: null,
+        pdsUrl,
+        code: 'access_denied',
+        description:
+          'Your sign-in took too long to complete. Please start sign-in again.',
+      })
       return null
     }
 
@@ -102,19 +113,34 @@ export function createChooseHandleRouter(
         { err },
         'Failed to get better-auth session on choose-handle',
       )
-      res
-        .status(500)
-        .type('html')
-        .send(renderError('Authentication failed. Please try again.'))
+      // Internal failure — flow.clientId is in scope so we can
+      // bounce back to the OAuth client with server_error.
+      await cleanExit({
+        res,
+        clientId: flow.clientId,
+        pdsUrl,
+        code: 'server_error',
+        description:
+          'Authentication failed because of a server error. Please try again.',
+        fallbackStatus: 500,
+      })
       return null
     }
 
     if (!session?.user?.email) {
       logger.warn({ flowId }, 'No authenticated session on choose-handle')
-      res
-        .status(401)
-        .type('html')
-        .send(renderError('Session expired, please start over'))
+      // The flow row is still alive so we have a clientId to bounce
+      // back to. User-paced timeout (most likely cause: better-auth
+      // session expired while user was on the picker), not server fault.
+      await cleanExit({
+        res,
+        clientId: flow.clientId,
+        pdsUrl,
+        code: 'access_denied',
+        description:
+          'Your sign-in took too long to complete. Please start sign-in again.',
+        fallbackStatus: 401,
+      })
       return null
     }
 
@@ -169,10 +195,16 @@ export function createChooseHandleRouter(
         },
         'Failed to extend request_uri on choose-handle',
       )
-      res
-        .status(400)
-        .type('html')
-        .send(renderError('Session expired, please start over'))
+      // Cluster B: PAR died before the user even saw the picker.
+      // We have flow.clientId, so bounce them back to the OAuth client.
+      await cleanExit({
+        res,
+        clientId: result.flow.clientId,
+        pdsUrl,
+        code: 'access_denied',
+        description:
+          'Your sign-in took too long to complete. Please start sign-in again.',
+      })
       return
     }
 
@@ -254,10 +286,16 @@ export function createChooseHandleRouter(
         { status: ping.status, err: ping.err, requestUri: flow.requestUri },
         'Failed to extend request_uri on POST choose-handle',
       )
-      res
-        .status(400)
-        .type('html')
-        .send(renderError('Session expired, please start over'))
+      // Cluster B: PAR died while user was picking a handle. We have
+      // flow.clientId, so bounce them back to the OAuth client.
+      await cleanExit({
+        res,
+        clientId: flow.clientId,
+        pdsUrl,
+        code: 'access_denied',
+        description:
+          'Your sign-in took too long to complete. Please start sign-in again.',
+      })
       return
     }
 
@@ -356,13 +394,18 @@ export function createChooseHandleRouter(
     // Step 5: Sign callback with handle local part included in HMAC payload.
     // Only the local part (e.g. 'alice') is sent — pds-core appends its own
     // trusted handleDomain, eliminating any possibility of domain mismatch.
-    const callbackParams = {
+    // client_id is included so pds-core's catch block can mount a
+    // clean-exit redirect to the OAuth client when Step 2's PAR
+    // requestManager.get() throws. See complete.ts for the same
+    // pattern on the no-handle-picker paths.
+    const callbackParams: CallbackParams = {
       request_uri: flow.requestUri,
       email,
       approved: '1',
       new_account: '1',
       handle: normalizedLocal,
     }
+    if (flow.clientId) callbackParams.client_id = flow.clientId
     const { sig, ts } = signCallback(
       callbackParams,
       ctx.config.epdsCallbackSecret,

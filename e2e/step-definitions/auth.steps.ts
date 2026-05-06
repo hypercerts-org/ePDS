@@ -346,10 +346,25 @@ Then(
   },
 )
 
-Then('the user can try again', async function (this: EpdsWorld) {
-  const page = getPage(this)
-  await expect(page.locator('.otp-box').first()).toBeEnabled()
-})
+Then(
+  'the OTP entry boxes are visible and enabled',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    const boxes = page.locator('.otp-box')
+    const count = await boxes.count()
+    if (count === 0) {
+      throw new Error('No .otp-box elements found — OTP form is not rendered')
+    }
+    // Every box must be both visible AND enabled. Asserting on .first()
+    // alone hid regressions where a partial form (e.g. a stale
+    // "verifying..." latch on later boxes) blocked further attempts even
+    // though the first box looked fine.
+    for (let i = 0; i < count; i++) {
+      await expect(boxes.nth(i)).toBeVisible()
+      await expect(boxes.nth(i)).toBeEnabled()
+    }
+  },
+)
 
 Then('further attempts are rejected', async function (this: EpdsWorld) {
   const page = getPage(this)
@@ -445,7 +460,11 @@ Then(
   async function (this: EpdsWorld, expected: string) {
     const page = getPage(this)
     await expect(page.locator('#error-msg')).toBeVisible({ timeout: 10_000 })
-    await expect(page.locator('#error-msg')).toHaveText(expected, {
+    // toContainText (not toHaveText) so the OTP-expired error
+    // banner can carry the inline "Send a new code" action button
+    // alongside the message text. Equality matching would fail
+    // whenever the inline action surfaces.
+    await expect(page.locator('#error-msg')).toContainText(expected, {
       timeout: 10_000,
     })
   },
@@ -566,24 +585,44 @@ async function callPdsExpiryHook(
 }
 
 /**
- * Read the PAR request_uri from the current auth-service login page
- * URL and stash it on the world for subsequent expiry hooks. The URL
- * is `https://<auth>/oauth/authorize?request_uri=urn:...&...` while the
- * user is on the login/OTP form. Throws if the URL doesn't carry it,
- * which means the surrounding scenario is mis-ordered (the page must
- * be on the auth-service side before this step runs).
+ * Read the PAR request_uri from the current auth-service page URL and
+ * stash it on the world for subsequent expiry hooks. While the user is
+ * on the login/OTP form the URL is
+ * `https://<auth>/oauth/authorize?request_uri=urn:...&...`, but on
+ * downstream pages (e.g. /auth/recover) the parameter has been dropped.
+ * Falls back to a previously-stashed `world.lastRequestUri` so a
+ * scenario can capture the URI early (via the dedicated capture step
+ * below) and consult it after navigation. Throws when neither source
+ * has a value, which means the scenario is mis-ordered.
  */
 function captureRequestUriFromPage(world: EpdsWorld): string {
   const page = getPage(world)
-  const requestUri = new URL(page.url()).searchParams.get('request_uri')
-  if (!requestUri) {
-    throw new Error(
-      `Expected request_uri in page URL but found none: ${page.url()}`,
-    )
+  const fromUrl = new URL(page.url()).searchParams.get('request_uri')
+  if (fromUrl) {
+    world.lastRequestUri = fromUrl
+    return fromUrl
   }
-  world.lastRequestUri = requestUri
-  return requestUri
+  if (world.lastRequestUri) {
+    return world.lastRequestUri
+  }
+  throw new Error(
+    `Expected request_uri in page URL or previously captured but found none: ${page.url()}`,
+  )
 }
+
+/**
+ * Capture and stash the PAR request_uri from the current auth-service
+ * page URL so a later step can refer to it after navigating away. Used
+ * by scenarios where the OTP form is left for /auth/recover (recovery)
+ * or any other downstream page where the request_uri has dropped off
+ * the URL.
+ */
+When(
+  'the PAR request_uri is captured for later expiry',
+  function (this: EpdsWorld) {
+    captureRequestUriFromPage(this)
+  },
+)
 
 When(
   'the PAR request_uri has expired before the bridge fires',
@@ -595,43 +634,55 @@ When(
   },
 )
 
-Then('the response body is not raw JSON', async function (this: EpdsWorld) {
-  const page = getPage(this)
-  // The OTP form's submit is JS-driven and async, and Playwright's
-  // fill() returns before the bridge redirects. Wait for the
-  // browser to actually leave the auth-service host and arrive at
-  // pds-core's epds-callback (where, in this scenario, the
-  // catch-block renders the error page). Without this wait we'd
-  // read the still-rendering OTP form's body.
-  const pdsHost = new URL(testEnv.pdsUrl).host
-  await page.waitForURL(
-    (url) => url.host === pdsHost && url.pathname.includes('epds-callback'),
-    { timeout: 30_000 },
-  )
-  const body = await page.locator('body').innerText()
-  // The pre-fix behaviour returned a body that started with
-  // {"error": "Authentication failed"}. A graceful HTML page won't —
-  // its <h1>/<p> text isn't valid JSON. The regex catches any
-  // {"error": ...} shape so a future leak of a different JSON
-  // payload is still caught.
-  if (/^\s*\{\s*"error"/.test(body)) {
-    throw new Error(
-      `pds-core leaked raw JSON to the browser: ${body.slice(0, 200)}`,
-    )
-  }
-})
+// ---------------------------------------------------------------------------
+// Clean-exit assertions for @otp-and-par-expiry scenarios
+// ---------------------------------------------------------------------------
+//
+// When the upstream PAR is hard-dead (the test hook deletes the row),
+// no amount of heartbeat can revive it — but we still owe the user a
+// clean exit per RFC 6749 §4.1.2.1: redirect them back to the OAuth
+// client's redirect_uri with `error=access_denied` so the client's
+// own UI can handle retry. The demo client translates that to
+// `?error=auth_failed` on its landing page.
 
 Then(
-  'the response body explains that sign-in timed out',
+  'the browser lands back at the demo client with an auth error',
+  async function (this: EpdsWorld) {
+    const origin = new URL(testEnv.demoUrl).origin
+    const page = getPage(this)
+    await page.waitForURL(`${origin}/?error=auth_failed*`, {
+      timeout: 30_000,
+    })
+  },
+)
+
+// ---------------------------------------------------------------------------
+// PAR heartbeat liveness (@par-heartbeat)
+// ---------------------------------------------------------------------------
+//
+// The OTP form auto-fires a fetch to /auth/ping every 3 minutes. Waiting
+// 3 minutes wall-clock is unacceptable for an e2e scenario, so this step
+// invokes the same fetch synchronously from the page's own JS context
+// — same origin, same cookies, same browser security boundary — and
+// asserts the response. That proves the wiring (page can reach
+// /auth/ping → auth-service forwards to pds-core's
+// /_internal/ping-request → returns 200) without waiting for the
+// interval to tick.
+
+Then(
+  'a heartbeat fetched from the OTP form returns ok:true',
   async function (this: EpdsWorld) {
     const page = getPage(this)
-    const body = await page.locator('body').innerText()
-    // Don't pin exact wording — just require something that mentions
-    // the timeout / expiry so a human reading it understands why
-    // their sign-in failed.
-    if (!/expir|timed? ?out|too long/i.test(body)) {
+    const body = await page.evaluate(async () => {
+      const r = await fetch('/auth/ping', {
+        credentials: 'include',
+        cache: 'no-store',
+      })
+      return (await r.json()) as { ok: boolean; reason?: string }
+    })
+    if (!body.ok) {
       throw new Error(
-        `Error page should mention the timeout but said: "${body.slice(0, 500)}"`,
+        `Expected /auth/ping to return ok:true but got: ${JSON.stringify(body)}`,
       )
     }
   },

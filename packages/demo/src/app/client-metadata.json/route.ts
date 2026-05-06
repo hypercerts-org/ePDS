@@ -27,6 +27,16 @@ import { getTheme } from '@/lib/theme'
 
 export const runtime = 'nodejs'
 
+// Force runtime rendering so EPDS_CLIENT_THEME (and the other env-fed
+// metadata fields) are read on each request rather than baked at
+// `next build` time. Without this, the route is statically
+// prerendered against whatever the env was when the docker image
+// was built — typically unset — so the published `brand_color`,
+// `background_color`, and `branding.css` fields stay frozen at the
+// defaults regardless of what the running container's env says.
+// Sibling `page.tsx` carries the same flag for the same reason.
+export const dynamic = 'force-dynamic'
+
 export async function GET() {
   const baseUrl = getBaseUrl()
   const theme = getTheme()
