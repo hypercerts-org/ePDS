@@ -632,6 +632,7 @@ export function renderLoginPage(opts: {
     .otp-box::placeholder { color: #d4d4d4; }
     .otp-box:focus { border-color: var(--focus-border); }
     .otp-actions { display: flex; gap: 32px; justify-content: center; margin-top: 12px; }
+    .otp-spam-hint { color: var(--muted-foreground); font-size: 13px; text-align: center; margin: 8px 0 16px; }
     .btn-primary { width: 100%; padding: 15px; background: ${brandColor}; color: white; border: none; border-radius: 9999px; font-size: 15px; font-weight: 500; cursor: pointer; transition: opacity 0.15s; }
     .btn-primary:hover { opacity: 0.9; }
     .btn-primary:disabled { opacity: 0.7; cursor: not-allowed; }
@@ -714,6 +715,9 @@ export function renderLoginPage(opts: {
         </div>
         <button type="submit" class="btn-primary">Verify</button>
       </form>
+      <p class="otp-spam-hint" id="otp-spam-hint">
+        If you don't see the email, check your spam folder.
+      </p>
       <div class="otp-actions">
         <button type="button" class="btn-secondary" id="btn-resend">Resend code</button>
         <button type="button" class="btn-secondary" id="btn-back">Use different email</button>
