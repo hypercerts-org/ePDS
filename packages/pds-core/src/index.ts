@@ -46,7 +46,7 @@ import {
   validateClientMetadataForPreview,
 } from '@certified-app/shared'
 import { shouldRewriteSecFetchSite } from './lib/sec-fetch-site-rewrite.js'
-import { isReservedSubdomain } from './lib/reserved-handle.js'
+import { handleIsUnavailable } from './lib/reserved-handle.js'
 import {
   findInsertionIndex,
   installCssInjectionMiddleware,
@@ -1023,17 +1023,15 @@ async function main() {
     }
     try {
       const account = await pds.ctx.accountManager.getAccount(handle)
-      // Reserved-subdomain check: upstream's createAccount throws
-      // HandleUnavailableError when the front part of the handle is
-      // in @atproto/pds's reservedSubdomains list (admin, www, support,
-      // ...). Without checking here, the live availability check on
-      // the picker said "✓ Available!" for those handles and the user
-      // only learned otherwise after clicking Create. Surface the
-      // unavailability inline so the picker disables Submit and shows
-      // an honest error instead.
-      const local = handle.split('.')[0] ?? ''
-      const isReserved = isReservedSubdomain(local)
-      res.json({ exists: !!account || isReserved })
+      // The handle picker treats "exists" as "unavailable" — see
+      // `handleIsUnavailable` for why both DB-collision and
+      // reserved-subdomain match feed the same boolean.
+      res.json({
+        exists: handleIsUnavailable({
+          fullHandle: handle,
+          accountExists: !!account,
+        }),
+      })
     } catch (err) {
       logger.error({ err, handle }, 'Failed to check handle availability')
       res.status(503).json({ error: 'handle_check_failed' })
