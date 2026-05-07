@@ -597,7 +597,7 @@ export function renderLoginPage(opts: {
   ${renderFaviconTag(opts.customFaviconUrl, opts.customFaviconUrlDark)}
   <title>Sign in to ${escapeHtml(appName)}</title>
   <style>
-    :root { --muted-foreground: #999; --input-bg: #ffffff; --input-border: #e5e5e5; --page-bg: #E8E8E8; --card-bg: #F8F8F8; --card-border: #E5E5E5; --btn-secondary-border: #e5e5e5; --focus-border: ${brandColor}; }
+    :root { --muted-foreground: #6b6b6b; --input-bg: #ffffff; --input-border: #e5e5e5; --page-bg: #E8E8E8; --card-bg: #F8F8F8; --card-border: #E5E5E5; --btn-secondary-border: #e5e5e5; --focus-border: ${brandColor}; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--page-bg); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; color: #1A130F; }
     .page-wrap { display: flex; flex-direction: column; align-items: stretch; max-width: 497px; width: 100%; }
@@ -614,6 +614,7 @@ export function renderLoginPage(opts: {
     .otp-box::placeholder { color: #d4d4d4; }
     .otp-box:focus { border-color: var(--focus-border); }
     .otp-actions { display: flex; gap: 32px; justify-content: center; margin-top: 12px; }
+    .otp-spam-hint { color: var(--muted-foreground); font-size: 13px; text-align: center; margin: 8px 0 16px; }
     .btn-primary { width: 100%; padding: 15px; background: ${brandColor}; color: white; border: none; border-radius: 9999px; font-size: 15px; font-weight: 500; cursor: pointer; transition: opacity 0.15s; }
     .btn-primary:hover { opacity: 0.9; }
     .btn-primary:disabled { opacity: 0.7; cursor: not-allowed; }
@@ -696,6 +697,9 @@ export function renderLoginPage(opts: {
         </div>
         <button type="submit" class="btn-primary">Verify</button>
       </form>
+      <p class="otp-spam-hint" id="otp-spam-hint">
+        If you don't see the email, check your spam folder.
+      </p>
       <div class="otp-actions">
         <button type="button" class="btn-secondary" id="btn-resend">Resend code</button>
         <button type="button" class="btn-secondary" id="btn-back">Use different email</button>
