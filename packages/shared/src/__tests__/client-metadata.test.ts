@@ -23,9 +23,14 @@ beforeEach(() => {
 })
 
 describe('resolveClientMetadata', () => {
-  it('returns client_name for non-URL client_id', async () => {
+  it('returns empty metadata for a non-URL client_id', async () => {
+    // Non-URL client_ids used to surface the raw value as
+    // metadata.client_name, which then ended up in page titles
+    // ("Sign in to not-a-url") on the auth-service login page.
+    // Returning empty metadata lets the caller's fallback chain
+    // (client_name || extractDomain → 'an application') win.
     const metadata = await resolveClientMetadata('my-local-app')
-    expect(metadata.client_name).toBe('my-local-app')
+    expect(metadata).toEqual({})
   })
 
   it('returns seeded metadata from cache', async () => {
@@ -135,9 +140,14 @@ describe('resolveClientName', () => {
     expect(name).toBe('no-name.app')
   })
 
-  it('returns client_id as-is for non-URL', async () => {
+  it('falls back to "an application" for a non-URL client_id', async () => {
+    // Non-URL client_ids used to leak through as the displayed
+    // app name (e.g. "Sign in to unnamed-client"). The empty-
+    // metadata change in resolveClientMetadata + extractDomain
+    // returning null on parse failure means resolveClientName's
+    // final fallback wins, yielding a generic "an application".
     const name = await resolveClientName('unnamed-client')
-    expect(name).toBe('unnamed-client')
+    expect(name).toBe('an application')
   })
 })
 
