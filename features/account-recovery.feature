@@ -39,6 +39,18 @@ Feature: Account recovery via backup emails
     Then the recovery OTP form is displayed
     And no email arrives for that non-existent address
 
+  # /auth/recover requires an active sign-in flow (it carries a
+  # request_uri that points at the upstream PAR). Hitting the URL
+  # directly — typically by following a stale link or pasting from
+  # somewhere — used to surface "Missing request_uri parameter",
+  # which leaks the internal OAuth field name and tells the user
+  # nothing actionable.
+  @stale-recovery-link
+  Scenario: Direct visit to recovery URL surfaces a friendly explanation, not a technical field name
+    When the user navigates directly to the recovery page without an active sign-in
+    Then the page explains that recovery has to start from the sign-in page
+    And the page does not mention the technical field name "request_uri"
+
   # --- Backup email management ---
 
   Scenario: User removes a backup email
