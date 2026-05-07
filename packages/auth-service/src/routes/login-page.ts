@@ -1065,6 +1065,15 @@ export function renderLoginPage(opts: {
         if (termsEl) termsEl.style.display = 'block';
         clearError();
         stopHeartbeat();
+        // Reset the email field — the user clicked "Use different
+        // email" precisely to escape the previous value, so leaving
+        // it pre-filled both wastes a clearing keystroke and looks
+        // like the form remembered them when they wanted a fresh
+        // start. Focus the input so they can start typing
+        // immediately.
+        emailInput.value = '';
+        currentEmail = '';
+        emailInput.focus();
       }
 
       // Send OTP via better-auth

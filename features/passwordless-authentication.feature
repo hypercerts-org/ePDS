@@ -384,6 +384,23 @@ Feature: Passwordless authentication via email OTP
   # programmatically clearing the demo's `oauth_state` cookie just
   # before the OTP submission, which is equivalent to the cookie
   # having lapsed by wall-clock.
+  # The "Use different email" button on the OTP step takes the user
+  # back to the email-entry form so they can sign in with a different
+  # address. The form must be EMPTY when they get there — leaving the
+  # prior email pre-filled is exactly the misleading "looks like the
+  # form remembered me" UX that the button was meant to escape from,
+  # and forces the user to manually clear the field before they can
+  # type their actual email.
+  @email @use-different-email
+  Scenario: "Use different email" returns the user to a clean email form
+    When the demo client initiates an OAuth login
+    Then the browser is redirected to the auth service login page
+    And the login page displays an email input form
+    When the user enters a unique test email and submits
+    Then the login page shows an OTP verification form
+    When the user clicks "Use different email"
+    Then the email input is empty and focused
+
   @email @demo-cookie-expiry @bug-report
   Scenario: Demo client's OAuth cookie has expired by the time of callback — useful error, not generic auth_failed
     When the demo client starts a new OAuth flow with random handle mode

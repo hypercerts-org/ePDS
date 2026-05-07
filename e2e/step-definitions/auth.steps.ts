@@ -928,3 +928,14 @@ Then(
     })
   },
 )
+
+// ---------------------------------------------------------------------------
+// "Use different email" UX
+// ---------------------------------------------------------------------------
+
+Then('the email input is empty and focused', async function (this: EpdsWorld) {
+  const page = getPage(this)
+  const input = page.locator('#email')
+  await expect(input).toHaveValue('', { timeout: 5_000 })
+  await expect(input).toBeFocused({ timeout: 5_000 })
+})
