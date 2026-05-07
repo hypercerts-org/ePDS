@@ -23,6 +23,32 @@ import { POWERED_BY_CSS, POWERED_BY_HTML } from '../lib/page-helpers.js'
 
 const logger = createLogger('auth:account-login')
 
+/**
+ * Pick the user-facing OTP-verify error message for the standalone
+ * account-login form. Exported for unit tests; the route handler
+ * pipes its caught error through this helper rather than open-coding
+ * the branching.
+ *
+ * Three cases:
+ *   - "too many attempts" / "expired" — better-auth has either
+ *     locked the verification row out or aged it out, so any
+ *     subsequent attempt with the same code is doomed. Point the
+ *     user at Resend.
+ *   - "invalid" — generic typo from better-auth (the shared
+ *     INVALID_OTP message). Re-typing might fix it.
+ *   - everything else — internal failure or unexpected shape.
+ */
+export function pickAccountLoginVerifyErrorMessage(err: unknown): string {
+  const errText = err instanceof Error ? err.message.toLowerCase() : ''
+  if (/too many|attempt|expir/.test(errText)) {
+    return 'That code can no longer be used. Click "Resend code" below to get a fresh one.'
+  }
+  if (errText.includes('invalid')) {
+    return 'Invalid code. Please try again.'
+  }
+  return 'Verification failed. Please try again.'
+}
+
 export function createAccountLoginRouter(
   auth: BetterAuthInstance,
   ctx: AuthServiceContext,
@@ -116,27 +142,13 @@ export function createAccountLoginRouter(
       return
     } catch (err: unknown) {
       logger.warn({ err, email }, 'OTP verification failed')
-      const errText = err instanceof Error ? err.message.toLowerCase() : ''
-      // Distinguish the lockout / aged-out path ("Too many attempts"
-      // and the followup INVALID_OTP-against-deleted-row) from a
-      // recoverable typo. Both surface as Error messages from
-      // better-auth; the lockout / expired path needs a Resend, the
-      // typo path just needs a re-type. Showing "Invalid or expired"
-      // for both let the user fight an error that more typing
-      // couldn't fix.
-      const isUnrecoverable = /too many|attempt|expir/.test(errText)
-      const errMsg = isUnrecoverable
-        ? 'That code can no longer be used. Click "Resend code" below to get a fresh one.'
-        : errText.includes('invalid')
-          ? 'Invalid code. Please try again.'
-          : 'Verification failed. Please try again.'
       res.type('html').send(
         renderOtpForm({
           email,
           csrfToken: res.locals.csrfToken,
           otpLength: ctx.config.otpLength,
           otpCharset: ctx.config.otpCharset,
-          error: errMsg,
+          error: pickAccountLoginVerifyErrorMessage(err),
         }),
       )
     }
