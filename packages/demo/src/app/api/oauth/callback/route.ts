@@ -186,7 +186,17 @@ export async function GET(request: NextRequest) {
       console.error(
         `[oauth/callback] FAILED status=${tokenRes.status} url=${tokenUrl} body=${errBody}`,
       )
-      return NextResponse.redirect(new URL('/?error=auth_failed', baseUrl))
+      // invalid_grant from the token endpoint typically means the
+      // authorization code expired (atproto's auth_request rows
+      // age out a few minutes after issuance). Surface that as
+      // session_expired rather than the generic auth_failed banner
+      // so the user sees an honest "sign-in took too long" rather
+      // than wondering whether their credentials were wrong.
+      const code =
+        tokenRes.status === 400 && /invalid_grant/i.test(errBody)
+          ? 'session_expired'
+          : 'auth_failed'
+      return NextResponse.redirect(new URL(`/?error=${code}`, baseUrl))
     }
 
     const tokenData = (await tokenRes.json()) as {
