@@ -536,9 +536,11 @@ export function renderChooseHandlePage(
     .error { color: #dc3545; background: #fdf0f0; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
     .btn-primary { width: 100%; padding: 12px; background: #0f1828; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; margin-top: 8px; }
     .btn-primary:hover:not(:disabled) { background: #1a2a40; }
+    .btn-primary:focus-visible { outline: 2px solid #0f1828; outline-offset: 2px; }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
     .btn-secondary { width: 100%; padding: 10px; background: white; color: #0f1828; border: 1px solid #0f1828; border-radius: 8px; font-size: 15px; font-weight: 500; cursor: pointer; margin-top: 8px; }
     .btn-secondary:hover:not(:disabled) { background: #f0f2f5; }
+    .btn-secondary:focus-visible { outline: 2px solid #0f1828; outline-offset: 2px; }
     .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
   </style>${renderOptionalStyleTag(customCss)}
 </head>
