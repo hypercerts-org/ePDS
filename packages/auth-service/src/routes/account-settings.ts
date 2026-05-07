@@ -57,6 +57,27 @@ export const FLASH_ERROR_MESSAGES: Record<string, string> = {
 }
 
 /**
+ * Resolve the success / error message pair from a /account request's
+ * query params. Whitelist the keys via the FLASH_*_MESSAGES tables so
+ * an attacker can't craft a URL like
+ * `/account?error=Some+raw+text` to inject arbitrary copy.
+ *
+ * Exported so the route handler can stay declarative AND be unit-
+ * tested without needing a fake express request.
+ */
+export function resolveAccountFlashFromQuery(query: {
+  success?: unknown
+  error?: unknown
+}): { successMessage: string | null; errorMessage: string | null } {
+  const successCode = typeof query.success === 'string' ? query.success : ''
+  const errorCode = typeof query.error === 'string' ? query.error : ''
+  return {
+    successMessage: FLASH_SUCCESS_MESSAGES[successCode] ?? null,
+    errorMessage: FLASH_ERROR_MESSAGES[errorCode] ?? null,
+  }
+}
+
+/**
  * Middleware that validates a better-auth session and injects it into res.locals.
  * If not authenticated, redirects to /account/login.
  */
@@ -122,15 +143,11 @@ export function createAccountSettingsRouter(
 
     // The POST handlers below redirect back to /account with a
     // ?success=… or ?error=… query param to confirm the action.
-    // Plumb those through so the user actually sees the result
-    // ("Backup email added", "Handle changed", …) instead of being
-    // silently bounced back to the same form. Whitelist the
-    // recognised codes via FLASH_*_MESSAGES so an attacker can't
-    // craft a URL that injects arbitrary text into the page.
-    const successCode = (req.query.success as string | undefined) ?? ''
-    const errorCode = (req.query.error as string | undefined) ?? ''
-    const successMessage = FLASH_SUCCESS_MESSAGES[successCode] ?? null
-    const errorMessage = FLASH_ERROR_MESSAGES[errorCode] ?? null
+    // resolveAccountFlashFromQuery whitelists the recognised codes
+    // so an attacker can't craft a URL that injects arbitrary text.
+    const { successMessage, errorMessage } = resolveAccountFlashFromQuery(
+      req.query as { success?: unknown; error?: unknown },
+    )
 
     res.type('html').send(
       renderSettingsPage({
