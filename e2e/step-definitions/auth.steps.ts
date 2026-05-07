@@ -1027,6 +1027,29 @@ Then(
   },
 )
 
+// ---------------------------------------------------------------------------
+// Stale-authorize-link UX
+// ---------------------------------------------------------------------------
+
+When(
+  'the user navigates directly to the authorize page without an active sign-in',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    await page.goto(`${testEnv.authUrl}/oauth/authorize`)
+  },
+)
+
+Then(
+  'the page explains that sign-in has to start from the app',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    await expect(page.locator('body')).toContainText(
+      /sign-in has to be started from the app/i,
+      { timeout: 10_000 },
+    )
+  },
+)
+
 When(
   'the user submits one more wrong OTP after the lockout',
   async function (this: EpdsWorld) {

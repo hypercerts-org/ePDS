@@ -447,6 +447,17 @@ Feature: Passwordless authentication via email OTP
     And the user submits one more wrong OTP after the lockout
     Then a "Send a new code" inline action is offered
 
+  # /oauth/authorize requires an active sign-in flow (it carries a
+  # request_uri that points at the upstream PAR). Direct visits to
+  # the URL — typically a stale link or a paste — used to surface
+  # "Missing request_uri parameter", which leaks an internal OAuth
+  # field name and tells the user nothing actionable.
+  @stale-authorize-link
+  Scenario: Direct visit to /oauth/authorize surfaces a friendly explanation
+    When the user navigates directly to the authorize page without an active sign-in
+    Then the page explains that sign-in has to start from the app
+    And the page does not mention the technical field name "request_uri"
+
   # Clicking Verify with no code typed used to flash "Invalid OTP",
   # which is dishonest: the user didn't type an invalid code, they
   # typed nothing. It also burned a real call to better-auth's
