@@ -1,5 +1,5 @@
 import { Given, Then, When } from '@cucumber/cucumber'
-import { expect } from '@playwright/test'
+import { expect, type Route } from '@playwright/test'
 import { testEnv } from '../support/env.js'
 import type { EpdsWorld } from '../support/world.js'
 import {
@@ -452,6 +452,158 @@ When(
         `expire-otp hook reported no rows updated for ${this.testEmail} — was an OTP actually sent first?`,
       )
     }
+  },
+)
+
+When(
+  'more than 60 minutes pass before the user submits the OTP',
+  async function (this: EpdsWorld) {
+    if (!testEnv.mailpitPass) return 'pending'
+    if (!testEnv.internalSecret) return 'pending'
+    if (!this.testEmail) {
+      throw new Error(
+        'No test email set — the email-submit step must run first',
+      )
+    }
+
+    // Backdate the auth_flow row so getAuthFlow() filters it out as
+    // expired. The epds_auth_flow cookie is left alone: keeping it lets
+    // the abort gate's /auth/ping call differentiate "auth_flow expired"
+    // (cookie present but row gone -> reason: flow_expired) from
+    // "no_cookie", which is what discriminates this scenario from
+    // unrelated dead-session paths.
+    const flowResult = await callExpiryHook(
+      '/_internal/test/expire-auth-flow',
+      this.testEmail,
+      {},
+    )
+    if (flowResult.updated < 1) {
+      throw new Error(
+        `expire-auth-flow hook reported no rows updated — was the OAuth login flow started first?`,
+      )
+    }
+
+    // Arm a /auth/ping interceptor BEFORE the Verify click submits the
+    // OTP. The OTP form's reactive abort gate pings /auth/ping
+    // synchronously and bails to /auth/abort if the response carries a
+    // non-transient failure. Use page.route + route.fetch so we read the
+    // body off the wire ourselves, then forward it to the page —
+    // Playwright drops subresource bodies once the page navigates, and
+    // the navigation here happens immediately after this very ping, so
+    // listening on `page.on('response')` and calling resp.json() races
+    // the navigation and loses.
+    const page = getPage(this)
+    let resolvePing: (body: { ok: boolean; reason?: string }) => void = () => {}
+    let rejectPing: (err: unknown) => void = () => {}
+    const pingPromise = new Promise<{ ok: boolean; reason?: string }>(
+      (resolve, reject) => {
+        resolvePing = resolve
+        rejectPing = reject
+      },
+    )
+
+    // Race the captured ping against an explicit timeout so the matching
+    // Then doesn't await forever if /auth/ping never fires (page JS broken,
+    // request blocked, etc.). 25s comfortably exceeds the form-load → Verify
+    // click → ping path; anything beyond that is a test failure, not slowness.
+    const PING_TIMEOUT_MS = 25_000
+    const timeoutHandle: NodeJS.Timeout = setTimeout(() => {
+      rejectPing(
+        new Error(
+          `Timed out after ${PING_TIMEOUT_MS}ms waiting for /auth/ping response`,
+        ),
+      )
+    }, PING_TIMEOUT_MS)
+    this.pendingPingBody = pingPromise.finally(() => {
+      clearTimeout(timeoutHandle)
+    })
+
+    const pingPattern = '**/auth/ping**'
+    let captured = false
+    const handler = async (route: Route) => {
+      let routeHandled = false
+      try {
+        const resp = await route.fetch()
+        const text = await resp.text()
+        if (!captured) {
+          captured = true
+          try {
+            resolvePing(JSON.parse(text) as { ok: boolean; reason?: string })
+          } catch (parseErr) {
+            rejectPing(
+              new Error(
+                `/auth/ping body was not JSON: ${text.slice(0, 200)} (${String(parseErr)})`,
+              ),
+            )
+          }
+        }
+        // Forward the response unmodified so the form's gate sees the
+        // exact body our test will assert on.
+        await route.fulfill({ response: resp, body: text })
+        routeHandled = true
+      } catch (err) {
+        if (!captured) {
+          captured = true
+          rejectPing(err)
+        }
+        if (!routeHandled) {
+          await route.abort().catch(() => {
+            /* already handled — ignore */
+          })
+        }
+      } finally {
+        // First ping captured: drop the route so later steps (or
+        // long-running heartbeats from the abort fallback page) don't
+        // keep stacking through this interceptor. Doing this AFTER
+        // fulfill/abort avoids racing the in-flight handler.
+        if (captured) {
+          await page.unroute(pingPattern, handler).catch(() => {
+            /* already unrouted — ignore */
+          })
+        }
+      }
+    }
+    await page.route(pingPattern, handler)
+  },
+)
+
+Then(
+  'the auth-complete page shows an {string} error',
+  async function (this: EpdsWorld, expected: string) {
+    const page = getPage(this)
+    await page.waitForURL('**/auth/complete', { timeout: 30_000 })
+    await expect(page.locator('p.error')).toContainText(expected, {
+      timeout: 10_000,
+    })
+  },
+)
+
+Then(
+  'the OAuth flow aborts because auth_flow expired',
+  async function (this: EpdsWorld) {
+    if (!this.pendingPingBody) {
+      throw new Error(
+        'No /auth/ping response was armed — an expiry step must run first',
+      )
+    }
+    const pingBody = await this.pendingPingBody
+    if (pingBody.ok || pingBody.reason !== 'flow_expired') {
+      throw new Error(
+        `Expected /auth/ping to report flow_expired but got: ${JSON.stringify(pingBody)}`,
+      )
+    }
+
+    // /auth/abort reads the AUTH_FLOW_COOKIE to recover the OAuth
+    // client_id for a redirect back to the demo client. With the
+    // auth_flow row backdated, getAuthFlow() returns undefined, so
+    // cleanExit falls back to its Tier-2 styled page on the auth-service
+    // host rather than redirecting onward. That fallback IS the visible
+    // contract for this failure mode; assert it explicitly.
+    const page = getPage(this)
+    await page.waitForURL('**/auth/abort', { timeout: 30_000 })
+    await expect(page.locator('h1')).toContainText('Sign-in session expired', {
+      timeout: 10_000,
+    })
   },
 )
 

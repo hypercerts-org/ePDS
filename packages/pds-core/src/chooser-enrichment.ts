@@ -200,7 +200,7 @@ export function buildChooserEnrichmentScript(): string {
       label.className = 'epds-email-label';
       label.style.cssText =
         'min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
-      label.textContent = m.email;
+      label.textContent = ' ' + m.email;
       if (m.el.dataset) m.el.dataset.epdsEnriched = '1';
       m.el.classList.add('epds-handle-label');
       var wrap = m.el.parentElement;

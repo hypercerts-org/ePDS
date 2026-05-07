@@ -80,6 +80,13 @@ export class EpdsWorld extends World {
    *  scenario start, re-attached after resetBrowserContext. */
   consoleCapture?: NodeJS.WritableStream
 
+  /** Body of the next /auth/ping response, captured by an expiry step
+   *  before the abort gate fires. The matching assertion step awaits
+   *  this to confirm which timer (auth_flow / PAR) tripped the abort.
+   *  Captured eagerly because Playwright loses subresource bodies once
+   *  the page navigates (which happens immediately after this ping). */
+  pendingPingBody?: Promise<{ ok: boolean; reason?: string }>
+
   get env() {
     return testEnv
   }
