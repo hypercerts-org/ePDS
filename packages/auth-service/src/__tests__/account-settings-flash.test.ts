@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   FLASH_SUCCESS_MESSAGES,
   FLASH_ERROR_MESSAGES,
+  resolveAccountFlashFromQuery,
 } from '../routes/account-settings.js'
 
 describe('account-settings flash messages', () => {
@@ -62,5 +63,47 @@ describe('account-settings flash messages', () => {
     for (const msg of Object.values(FLASH_ERROR_MESSAGES)) {
       expect(msg).not.toMatch(/<[a-z]/i)
     }
+  })
+})
+
+describe('resolveAccountFlashFromQuery', () => {
+  it('returns the success message when the success code is known', () => {
+    const result = resolveAccountFlashFromQuery({ success: 'backup_added' })
+    expect(result.successMessage).toBe(FLASH_SUCCESS_MESSAGES.backup_added)
+    expect(result.errorMessage).toBeNull()
+  })
+
+  it('returns the error message when the error code is known', () => {
+    const result = resolveAccountFlashFromQuery({
+      success: '',
+      error: 'invalid_handle',
+    })
+    expect(result.successMessage).toBeNull()
+    expect(result.errorMessage).toBe(FLASH_ERROR_MESSAGES.invalid_handle)
+  })
+
+  it('returns null on both sides when the query is empty', () => {
+    expect(resolveAccountFlashFromQuery({})).toEqual({
+      successMessage: null,
+      errorMessage: null,
+    })
+  })
+
+  it('returns null on both sides for unknown codes (safety against URL-injection of attacker text)', () => {
+    expect(
+      resolveAccountFlashFromQuery({
+        success: 'attacker_chosen_text',
+        error: '<script>alert(1)</script>',
+      }),
+    ).toEqual({ successMessage: null, errorMessage: null })
+  })
+
+  it('ignores non-string query values gracefully (e.g. ?success=foo&success=bar arrays)', () => {
+    expect(
+      resolveAccountFlashFromQuery({
+        success: ['backup_added', 'backup_removed'],
+        error: 12345,
+      }),
+    ).toEqual({ successMessage: null, errorMessage: null })
   })
 })
