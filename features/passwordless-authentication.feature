@@ -365,6 +365,27 @@ Feature: Passwordless authentication via email OTP
     Then the Resend code button is no longer offered
     And a Start over button is offered instead
 
+  # The PDS clean-exit redirect uses error=access_denied with an
+  # error_description shaped like "Your sign-in took too long...".
+  # The demo's landing page used to map every PDS-side error to the
+  # same generic "auth_failed" banner, which discarded that context
+  # — telling the user the sign-in failed without saying *why*.
+  # Translating timeout-shaped descriptions to a `session_expired`
+  # banner gives the user the actual reason and a sensible next
+  # step ("Please sign in again") instead of leaving them unsure
+  # whether they typed the wrong code, are blocked, or hit a bug.
+  @email @otp-and-par-expiry @passes-through-timeout-context
+  Scenario: PDS timeout error_description surfaces as a session-expired banner
+    When the demo client initiates an OAuth login
+    Then the browser is redirected to the auth service login page
+    And the login page displays an email input form
+    When the user enters a unique test email and submits
+    Then an OTP email arrives in the mail trap for the test email
+    And the login page shows an OTP verification form
+    When the PAR request_uri has expired before the bridge fires
+    And the user enters the OTP code
+    Then the demo client surfaces a session-expired error
+
   # The demo OAuth client stores its OAuth state (state value, code
   # verifier, token endpoint, issuer) in a signed cookie that has its
   # own lifetime. If that cookie expires before the auth-service

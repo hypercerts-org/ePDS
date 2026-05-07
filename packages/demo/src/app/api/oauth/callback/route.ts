@@ -40,8 +40,24 @@ export async function GET(request: NextRequest) {
     const error = request.nextUrl.searchParams.get('error')
 
     if (error) {
-      console.error('[oauth/callback] Auth error from PDS')
-      return NextResponse.redirect(new URL('/?error=auth_failed', baseUrl))
+      // The PDS clean-exit paths (e.g. dead PAR after a long wait)
+      // send error=access_denied with an error_description like
+      // "Your sign-in took too long...". A generic auth_failed
+      // banner discards that context and tells the user nothing
+      // about *why* it failed. Surface session-expiry timeouts
+      // distinctly so the landing page can guide them ("sign in
+      // again") instead of looking like the credentials were
+      // wrong.
+      const errorDescription =
+        request.nextUrl.searchParams.get('error_description') ?? ''
+      const isTimeout =
+        error === 'access_denied' &&
+        /timed out|too long|expired|session/i.test(errorDescription)
+      const code = isTimeout ? 'session_expired' : 'auth_failed'
+      console.error(
+        `[oauth/callback] Auth error from PDS: ${error} (${errorDescription})`,
+      )
+      return NextResponse.redirect(new URL(`/?error=${code}`, baseUrl))
     }
 
     if (!code || !state) {

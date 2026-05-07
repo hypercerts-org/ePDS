@@ -802,9 +802,18 @@ Then(
   async function (this: EpdsWorld) {
     const origin = new URL(testEnv.demoUrl).origin
     const page = getPage(this)
-    await page.waitForURL(`${origin}/?error=auth_failed*`, {
-      timeout: 30_000,
-    })
+    // Both `session_expired` (timeout-shaped error_description from
+    // the PDS clean-exit path) and `auth_failed` (everything else)
+    // satisfy "an auth error" — they're both demo error codes that
+    // surface a banner on the landing page. Older scenarios were
+    // written before the demo distinguished the two; rather than
+    // re-tagging every one of them, accept either.
+    await page.waitForURL(
+      (url) =>
+        url.origin === origin &&
+        /^[?&](error=(auth_failed|session_expired))/.test(url.search),
+      { timeout: 30_000 },
+    )
   },
 )
 
