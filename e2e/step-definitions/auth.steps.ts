@@ -839,3 +839,49 @@ Then(
     }
   },
 )
+
+// ---------------------------------------------------------------------------
+// Resend-button visibility (fix for the "fresh OTP wasted on dead PAR" UX)
+// ---------------------------------------------------------------------------
+//
+// The page never offers an action that cannot complete the flow. When the
+// PAR is dead, the standalone Resend button is removed from view and a
+// Start over button takes its place — clicking it bails to /auth/abort
+// rather than issuing an OTP that would only fail downstream. The steps
+// below trigger the page's reactive ping (via the visibilitychange
+// handler that fires on tab-foreground) so it can observe the dead PAR
+// and reconcile the UI without a 5-minute wall-clock wait.
+
+When('the OTP form re-checks PAR liveness', async function (this: EpdsWorld) {
+  const page = getPage(this)
+  // Drive the page's reactive ping via a string-source script.
+  // Using page.evaluate(() => ...) inlines esbuild's __name helper,
+  // which then fails in Playwright's evaluation context with
+  // "ReferenceError: __name is not defined". Passing a string
+  // bypasses the bundler.
+  await page.evaluate(`(function () {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: function () { return 'visible' },
+      })
+      document.dispatchEvent(new Event('visibilitychange'))
+    })()`)
+})
+
+Then(
+  'the Resend code button is no longer offered',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    await expect(page.locator('#btn-resend')).toBeHidden({ timeout: 5_000 })
+  },
+)
+
+Then(
+  'a Start over button is offered instead',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    await expect(page.locator('#btn-start-over')).toBeVisible({
+      timeout: 5_000,
+    })
+  },
+)

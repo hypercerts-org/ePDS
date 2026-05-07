@@ -743,17 +743,38 @@ export function renderLoginPage(opts: {
       var heartbeatEnabled = ${JSON.stringify(opts.heartbeatEnabled)};
       var heartbeatHandle = null;
       var heartbeatIntervalMs = 3 * 60 * 1000;
+      // Upstream's AUTHORIZATION_INACTIVITY_TIMEOUT — once this much
+      // wall-clock time has elapsed since our last successful PAR
+      // refresh, the upstream row is guaranteed to be dead. Used by
+      // parLikelyDead() to hide Resend before the user can click it.
+      var parInactivityTimeoutMs = 5 * 60 * 1000;
+      // Page load is the implicit first PAR refresh — atproto's
+      // PAR_EXPIRES_IN gives a fresh row 5 min on creation, and the
+      // user just hit /oauth/authorize seconds ago. Treat now as
+      // last-known-alive until the first ping confirms otherwise.
+      var lastSuccessfulHeartbeatAt = Date.now();
       // Set to true the moment we know the flow can no longer
       // complete (PAR or auth_flow gone). Resend / Verify gates
       // check this so a click that races the proactive notice
       // still bails to /auth/abort instead of issuing a fresh OTP
       // that would only fail.
       var flowAborted = false;
+      // True iff we have proof the PAR is still alive (last ping
+      // was ok:true and was recent enough to fall inside the
+      // upstream inactivity window). Used to gate every "offer the
+      // user a Resend" decision so they only ever see actions that
+      // can actually complete the flow.
+      function parLikelyDead() {
+        if (flowAborted) return true;
+        return Date.now() - lastSuccessfulHeartbeatAt >= parInactivityTimeoutMs;
+      }
       function pingHeartbeat() {
         return fetch('/auth/ping', { credentials: 'include', cache: 'no-store' })
           .then(function(r) { return r.json(); })
           .then(function(body) {
-            if (body && body.ok === false && body.reason !== 'transient') {
+            if (body && body.ok === true) {
+              lastSuccessfulHeartbeatAt = Date.now();
+            } else if (body && body.ok === false && body.reason !== 'transient') {
               // Auth flow / PAR genuinely dead — no point pinging again,
               // and no point letting the user keep typing. 'transient'
               // (5xx / network blip) does NOT stop the interval; the
@@ -763,7 +784,13 @@ export function renderLoginPage(opts: {
             }
             return body;
           })
-          .catch(function() { return null; /* network blip — caller may retry */ });
+          .catch(function() { return null; /* network blip — caller may retry */ })
+          .finally(function() {
+            // Always reconcile visibility — a 'transient' tick that
+            // pushes us past the inactivity window must hide Resend
+            // even though we never got a definitive 'par_expired'.
+            refreshResendVisibility();
+          });
       }
       function startHeartbeat() {
         if (!heartbeatEnabled) return;
@@ -777,6 +804,16 @@ export function renderLoginPage(opts: {
         }
       }
       window.addEventListener('beforeunload', stopHeartbeat);
+      // When the tab returns to the foreground after being hidden,
+      // setInterval may have been throttled enough that PAR has
+      // silently lapsed. Re-ping immediately so the UI reflects
+      // reality before the user clicks anything.
+      document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'visible' && heartbeatEnabled) {
+          pingHeartbeat();
+          refreshResendVisibility();
+        }
+      });
 
       // Show the proactive "this won't work — start over" notice when
       // the flow is unrecoverable. Disables the OTP boxes, the verify
@@ -817,6 +854,41 @@ export function renderLoginPage(opts: {
           window.location.href = '/auth/abort';
         });
         errorEl.appendChild(startOverBtn);
+      }
+
+      /**
+       * Toggle the standalone Resend button between visible and
+       * hidden based on whether the PAR is still alive. The button
+       * is removed from view (display:none) rather than just
+       * disabled — a button the user cannot productively click
+       * shouldn't be on the page at all. When hidden, a "Start over"
+       * link is shown in its place so the user always has a forward
+       * path. Idempotent — safe to call from heartbeat ticks,
+       * visibility change handlers, and inline render paths.
+       */
+      function refreshResendVisibility() {
+        var resendBtn = document.getElementById('btn-resend');
+        var startOverLink = document.getElementById('btn-start-over');
+        if (!resendBtn) return;
+        if (parLikelyDead()) {
+          resendBtn.style.display = 'none';
+          if (!startOverLink) {
+            startOverLink = document.createElement('button');
+            startOverLink.type = 'button';
+            startOverLink.id = 'btn-start-over';
+            startOverLink.className = 'btn-secondary';
+            startOverLink.textContent = 'Start over';
+            startOverLink.addEventListener('click', function() {
+              window.location.href = '/auth/abort';
+            });
+            resendBtn.parentNode.insertBefore(startOverLink, resendBtn);
+          }
+        } else {
+          resendBtn.style.display = '';
+          if (startOverLink && startOverLink.parentNode) {
+            startOverLink.parentNode.removeChild(startOverLink);
+          }
+        }
       }
 
       /**
@@ -983,6 +1055,7 @@ export function renderLoginPage(opts: {
         if (otpBoxes.length) otpBoxes[0].focus();
         clearError();
         startHeartbeat();
+        refreshResendVisibility();
       }
 
       function showEmailStep() {
@@ -1104,15 +1177,21 @@ export function renderLoginPage(opts: {
             // expired") plus generic "expir"/"too long" variants.
             var isExpired = /expir|too long/i.test(result.error);
             if (isExpired) {
-              // The inline action triggers the same Resend handler,
-              // which itself runs abortIfFlowDead() before issuing
-              // a new code. So even if the PAR is dead the user
-              // gets the spec-compliant bounce rather than a fresh
-              // OTP that wouldn't work — no need to gate the
-              // action's visibility separately here.
-              showErrorWithAction(result.error, 'Send a new code', function() {
-                document.getElementById('btn-resend').click();
-              });
+              // Only offer "Send a new code" when the PAR is still
+              // alive. If it isn't, a fresh OTP would issue but
+              // never complete — wasting the user's time on a code
+              // that can't work. Show "Start over" instead so the
+              // only forward path we surface is one that will
+              // actually succeed.
+              if (parLikelyDead()) {
+                showErrorWithAction(result.error, 'Start over', function() {
+                  window.location.href = '/auth/abort';
+                });
+              } else {
+                showErrorWithAction(result.error, 'Send a new code', function() {
+                  document.getElementById('btn-resend').click();
+                });
+              }
             } else {
               showError(result.error);
             }
@@ -1185,8 +1264,10 @@ export function renderLoginPage(opts: {
           });
         }
         // OTP form is already visible server-side; showOtpStep() never
-        // ran, so kick off the heartbeat ourselves.
+        // ran, so kick off the heartbeat ourselves and reflect the
+        // current PAR-liveness state in the Resend button visibility.
         startHeartbeat();
+        refreshResendVisibility();
       }
     })();
   </script>
