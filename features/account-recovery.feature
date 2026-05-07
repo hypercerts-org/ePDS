@@ -39,6 +39,21 @@ Feature: Account recovery via backup emails
     Then the recovery OTP form is displayed
     And no email arrives for that non-existent address
 
+  # The "Recover with backup email" link on the OTP form used to
+  # carry a hard-coded "/placeholder" URL instead of the active
+  # OAuth flow's actual request_uri. The user could complete
+  # recovery, but clicking "Back to sign in" landed them on
+  # upstream's "data you submitted is invalid" error page (because
+  # /placeholder isn't a real PAR). This scenario asserts the link
+  # carries the actual request_uri so the back path round-trips
+  # cleanly.
+  @recovery-link-roundtrip
+  Scenario: Recovery link carries the active OAuth flow's request_uri
+    Given the demo client initiates OAuth with the test email as login_hint
+    Then an OTP email arrives in the mail trap
+    And the login page shows an OTP verification form
+    Then the recovery link points at the active OAuth flow's request_uri
+
   # /auth/recover requires an active sign-in flow (it carries a
   # request_uri that points at the upstream PAR). Hitting the URL
   # directly — typically by following a stale link or pasting from

@@ -331,6 +331,39 @@ Then(
 )
 
 // ---------------------------------------------------------------------------
+// Recovery-link round-trip
+// ---------------------------------------------------------------------------
+
+Then(
+  "the recovery link points at the active OAuth flow's request_uri",
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    // Pull the request_uri the auth-service was driving for this
+    // page from the URL we landed on.
+    const flowUrl = new URL(page.url())
+    const expectedRequestUri = flowUrl.searchParams.get('request_uri')
+    if (!expectedRequestUri) {
+      throw new Error(
+        `Expected the current page URL to carry a request_uri so the test can compare it to the recovery link, but URL was: ${page.url()}`,
+      )
+    }
+    const recoveryHref = await page
+      .locator('#recovery-link')
+      .getAttribute('href')
+    if (!recoveryHref) {
+      throw new Error('Recovery link not found on page')
+    }
+    const recoveryUrl = new URL(recoveryHref, flowUrl.origin)
+    const linkRequestUri = recoveryUrl.searchParams.get('request_uri')
+    if (linkRequestUri !== expectedRequestUri) {
+      throw new Error(
+        `Recovery link request_uri mismatch:\n  expected: ${expectedRequestUri}\n  got:      ${linkRequestUri}`,
+      )
+    }
+  },
+)
+
+// ---------------------------------------------------------------------------
 // Stale-recovery-link UX
 // ---------------------------------------------------------------------------
 

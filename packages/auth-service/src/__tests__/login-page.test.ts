@@ -425,6 +425,7 @@ describe('renderLoginPage handle login button', () => {
       loginHint: '',
       initialStep: 'email',
       otpAlreadySent: false,
+      requestUri: 'urn:ietf:params:oauth:request_uri:test-req',
       csrfToken: 'csrf',
       authBasePath: '/api/auth',
       pdsPublicUrl: 'https://pds.example.com',
@@ -512,6 +513,7 @@ function renderDefault(): string {
     loginHint: '',
     initialStep: 'email',
     otpAlreadySent: false,
+    requestUri: 'urn:ietf:params:oauth:request_uri:test-req',
     csrfToken: 'csrf',
     authBasePath: '/api/auth',
     pdsPublicUrl: 'https://pds.example.com',
@@ -639,6 +641,22 @@ describe('renderLoginPage inline Resend action on expired OTP', () => {
     expect(html).toMatch(
       /if \(isUnrecoverable\) \{[\s\S]*?\} else \{[\s\S]*?showError\(result\.error\);\s*\}/,
     )
+  })
+
+  it('renders the recovery link with the actual request_uri, not a placeholder', () => {
+    // The "Recover with backup email" link must round-trip the
+    // active OAuth flow's request_uri, so the recovery page's
+    // "Back to sign in" can return the user to the original
+    // /oauth/authorize. Earlier code hard-coded a "/placeholder"
+    // suffix on pdsPublicUrl, which silently broke the back path.
+    const html = renderDefault()
+    expect(html).toContain(
+      'href="/auth/recover?request_uri=urn%3Aietf%3Aparams%3Aoauth%3Arequest_uri%3Atest-req"',
+    )
+    // Make sure the placeholder fallback did not survive the
+    // refactor (catches a regression where the literal "placeholder"
+    // ends up back in the rendered HTML).
+    expect(html).not.toContain('/placeholder')
   })
 })
 
