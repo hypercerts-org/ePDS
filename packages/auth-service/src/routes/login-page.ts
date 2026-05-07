@@ -982,8 +982,21 @@ export function renderLoginPage(opts: {
         box.addEventListener('paste', function(e) {
           e.preventDefault();
           var data = (e.clipboardData || window.clipboardData).getData('text') || '';
-          var cleaned = data.replace(/\\s/g, '').slice(0, otpBoxes.length - idx);
-          for (var i = 0; i < cleaned.length; i++) otpBoxes[idx + i].value = cleaned[i];
+          // Strip everything that isn't part of the OTP charset.
+          // Pasting "1234 5678" should fill the boxes; pasting
+          // "12-AB-34" with a numeric OTP should drop the dashes
+          // and letters silently rather than auto-submitting a
+          // garbage code that better-auth will then reject as
+          // "Invalid OTP" — the user typed nothing wrong, the
+          // paste source did, so flashing them an error would be
+          // both misleading and burn a rate-limit slot.
+          var charsetRegex = otpCharset === 'alphanumeric' ? /[^A-Za-z0-9]/g : /[^0-9]/g;
+          var cleaned = data.replace(charsetRegex, '').slice(0, otpBoxes.length - idx);
+          for (var i = 0; i < cleaned.length; i++) {
+            otpBoxes[idx + i].value = otpCharset === 'alphanumeric'
+              ? cleaned[i].toUpperCase()
+              : cleaned[i];
+          }
           updateHiddenCode();
           var nextIdx = Math.min(idx + cleaned.length, otpBoxes.length - 1);
           otpBoxes[nextIdx].focus();

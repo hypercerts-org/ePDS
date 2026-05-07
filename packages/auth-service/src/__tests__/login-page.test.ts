@@ -671,6 +671,19 @@ describe('renderLoginPage inline Resend action on expired OTP', () => {
     expect(html).toMatch(/verifyLockedOut\s*=\s*false/)
   })
 
+  it('filters pasted OTP content to the configured charset before auto-submitting', () => {
+    const html = renderDefault()
+    // Numeric OTPs must drop letters / hyphens from a paste rather
+    // than letting them through and auto-submitting a garbage
+    // value that better-auth will reject — wastes a rate-limit
+    // slot AND flashes a misleading "Invalid OTP". The handler
+    // builds a charsetRegex from the JSON-injected otpCharset
+    // var; assert both branches are present.
+    expect(html).toMatch(
+      /charsetRegex\s*=\s*otpCharset\s*===\s*'alphanumeric'\s*\?\s*\/\[\^A-Za-z0-9\]\/g\s*:\s*\/\[\^0-9\]\/g/,
+    )
+  })
+
   it('renders the recovery link with the actual request_uri, not a placeholder', () => {
     // The "Recover with backup email" link must round-trip the
     // active OAuth flow's request_uri, so the recovery page's
