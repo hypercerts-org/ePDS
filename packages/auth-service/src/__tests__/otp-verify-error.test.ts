@@ -1,60 +1,47 @@
 import { describe, it, expect } from 'vitest'
 import { pickOtpVerifyErrorMessage } from '../lib/otp-verify-error.js'
 
+// Expected user-facing messages for each error class. Lifted to
+// constants so the tests don't repeat the exact copy at every call
+// site (Sonar flags >3% line duplication on new code).
+const RESEND_MSG =
+  'That code can no longer be used. Click "Resend code" below to get a fresh one.'
+const TYPO_MSG = 'Invalid code. Please try again.'
+const FALLBACK_MSG = 'Verification failed. Please try again.'
+
 describe('pickOtpVerifyErrorMessage', () => {
-  // The standalone /account/login flow surfaces three distinct
-  // error states through its server-rendered OTP form. The user-
-  // facing copy must distinguish them, otherwise typing more in
+  // The OTP verify flows (account-login, recovery) surface three
+  // distinct error states through their server-rendered OTP forms.
+  // The user-facing copy must distinguish them — typing more in
   // an unrecoverable state just rolls up failed attempts that
   // could never succeed.
 
-  it('points the user at Resend when the row was locked out', () => {
-    const err = new Error('Too many attempts')
-    expect(pickOtpVerifyErrorMessage(err)).toBe(
-      'That code can no longer be used. Click "Resend code" below to get a fresh one.',
-    )
-  })
-
-  it('points the user at Resend when the OTP has expired', () => {
-    const err = new Error('OTP expired')
-    expect(pickOtpVerifyErrorMessage(err)).toBe(
-      'That code can no longer be used. Click "Resend code" below to get a fresh one.',
-    )
-  })
+  it.each([
+    ['Too many attempts', RESEND_MSG],
+    ['OTP expired', RESEND_MSG],
+    ['Too many attempts on this code', RESEND_MSG],
+    ['TOO MANY ATTEMPTS', RESEND_MSG], // case-insensitive
+  ])(
+    'points the user at Resend on lockout/aged-out: %s',
+    (errMessage, expected) => {
+      expect(pickOtpVerifyErrorMessage(new Error(errMessage))).toBe(expected)
+    },
+  )
 
   it('asks the user to re-type on a typo', () => {
-    const err = new Error('Invalid OTP')
-    expect(pickOtpVerifyErrorMessage(err)).toBe(
-      'Invalid code. Please try again.',
-    )
+    expect(pickOtpVerifyErrorMessage(new Error('Invalid OTP'))).toBe(TYPO_MSG)
   })
 
-  it('falls back to a generic verification-failed message on unknown errors', () => {
-    const err = new Error('Internal database problem')
-    expect(pickOtpVerifyErrorMessage(err)).toBe(
-      'Verification failed. Please try again.',
-    )
+  it('falls back to generic verification-failed on unknown errors', () => {
+    expect(
+      pickOtpVerifyErrorMessage(new Error('Internal database problem')),
+    ).toBe(FALLBACK_MSG)
   })
 
-  it('handles non-Error rejections gracefully', () => {
-    expect(pickOtpVerifyErrorMessage('string-thrown')).toBe(
-      'Verification failed. Please try again.',
-    )
-    expect(pickOtpVerifyErrorMessage(null)).toBe(
-      'Verification failed. Please try again.',
-    )
-    expect(pickOtpVerifyErrorMessage(undefined)).toBe(
-      'Verification failed. Please try again.',
-    )
-  })
-
-  it('matches the lockout pattern case-insensitively', () => {
-    // better-auth's INVALID_OTP / OTP_EXPIRED / TOO_MANY_ATTEMPTS
-    // strings come through as English fixed text — the function
-    // lowercases the message before matching, so capitalisation
-    // shouldn't matter.
-    expect(pickOtpVerifyErrorMessage(new Error('TOO MANY ATTEMPTS'))).toBe(
-      'That code can no longer be used. Click "Resend code" below to get a fresh one.',
-    )
-  })
+  it.each([['string-thrown'], [null], [undefined]])(
+    'falls back to generic verification-failed on non-Error rejections (%p)',
+    (err) => {
+      expect(pickOtpVerifyErrorMessage(err)).toBe(FALLBACK_MSG)
+    },
+  )
 })
