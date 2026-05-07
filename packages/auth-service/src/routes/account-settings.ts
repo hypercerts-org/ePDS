@@ -17,6 +17,46 @@ import { POWERED_BY_CSS, POWERED_BY_HTML } from '../lib/page-helpers.js'
 const logger = createLogger('auth:account-settings')
 
 /**
+ * User-visible flash-message lookup tables for the GET /account
+ * page. The POST handlers redirect back with `?success=<code>` or
+ * `?error=<code>` and the GET handler renders the matching message.
+ *
+ * Whitelisted lookup (not `?success=Some+raw+text`) so attackers
+ * can't inject arbitrary text into the settings page via a crafted
+ * URL.
+ *
+ * Exported for unit testing.
+ */
+export const FLASH_SUCCESS_MESSAGES: Record<string, string> = {
+  backup_added:
+    'Backup email added. Click the verification link we sent to confirm.',
+  backup_verified: 'Backup email verified.',
+  backup_removed: 'Backup email removed.',
+  handle_updated: 'Handle updated.',
+  session_revoked: 'Session revoked.',
+}
+
+export const FLASH_ERROR_MESSAGES: Record<string, string> = {
+  invalid_email: 'That email address is not valid.',
+  already_primary:
+    'That email is already your primary — you can sign in with it directly.',
+  account_not_found: "We couldn't find an account for your sign-in.",
+  send_failed:
+    "We couldn't send the verification email. Please try again in a moment.",
+  verify_failed:
+    'That verification link is no longer valid. Add the backup email again to receive a fresh link.',
+  invalid_handle:
+    "That handle isn't valid. Use 5–20 characters: letters, numbers, or hyphens.",
+  handle_failed:
+    "We couldn't change your handle. It may be reserved or already taken.",
+  delete_failed:
+    "We couldn't delete your account right now. Please try again in a moment.",
+  handle_taken: 'That handle is not available — please choose another.',
+  confirm_delete:
+    'Type DELETE in the confirmation box to permanently delete your account.',
+}
+
+/**
  * Middleware that validates a better-auth session and injects it into res.locals.
  * If not authenticated, redirects to /account/login.
  */
@@ -80,6 +120,18 @@ export function createAccountSettingsRouter(
       logger.warn({ err }, 'Failed to list sessions')
     }
 
+    // The POST handlers below redirect back to /account with a
+    // ?success=… or ?error=… query param to confirm the action.
+    // Plumb those through so the user actually sees the result
+    // ("Backup email added", "Handle changed", …) instead of being
+    // silently bounced back to the same form. Whitelist the
+    // recognised codes via FLASH_*_MESSAGES so an attacker can't
+    // craft a URL that injects arbitrary text into the page.
+    const successCode = (req.query.success as string | undefined) ?? ''
+    const errorCode = (req.query.error as string | undefined) ?? ''
+    const successMessage = FLASH_SUCCESS_MESSAGES[successCode] ?? null
+    const errorMessage = FLASH_ERROR_MESSAGES[errorCode] ?? null
+
     res.type('html').send(
       renderSettingsPage({
         did: did ?? '(unknown)',
@@ -90,6 +142,8 @@ export function createAccountSettingsRouter(
         sessions,
         currentSessionToken: session.session.token,
         csrfToken: res.locals.csrfToken,
+        successMessage,
+        errorMessage,
       }),
     )
   })
@@ -217,7 +271,7 @@ export function createAccountSettingsRouter(
       if (did && email) {
         ctx.db.removeBackupEmail(did, email)
       }
-      res.redirect(303, '/account')
+      res.redirect(303, '/account?success=backup_removed')
     },
   )
 
@@ -237,7 +291,7 @@ export function createAccountSettingsRouter(
           logger.warn({ err }, 'Failed to revoke session')
         }
       }
-      res.redirect(303, '/account')
+      res.redirect(303, '/account?success=session_revoked')
     },
   )
 
@@ -427,7 +481,21 @@ function renderSettingsPage(opts: {
   }>
   currentSessionToken: string
   csrfToken: string
+  successMessage?: string | null
+  errorMessage?: string | null
 }): string {
+  // Prepend any flash banners INSIDE the existing page-wrap so they
+  // sit above the settings content. Both go through escapeHtml even
+  // though the source dictionary is whitelisted — defence-in-depth
+  // against a future maintainer accidentally widening the lookup.
+  const flashHtml = [
+    opts.successMessage
+      ? `<div class="flash flash-success" role="status">${escapeHtml(opts.successMessage)}</div>`
+      : '',
+    opts.errorMessage
+      ? `<div class="flash flash-error" role="alert">${escapeHtml(opts.errorMessage)}</div>`
+      : '',
+  ].join('')
   const backupRows = opts.backupEmails
     .map(
       (be) => `
@@ -488,6 +556,8 @@ function renderSettingsPage(opts: {
         <button type="submit" class="btn-secondary">Sign out</button>
       </form>
     </div>
+
+    ${flashHtml}
 
     <section class="section">
       <h2>Account</h2>
@@ -589,6 +659,9 @@ const SETTINGS_CSS = `
   .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; border-bottom: 1px solid #eee; padding-bottom: 16px; }
   h1 { font-size: 24px; color: #111; }
   h2 { font-size: 18px; color: #333; margin-bottom: 12px; }
+  .flash { padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; }
+  .flash-success { background: #f0fff4; color: #28a745; border: 1px solid #c3e6cb; }
+  .flash-error { background: #fdf0f0; color: #dc3545; border: 1px solid #f5c6cb; }
   .section { margin-bottom: 28px; padding-bottom: 20px; border-bottom: 1px solid #f0f0f0; }
   .section:last-child { border-bottom: none; margin-bottom: 0; }
   .setting-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; font-size: 14px; color: #333; }
