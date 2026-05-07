@@ -489,6 +489,35 @@ Feature: Passwordless authentication via email OTP
     And the user enters the OTP code
     Then the browser lands back at the demo client with an auth error
 
+  # Regression boundary for the auth_flow lifetime. The auth_flow row +
+  # epds_auth_flow cookie are explicitly NOT tied to the OTP TTL — they
+  # live for 60 minutes (lib/auth-flow.ts) so a slow user who hits OTP
+  # expiry and clicks Resend can still complete on the original ticket.
+  # If someone shortens AUTH_FLOW_TTL_MS back to the OTP TTL we want to
+  # catch it here: past the 60-minute mark, even a freshly verified OTP
+  # must NOT recover the flow.
+  #
+  # Post-PR-154 the OTP form's reactive abort gate pings /auth/ping
+  # before submitting; with the auth_flow row backdated /auth/ping
+  # answers `flow_expired` and the gate navigates to /auth/abort.
+  # /auth/abort then reads AUTH_FLOW_COOKIE to recover the OAuth
+  # client_id for a redirect back — and because the same row is dead
+  # that lookup also fails, so cleanExit serves its Tier-2 styled
+  # "Sign-in session expired" fallback page on the auth-service host.
+  # We assert both signals: the ping reason (proving auth_flow
+  # specifically tripped, not PAR) and the abort fallback page.
+  @email @otp-expiry
+  Scenario: OAuth flow expires after the auth_flow TTL elapses
+    When the demo client initiates an OAuth login
+    Then the browser is redirected to the auth service login page
+    And the login page displays an email input form
+    When the user enters a unique test email and submits
+    Then an OTP email arrives in the mail trap for the test email
+    And the login page shows an OTP verification form
+    When more than 60 minutes pass before the user submits the OTP
+    And the user enters the OTP code
+    Then the OAuth flow aborts because auth_flow expired
+
   # --- Brute force protection ---
 
   Scenario: OTP verification rejects wrong code
