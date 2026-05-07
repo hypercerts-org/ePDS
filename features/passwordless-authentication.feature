@@ -384,6 +384,29 @@ Feature: Passwordless authentication via email OTP
   # programmatically clearing the demo's `oauth_state` cookie just
   # before the OTP submission, which is equivalent to the cookie
   # having lapsed by wall-clock.
+  # better-auth's email-otp plugin allows up to 3 wrong attempts on a
+  # single code. The 4th wrong submit returns "Too many attempts" AND
+  # deletes the verification row — so any further attempts on that
+  # same code path are doomed to fail (better-auth then returns
+  # "Invalid OTP" because the row no longer exists, which would mislead
+  # the user into thinking they have a typo).
+  #
+  # Once the user is in the too-many-attempts state, the only forward
+  # path is to request a fresh code. The form must surface that
+  # forward path inline alongside the error, the same way it does for
+  # OTP expiry — anything else lets the user fight an error that
+  # cannot be resolved by typing more carefully.
+  @email @too-many-attempts
+  Scenario: "Too many attempts" surfaces a Send-a-new-code action
+    When the demo client initiates an OAuth login
+    Then the browser is redirected to the auth service login page
+    And the login page displays an email input form
+    When the user enters a unique test email and submits
+    Then the login page shows an OTP verification form
+    When the user submits enough wrong OTPs to trigger the lockout
+    Then the verification form shows an "Too many attempts" error
+    And a "Send a new code" inline action is offered
+
   # Clicking Verify with no code typed used to flash "Invalid OTP",
   # which is dishonest: the user didn't type an invalid code, they
   # typed nothing. It also burned a real call to better-auth's

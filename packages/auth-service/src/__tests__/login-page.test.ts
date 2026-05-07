@@ -602,13 +602,20 @@ describe('renderLoginPage inline Resend action on expired OTP', () => {
     expect(fnBody).not.toContain('innerHTML')
   })
 
-  it('detects OTP-expired errors via a substring-stable regex', () => {
+  it('detects unrecoverable verify errors via a substring-stable regex', () => {
     const html = renderDefault()
-    // The detection must catch:
-    //   - better-auth's "Invalid or expired code"
-    //   - auth-service's "OTP expired"
-    //   - any future wording with "expir" or "too long" in it
-    expect(html).toMatch(/var isExpired = \/expir\|too long\/i\.test/)
+    // The detection must catch every error string that means the
+    // current code path is dead and the user must Resend (or Start
+    // over):
+    //   - better-auth's "Invalid or expired code" / "OTP expired"
+    //     ("expir")
+    //   - auth-service's age-out wording ("too long")
+    //   - better-auth's "Too many attempts" lockout
+    //     ("too many" / "attempt") — see ERROR_CODES in
+    //     better-auth/dist/plugins/email-otp/routes.mjs
+    expect(html).toMatch(
+      /var isUnrecoverable = \/expir\|too long\|too many\|attempt\/i\.test/,
+    )
   })
 
   it('renders the inline action with the "Send a new code" label and triggers the Resend button', () => {
@@ -618,13 +625,15 @@ describe('renderLoginPage inline Resend action on expired OTP', () => {
     expect(html).toContain("document.getElementById('btn-resend').click()")
   })
 
-  it('falls back to the plain showError on non-expired errors', () => {
+  it('falls back to the plain showError on recoverable (typo) errors', () => {
     const html = renderDefault()
-    // The non-expired branch must NOT route through
-    // showErrorWithAction (otherwise an "Invalid code" message
-    // would carry an inappropriate "Send a new code" link).
+    // The recoverable-error branch must NOT route through
+    // showErrorWithAction (otherwise a typo "Invalid OTP" message
+    // would carry an inappropriate "Send a new code" link). The
+    // structure to verify: if (isUnrecoverable) { ... } else {
+    // showError(result.error); }.
     expect(html).toMatch(
-      /if \(isExpired\) \{[\s\S]*?\} else \{[\s\S]*?showError\(result\.error\);\s*\}/,
+      /if \(isUnrecoverable\) \{[\s\S]*?\} else \{[\s\S]*?showError\(result\.error\);\s*\}/,
     )
   })
 })

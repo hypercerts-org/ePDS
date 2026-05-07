@@ -1188,14 +1188,19 @@ export function renderLoginPage(opts: {
         try {
           var result = await verifyOtp(currentEmail, otp);
           if (result && result.error) {
-            // Inline a "Send a new code" action when the error
-            // indicates the OTP has aged out — too easy to miss the
-            // separate Resend button below the form. The substring
-            // match catches the better-auth wording ("Invalid or
-            // expired code") and the auth-service wording ("OTP
-            // expired") plus generic "expir"/"too long" variants.
-            var isExpired = /expir|too long/i.test(result.error);
-            if (isExpired) {
+            // Inline a "Send a new code" action when the current
+            // code path is dead — too easy to miss the separate
+            // Resend button below the form, and fighting an
+            // unrecoverable error is exactly the misleading,
+            // time-wasting UX we want to avoid. Matches:
+            //   - "Invalid or expired code" / "OTP expired"
+            //     (the original aged-out case)
+            //   - "Too many attempts" (better-auth deletes the
+            //     verification row after N wrong tries — the next
+            //     code typed cannot succeed; the only forward
+            //     path is a fresh Resend)
+            var isUnrecoverable = /expir|too long|too many|attempt/i.test(result.error);
+            if (isUnrecoverable) {
               // Only offer "Send a new code" when the PAR is still
               // alive. If it isn't, a fresh OTP would issue but
               // never complete — wasting the user's time on a code

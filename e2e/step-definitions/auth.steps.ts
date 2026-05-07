@@ -963,3 +963,57 @@ Then('no "Invalid OTP" error is shown', async function (this: EpdsWorld) {
     )
   }
 })
+
+// ---------------------------------------------------------------------------
+// "Too many attempts" lockout UX
+// ---------------------------------------------------------------------------
+
+When(
+  'the user submits enough wrong OTPs to trigger the lockout',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    const boxCount = await page.locator('.otp-box').count()
+    if (!this.testEmail) {
+      throw new Error(
+        'No testEmail in world; the email-submit step must run first',
+      )
+    }
+    // better-auth's allowedAttempts is 5 (see auth-service better-auth.ts).
+    // After 5 wrong submits the next call sees attempts >= 5 and throws
+    // TOO_MANY_ATTEMPTS while deleting the row. Burn 5 attempts via direct
+    // fetch (the form path is racy from the driver's side because of
+    // auto-submit + clearOtpBoxes interleaving), then trigger the 6th
+    // through the form so the submit handler's error rendering — the UX
+    // we want to assert on — actually fires.
+    const burnDigits = ['0', '1', '2', '3', '4']
+    for (const digit of burnDigits) {
+      await page.evaluate(
+        `fetch('/api/auth/sign-in/email-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: ${JSON.stringify(this.testEmail)}, otp: ${JSON.stringify(digit.repeat(boxCount))} }),
+        }).catch(function () {})`,
+      )
+    }
+    // Final attempt through the form.
+    await page.evaluate(`(function () {
+      var boxes = document.querySelectorAll('.otp-box');
+      for (var i = 0; i < boxes.length; i++) boxes[i].value = '';
+    })()`)
+    await page.locator('.otp-box').first().focus()
+    await page.keyboard.type('5'.repeat(boxCount))
+    await expect(page.locator('#error-msg')).toBeVisible({ timeout: 10_000 })
+  },
+)
+
+Then(
+  'a "Send a new code" inline action is offered',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    await expect(
+      page.locator('#error-msg button.flash-action', {
+        hasText: /send a new code/i,
+      }),
+    ).toBeVisible({ timeout: 5_000 })
+  },
+)
