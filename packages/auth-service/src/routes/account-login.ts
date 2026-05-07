@@ -20,34 +20,9 @@ import type { AuthServiceContext } from '../context.js'
 import { buildOtpInputProps } from '../otp-input.js'
 import type { BetterAuthInstance } from '../better-auth.js'
 import { POWERED_BY_CSS, POWERED_BY_HTML } from '../lib/page-helpers.js'
+import { pickOtpVerifyErrorMessage } from '../lib/otp-verify-error.js'
 
 const logger = createLogger('auth:account-login')
-
-/**
- * Pick the user-facing OTP-verify error message for the standalone
- * account-login form. Exported for unit tests; the route handler
- * pipes its caught error through this helper rather than open-coding
- * the branching.
- *
- * Three cases:
- *   - "too many attempts" / "expired" — better-auth has either
- *     locked the verification row out or aged it out, so any
- *     subsequent attempt with the same code is doomed. Point the
- *     user at Resend.
- *   - "invalid" — generic typo from better-auth (the shared
- *     INVALID_OTP message). Re-typing might fix it.
- *   - everything else — internal failure or unexpected shape.
- */
-export function pickAccountLoginVerifyErrorMessage(err: unknown): string {
-  const errText = err instanceof Error ? err.message.toLowerCase() : ''
-  if (/too many|attempt|expir/.test(errText)) {
-    return 'That code can no longer be used. Click "Resend code" below to get a fresh one.'
-  }
-  if (errText.includes('invalid')) {
-    return 'Invalid code. Please try again.'
-  }
-  return 'Verification failed. Please try again.'
-}
 
 export function createAccountLoginRouter(
   auth: BetterAuthInstance,
@@ -148,7 +123,7 @@ export function createAccountLoginRouter(
           csrfToken: res.locals.csrfToken,
           otpLength: ctx.config.otpLength,
           otpCharset: ctx.config.otpCharset,
-          error: pickAccountLoginVerifyErrorMessage(err),
+          error: pickOtpVerifyErrorMessage(err),
         }),
       )
     }

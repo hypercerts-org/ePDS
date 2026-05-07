@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { pickAccountLoginVerifyErrorMessage } from '../routes/account-login.js'
+import { pickOtpVerifyErrorMessage } from '../lib/otp-verify-error.js'
 
-describe('pickAccountLoginVerifyErrorMessage', () => {
+describe('pickOtpVerifyErrorMessage', () => {
   // The standalone /account/login flow surfaces three distinct
   // error states through its server-rendered OTP form. The user-
   // facing copy must distinguish them, otherwise typing more in
@@ -10,40 +10,40 @@ describe('pickAccountLoginVerifyErrorMessage', () => {
 
   it('points the user at Resend when the row was locked out', () => {
     const err = new Error('Too many attempts')
-    expect(pickAccountLoginVerifyErrorMessage(err)).toBe(
+    expect(pickOtpVerifyErrorMessage(err)).toBe(
       'That code can no longer be used. Click "Resend code" below to get a fresh one.',
     )
   })
 
   it('points the user at Resend when the OTP has expired', () => {
     const err = new Error('OTP expired')
-    expect(pickAccountLoginVerifyErrorMessage(err)).toBe(
+    expect(pickOtpVerifyErrorMessage(err)).toBe(
       'That code can no longer be used. Click "Resend code" below to get a fresh one.',
     )
   })
 
   it('asks the user to re-type on a typo', () => {
     const err = new Error('Invalid OTP')
-    expect(pickAccountLoginVerifyErrorMessage(err)).toBe(
+    expect(pickOtpVerifyErrorMessage(err)).toBe(
       'Invalid code. Please try again.',
     )
   })
 
   it('falls back to a generic verification-failed message on unknown errors', () => {
     const err = new Error('Internal database problem')
-    expect(pickAccountLoginVerifyErrorMessage(err)).toBe(
+    expect(pickOtpVerifyErrorMessage(err)).toBe(
       'Verification failed. Please try again.',
     )
   })
 
   it('handles non-Error rejections gracefully', () => {
-    expect(pickAccountLoginVerifyErrorMessage('string-thrown')).toBe(
+    expect(pickOtpVerifyErrorMessage('string-thrown')).toBe(
       'Verification failed. Please try again.',
     )
-    expect(pickAccountLoginVerifyErrorMessage(null)).toBe(
+    expect(pickOtpVerifyErrorMessage(null)).toBe(
       'Verification failed. Please try again.',
     )
-    expect(pickAccountLoginVerifyErrorMessage(undefined)).toBe(
+    expect(pickOtpVerifyErrorMessage(undefined)).toBe(
       'Verification failed. Please try again.',
     )
   })
@@ -53,9 +53,7 @@ describe('pickAccountLoginVerifyErrorMessage', () => {
     // strings come through as English fixed text — the function
     // lowercases the message before matching, so capitalisation
     // shouldn't matter.
-    expect(
-      pickAccountLoginVerifyErrorMessage(new Error('TOO MANY ATTEMPTS')),
-    ).toBe(
+    expect(pickOtpVerifyErrorMessage(new Error('TOO MANY ATTEMPTS'))).toBe(
       'That code can no longer be used. Click "Resend code" below to get a fresh one.',
     )
   })

@@ -28,6 +28,7 @@ import {
 import { renderError } from '../lib/render-error.js'
 import { AUTH_FLOW_COOKIE, AUTH_FLOW_TTL_MS } from '../lib/auth-flow.js'
 import { heartbeatEnabledFor } from './login-page.js'
+import { pickOtpVerifyErrorMessage } from '../lib/otp-verify-error.js'
 
 const logger = createLogger('auth:recovery')
 
@@ -277,11 +278,11 @@ export function createRecoveryRouter(
       res.redirect(303, '/auth/complete')
     } catch (err: unknown) {
       logger.warn({ err, email }, 'Recovery OTP verification failed')
-      const errMsg =
-        err instanceof Error &&
-        (err.message.includes('invalid') || err.message.includes('expired'))
-          ? 'Invalid or expired code. Please try again.'
-          : 'Verification failed. Please try again.'
+      // Same shape as the account-login flow: distinguish typo
+      // from lockout/aged-out so the user gets pointed at Resend
+      // rather than fighting an "Invalid or expired" error that
+      // more typing can't fix.
+      const errMsg = pickOtpVerifyErrorMessage(err)
       const { customCss, customFaviconUrl, customFaviconUrlDark, backUri } =
         await getFlowBranding(req)
       res.send(
