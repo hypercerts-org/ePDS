@@ -384,6 +384,25 @@ Feature: Passwordless authentication via email OTP
   # programmatically clearing the demo's `oauth_state` cookie just
   # before the OTP submission, which is equivalent to the cookie
   # having lapsed by wall-clock.
+  # Clicking Verify with no code typed used to flash "Invalid OTP",
+  # which is dishonest: the user didn't type an invalid code, they
+  # typed nothing. It also burned a real call to better-auth's
+  # /sign-in/email-otp endpoint, which counts against the
+  # rate-limiter — so a confused user who tab-clicked Verify could
+  # lock themselves out faster than necessary. The Verify button
+  # must not allow a submit until the user has typed the full code,
+  # and an empty submit (e.g. via Enter on a still-empty form) must
+  # surface a useful prompt rather than a misleading error.
+  @email @verify-empty-otp
+  Scenario: Submitting Verify with an empty code does not produce a misleading "Invalid OTP"
+    When the demo client initiates an OAuth login
+    Then the browser is redirected to the auth service login page
+    And the login page displays an email input form
+    When the user enters a unique test email and submits
+    Then the login page shows an OTP verification form
+    When the user clicks the Verify button without entering a code
+    Then no "Invalid OTP" error is shown
+
   # The "Use different email" button on the OTP step takes the user
   # back to the email-entry form so they can sign in with a different
   # address. The form must be EMPTY when they get there — leaving the

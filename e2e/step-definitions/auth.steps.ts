@@ -939,3 +939,27 @@ Then('the email input is empty and focused', async function (this: EpdsWorld) {
   await expect(input).toHaveValue('', { timeout: 5_000 })
   await expect(input).toBeFocused({ timeout: 5_000 })
 })
+
+// ---------------------------------------------------------------------------
+// Empty-OTP submit guard
+// ---------------------------------------------------------------------------
+
+When(
+  'the user clicks the Verify button without entering a code',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    await page.click('#form-verify-otp button[type=submit]')
+  },
+)
+
+Then('no "Invalid OTP" error is shown', async function (this: EpdsWorld) {
+  const page = getPage(this)
+  // Give any async submit a moment to land before asserting absence.
+  await page.waitForTimeout(1_000)
+  const errorText = await page.locator('#error-msg').textContent()
+  if (errorText && /invalid otp/i.test(errorText)) {
+    throw new Error(
+      `Expected no "Invalid OTP" error after empty submit but saw: "${errorText}"`,
+    )
+  }
+})

@@ -1157,12 +1157,22 @@ export function renderLoginPage(opts: {
         // first call consumes the code; a second one races the redirect and
         // flashes "Invalid OTP" before the page unloads.
         if (verifying) return;
+        var otp = document.getElementById('code').value.trim();
+        // Don't bother better-auth with an empty / partial submit —
+        // it would flash a misleading "Invalid OTP" (the user typed
+        // nothing, not an invalid code) and burn a rate-limit slot.
+        // Just focus the first empty box and bail.
+        if (otp.length < otpBoxes.length) {
+          for (var i = 0; i < otpBoxes.length; i++) {
+            if (!otpBoxes[i].value) { otpBoxes[i].focus(); break; }
+          }
+          return;
+        }
         verifying = true;
         // Stop pinging the moment a verify is in flight — the redirect
         // is imminent and any further heartbeat is wasted.
         stopHeartbeat();
         clearError();
-        var otp = document.getElementById('code').value.trim();
         var btn = this.querySelector('button[type=submit]');
         btn.disabled = true;
         btn.textContent = 'Verifying...';
