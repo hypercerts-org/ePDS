@@ -5,17 +5,17 @@ import { useState } from 'react'
 import { ForceLoginCheckbox } from './ForceLoginCheckbox'
 
 const ERROR_MESSAGES: Record<string, string> = {
-  auth_failed: 'Authentication failed. Please try again.',
+  auth_failed: 'Sign-in failed. Please try again.',
   session_expired:
     'Your sign-in took too long to finish. Please sign in again.',
-  par_failed:
-    'Could not start login — the PDS rejected the request. Check server logs.',
+  par_failed: "Sign-in couldn't start right now. Please try again in a moment.",
   invalid_email: 'Please enter a valid email address.',
   invalid_handle: 'Please enter a valid handle (e.g. you.bsky.social).',
-  invalid_login_hint: 'Invalid login hint format.',
-  token_failed: 'Login could not be completed — token exchange failed.',
+  invalid_login_hint:
+    "We didn't recognise that account. Please sign in with your email instead.",
+  token_failed: "Sign-in couldn't be completed. Please sign in again.",
   state_mismatch:
-    'Login session expired or was tampered with. Please try again.',
+    'Your sign-in session expired or was interrupted. Please sign in again.',
 }
 
 /**
