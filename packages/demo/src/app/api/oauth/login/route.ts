@@ -263,7 +263,7 @@ export async function GET(request: Request) {
           httpOnly: true,
           secure: true,
           sameSite: 'lax',
-          maxAge: 600,
+          maxAge: 60 * 60,
           path: '/',
         })
         return resp2
@@ -281,7 +281,7 @@ export async function GET(request: Request) {
       httpOnly: true,
       secure: true,
       sameSite: 'lax',
-      maxAge: 600,
+      maxAge: 60 * 60,
       path: '/',
     })
     return response

@@ -6,6 +6,8 @@ import { ForceLoginCheckbox } from './ForceLoginCheckbox'
 
 const ERROR_MESSAGES: Record<string, string> = {
   auth_failed: 'Authentication failed. Please try again.',
+  session_expired:
+    'Your sign-in took too long to finish. Please sign in again.',
   par_failed:
     'Could not start login — the PDS rejected the request. Check server logs.',
   invalid_email: 'Please enter a valid email address.',
