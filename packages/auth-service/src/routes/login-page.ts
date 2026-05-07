@@ -635,9 +635,11 @@ export function renderLoginPage(opts: {
     .otp-spam-hint { color: var(--muted-foreground); font-size: 13px; text-align: center; margin: 8px 0 16px; }
     .btn-primary { width: 100%; padding: 15px; background: ${brandColor}; color: white; border: none; border-radius: 9999px; font-size: 15px; font-weight: 500; cursor: pointer; transition: opacity 0.15s; }
     .btn-primary:hover { opacity: 0.9; }
+    .btn-primary:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; }
     .btn-primary:disabled { opacity: 0.7; cursor: not-allowed; }
-    .btn-secondary { display: inline-block; color: #6b6b6b; background: none; border: none; font-size: 14px; font-weight: 500; cursor: pointer; padding: 4px 0; }
+    .btn-secondary { display: inline-block; color: #6b6b6b; background: none; border: none; font-size: 14px; font-weight: 500; cursor: pointer; padding: 4px 0; border-radius: 4px; }
     .btn-secondary:hover { color: #1A130F; }
+    .btn-secondary:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; }
     .btn-social { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 13px 20px; border: 1px solid var(--btn-secondary-border); border-radius: 9999px; font-size: 15px; font-weight: 500; cursor: pointer; text-decoration: none; background: white; color: #333; margin-bottom: 8px; transition: background 0.15s; }
     .btn-social:hover { background: #fafafa; }
     .btn-atproto { margin-top: 12px; margin-bottom: 0; color: #1A130F !important; background: var(--input-bg) !important; border-color: var(--input-border) !important; }
