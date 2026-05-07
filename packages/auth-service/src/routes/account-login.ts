@@ -206,6 +206,7 @@ function renderOtpForm(opts: {
                  autocapitalize="${inputProps.autocapitalize}"
                  placeholder="${inputProps.placeholder}"
                  class="otp-input"
+                 oninput="this.value=this.value.replace(${opts.otpCharset === 'alphanumeric' ? '/[^A-Za-z0-9]/g' : '/[^0-9]/g'},'')${opts.otpCharset === 'alphanumeric' ? '.toUpperCase()' : ''}"
                  style="letter-spacing: ${Math.max(2, Math.round(32 / opts.otpLength))}px">
         </div>
         <button type="submit" class="btn-primary">Verify</button>
