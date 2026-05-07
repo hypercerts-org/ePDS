@@ -148,7 +148,7 @@ function renderLoginForm(opts: { csrfToken: string; error?: string }): string {
     <div class="container">
       <h1>Account Settings</h1>
       <p class="subtitle">Sign in to manage your account</p>
-      ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
+      ${opts.error ? '<p class="error" role="alert">' + escapeHtml(opts.error) + '</p>' : ''}
       <form method="POST" action="/account/send-otp">
         <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
         <div class="field">
@@ -191,7 +191,7 @@ function renderOtpForm(opts: {
     <div class="container">
       <h1>Enter your code</h1>
       <p id="otp-help" class="subtitle">We sent a ${opts.otpLength}-${opts.otpCharset === 'alphanumeric' ? 'character' : 'digit'} code to <strong>${escapeHtml(maskedEmail)}</strong></p>
-      ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
+      ${opts.error ? '<p class="error" role="alert">' + escapeHtml(opts.error) + '</p>' : ''}
       <form method="POST" action="/account/verify-otp">
         <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
         <input type="hidden" name="email" value="${escapeHtml(opts.email)}">

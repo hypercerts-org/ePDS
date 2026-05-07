@@ -673,7 +673,7 @@ export function renderLoginPage(opts: {
     ${logoHtml}
     <h1 id="heading">${opts.initialStep === 'otp' ? 'Enter your code' : 'Sign in'}</h1>
 
-    <div id="error-msg" class="flash-msg" style="display:none;"></div>
+    <div id="error-msg" class="flash-msg" style="display:none;" role="status" aria-live="polite"></div>
 
     ${socialButtonsHtml}
 

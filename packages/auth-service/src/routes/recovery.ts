@@ -350,7 +350,7 @@ export function renderRecoveryForm(opts: {
     <div class="container">
       <h1>Account Recovery</h1>
       <p class="subtitle">Enter the backup email address associated with your account.</p>
-      ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
+      ${opts.error ? '<p class="error" role="alert">' + escapeHtml(opts.error) + '</p>' : ''}
       <form method="POST" action="/auth/recover">
         <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
         <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
@@ -445,7 +445,7 @@ export function renderRecoveryOtpForm(opts: {
     <div class="container">
       <h1>Enter recovery code</h1>
       <p id="code-help" class="subtitle">If a backup email matches, we sent a ${opts.otpLength}-${opts.otpCharset === 'alphanumeric' ? 'character' : 'digit'} code to <strong>${escapeHtml(maskedEmail)}</strong></p>
-      ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
+      ${opts.error ? '<p class="error" role="alert">' + escapeHtml(opts.error) + '</p>' : ''}
       <form method="POST" action="/auth/recover/verify">
         <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
         <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
