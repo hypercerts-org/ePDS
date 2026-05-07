@@ -671,6 +671,22 @@ describe('renderLoginPage inline Resend action on expired OTP', () => {
     expect(html).toMatch(/verifyLockedOut\s*=\s*false/)
   })
 
+  it('clears the OTP boxes after a successful Resend so old typing does not linger', () => {
+    const html = renderDefault()
+    // When the user clicks Resend the verification row is rotated,
+    // so any digits they had typed for the old code are stale.
+    // The Resend success path must reset the boxes so the user
+    // can paste / type the fresh code without first deleting
+    // what's there.
+    const resendIdx = html.indexOf("'Code resent!'")
+    expect(resendIdx).toBeGreaterThan(-1)
+    // Look for clearOtpBoxes() near the success message — the
+    // success branch is what the test is asserting on, not the
+    // expired-otp branch which is much later in the file.
+    const window = html.slice(Math.max(0, resendIdx - 500), resendIdx + 200)
+    expect(window).toContain('clearOtpBoxes()')
+  })
+
   it('filters pasted OTP content to the configured charset before auto-submitting', () => {
     const html = renderDefault()
     // Numeric OTPs must drop letters / hyphens from a paste rather

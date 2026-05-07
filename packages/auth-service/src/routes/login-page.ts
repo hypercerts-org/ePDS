@@ -1318,6 +1318,12 @@ export function renderLoginPage(opts: {
           // verification row is brand new, so future submits can
           // succeed and shouldn't inherit the old lockout state.
           verifyLockedOut = false;
+          // Clear any digits the user typed for the old code so
+          // they can paste / type the fresh one without first
+          // having to delete what's there. Focus the first box so
+          // the next keystroke goes to the right place.
+          clearOtpBoxes();
+          if (otpBoxes.length) otpBoxes[0].focus();
           showSuccess('Code resent!');
         }
       });
