@@ -969,10 +969,26 @@ export function renderLoginPage(opts: {
       var inputCharsetRegex = otpCharset === 'alphanumeric' ? /[^A-Za-z0-9]/g : /[^0-9]/g;
       otpBoxes.forEach(function(box, idx) {
         box.addEventListener('input', function() {
-          // keep only the last typed char (handles paste into a single box)
           var v = box.value.replace(/\\s/g, '').replace(inputCharsetRegex, '');
-          if (v.length > 1) v = v.slice(-1);
           if (v && otpCharset === 'alphanumeric') v = v.toUpperCase();
+          if (v.length > 1) {
+            // iOS / Android SMS autofill drops the entire code into
+            // the first box (the one tagged autocomplete=one-time-code)
+            // as a single input event with the full string. Without
+            // distribution the user would see only the last digit
+            // and lose the rest. Distribute across boxes starting
+            // here, mirroring the paste handler.
+            for (var i = 0; i < v.length && idx + i < otpBoxes.length; i++) {
+              otpBoxes[idx + i].value = v[i];
+            }
+            updateHiddenCode();
+            var nextIdx = Math.min(idx + v.length, otpBoxes.length - 1);
+            otpBoxes[nextIdx].focus();
+            if (hiddenCode.value.length === otpBoxes.length) {
+              document.getElementById('form-verify-otp').requestSubmit();
+            }
+            return;
+          }
           box.value = v;
           updateHiddenCode();
           if (box.value && idx < otpBoxes.length - 1) otpBoxes[idx + 1].focus();

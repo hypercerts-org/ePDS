@@ -710,6 +710,18 @@ describe('renderLoginPage inline Resend action on expired OTP', () => {
     )
   })
 
+  it('distributes a multi-char input event across the OTP boxes (iOS SMS autofill)', () => {
+    const html = renderDefault()
+    // iOS / Android SMS autofill drops the whole code into the
+    // first box (the one tagged autocomplete=one-time-code) as a
+    // single input event with the full string. Without
+    // distribution the user would lose every digit but the last.
+    // The handler must spread v[0..N] across otpBoxes starting at
+    // the current idx, then focus the last filled box.
+    expect(html).toMatch(/if \(v\.length > 1\)/)
+    expect(html).toMatch(/otpBoxes\[idx \+ i\]\.value = v\[i\]/)
+  })
+
   it('renders the recovery link with the actual request_uri, not a placeholder', () => {
     // The "Recover with backup email" link must round-trip the
     // active OAuth flow's request_uri, so the recovery page's
