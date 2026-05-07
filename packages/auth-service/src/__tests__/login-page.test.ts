@@ -643,6 +643,34 @@ describe('renderLoginPage inline Resend action on expired OTP', () => {
     )
   })
 
+  it('clears the email input on "Use different email" so the form does not appear to remember the previous user', () => {
+    const html = renderDefault()
+    // showEmailStep() must reset emailInput.value AND focus the
+    // input so the next keystroke goes to a clean form. Leaving
+    // the previous email pre-filled was the regression we want to
+    // catch — assert both effects appear in the inlined script.
+    expect(html).toMatch(/emailInput\.value\s*=\s*''/)
+    expect(html).toMatch(/emailInput\.focus\(\)/)
+  })
+
+  it('short-circuits Verify when the OTP boxes are not all filled', () => {
+    const html = renderDefault()
+    // The submit handler bails early when otp.length is shorter
+    // than the number of OTP boxes — that's what stops empty
+    // Verify clicks from flashing a misleading "Invalid OTP" and
+    // burning a rate-limit slot. Assert the guard is present.
+    expect(html).toMatch(/if \(otp\.length < otpBoxes\.length\)/)
+  })
+
+  it('latches verifyLockedOut on a "too many"-shaped error and resets it on Resend', () => {
+    const html = renderDefault()
+    // The post-lockout fix needs both halves: a latch that gets
+    // SET on the lockout error, and a reset on a successful
+    // Resend so a fresh code reopens the verification cycle.
+    expect(html).toMatch(/verifyLockedOut\s*=\s*true/)
+    expect(html).toMatch(/verifyLockedOut\s*=\s*false/)
+  })
+
   it('renders the recovery link with the actual request_uri, not a placeholder', () => {
     // The "Recover with backup email" link must round-trip the
     // active OAuth flow's request_uri, so the recovery page's
