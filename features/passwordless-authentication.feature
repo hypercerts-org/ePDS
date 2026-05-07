@@ -428,6 +428,25 @@ Feature: Passwordless authentication via email OTP
     Then the verification form shows an "Too many attempts" error
     And a "Send a new code" inline action is offered
 
+  # After the first lockout response, better-auth has deleted the
+  # verification row, so any further /sign-in/email-otp call falls
+  # through the row-not-found path and returns "Invalid OTP" — even
+  # though the row is gone, not invalid. The page latches the
+  # lockout state so post-lockout submits inherit the same inline
+  # action treatment as the original "Too many attempts" response,
+  # rather than letting the user fight an "Invalid OTP" error that
+  # more typing can't possibly fix.
+  @email @too-many-attempts @post-lockout
+  Scenario: After the lockout, further submits still surface a Send-a-new-code action
+    When the demo client initiates an OAuth login
+    Then the browser is redirected to the auth service login page
+    And the login page displays an email input form
+    When the user enters a unique test email and submits
+    Then the login page shows an OTP verification form
+    When the user submits enough wrong OTPs to trigger the lockout
+    And the user submits one more wrong OTP after the lockout
+    Then a "Send a new code" inline action is offered
+
   # Clicking Verify with no code typed used to flash "Invalid OTP",
   # which is dishonest: the user didn't type an invalid code, they
   # typed nothing. It also burned a real call to better-auth's

@@ -1026,3 +1026,18 @@ Then(
     ).toBeVisible({ timeout: 5_000 })
   },
 )
+
+When(
+  'the user submits one more wrong OTP after the lockout',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    const boxCount = await page.locator('.otp-box').count()
+    await page.evaluate(`(function () {
+      var boxes = document.querySelectorAll('.otp-box');
+      for (var i = 0; i < boxes.length; i++) boxes[i].value = '';
+    })()`)
+    await page.locator('.otp-box').first().focus()
+    await page.keyboard.type('9'.repeat(boxCount))
+    await expect(page.locator('#error-msg')).toBeVisible({ timeout: 10_000 })
+  },
+)

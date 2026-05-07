@@ -759,6 +759,17 @@ export function renderLoginPage(opts: {
       // still bails to /auth/abort instead of issuing a fresh OTP
       // that would only fail.
       var flowAborted = false;
+      // Set to true the moment better-auth surfaces a lockout
+      // ("Too many attempts"). The verification row is deleted at
+      // that point, so every subsequent /sign-in/email-otp call
+      // returns INVALID_OTP ("Invalid OTP") against nothing — and
+      // a user who keeps typing would just rack up dishonest
+      // "Invalid OTP" errors when in reality the only forward
+      // path is a fresh Resend. Latching this lets the
+      // post-lockout INVALID_OTP path inherit the same inline
+      // "Send a new code" treatment as the original "Too many
+      // attempts" response.
+      var verifyLockedOut = false;
       // True iff we have proof the PAR is still alive (last ping
       // was ok:true and was recent enough to fall inside the
       // upstream inactivity window). Used to gate every "offer the
@@ -1199,7 +1210,16 @@ export function renderLoginPage(opts: {
             //     verification row after N wrong tries — the next
             //     code typed cannot succeed; the only forward
             //     path is a fresh Resend)
-            var isUnrecoverable = /expir|too long|too many|attempt/i.test(result.error);
+            // Plus: once we have seen a lockout once, every
+            // subsequent /sign-in/email-otp call hits a deleted
+            // verification row and returns the generic
+            // "Invalid OTP" — which without this latch would let
+            // the user fight a typo error that more typing can't
+            // fix.
+            if (/too many|attempt/i.test(result.error)) verifyLockedOut = true;
+            var isUnrecoverable =
+              /expir|too long|too many|attempt/i.test(result.error) ||
+              verifyLockedOut;
             if (isUnrecoverable) {
               // Only offer "Send a new code" when the PAR is still
               // alive. If it isn't, a fresh OTP would issue but
@@ -1255,6 +1275,10 @@ export function renderLoginPage(opts: {
         if (result.error) {
           showError(result.error);
         } else {
+          // A fresh code resets the verify-lockout latch — the
+          // verification row is brand new, so future submits can
+          // succeed and shouldn't inherit the old lockout state.
+          verifyLockedOut = false;
           showSuccess('Code resent!');
         }
       });

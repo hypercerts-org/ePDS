@@ -613,9 +613,13 @@ describe('renderLoginPage inline Resend action on expired OTP', () => {
     //   - better-auth's "Too many attempts" lockout
     //     ("too many" / "attempt") — see ERROR_CODES in
     //     better-auth/dist/plugins/email-otp/routes.mjs
-    expect(html).toMatch(
-      /var isUnrecoverable = \/expir\|too long\|too many\|attempt\/i\.test/,
-    )
+    // The page also OR-combines the regex result with a
+    // verifyLockedOut latch so post-lockout INVALID_OTP errors
+    // (better-auth has deleted the row by then, so further calls
+    // fall through to the row-not-found path) inherit the same
+    // inline-action treatment.
+    expect(html).toMatch(/\/expir\|too long\|too many\|attempt\/i\.test/)
+    expect(html).toContain('verifyLockedOut')
   })
 
   it('renders the inline action with the "Send a new code" label and triggers the Resend button', () => {
