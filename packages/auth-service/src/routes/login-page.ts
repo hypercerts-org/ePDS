@@ -955,11 +955,19 @@ export function renderLoginPage(opts: {
         hiddenCode.value = '';
       }
 
+      // Mirror the paste filter so a single typed keystroke gets
+      // dropped silently when it isn't part of the OTP charset.
+      // Without this a user typing "1A2B3C" into a numeric form
+      // ends up with "1A2B3C" in the boxes and triggers an
+      // auto-submit that returns "Invalid OTP", same misleading
+      // path the paste filter closes off.
+      var inputCharsetRegex = otpCharset === 'alphanumeric' ? /[^A-Za-z0-9]/g : /[^0-9]/g;
       otpBoxes.forEach(function(box, idx) {
         box.addEventListener('input', function() {
           // keep only the last typed char (handles paste into a single box)
-          var v = box.value.replace(/\\s/g, '');
+          var v = box.value.replace(/\\s/g, '').replace(inputCharsetRegex, '');
           if (v.length > 1) v = v.slice(-1);
+          if (v && otpCharset === 'alphanumeric') v = v.toUpperCase();
           box.value = v;
           updateHiddenCode();
           if (box.value && idx < otpBoxes.length - 1) otpBoxes[idx + 1].focus();

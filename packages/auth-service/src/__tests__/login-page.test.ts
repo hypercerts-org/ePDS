@@ -684,6 +684,16 @@ describe('renderLoginPage inline Resend action on expired OTP', () => {
     )
   })
 
+  it('filters typed OTP keystrokes to the configured charset', () => {
+    const html = renderDefault()
+    // The same charset filter must apply on the per-box input
+    // handler — typing "A" into a numeric form should be dropped
+    // silently rather than auto-submitting a bad code at the end.
+    expect(html).toMatch(
+      /inputCharsetRegex\s*=\s*otpCharset\s*===\s*'alphanumeric'\s*\?\s*\/\[\^A-Za-z0-9\]\/g\s*:\s*\/\[\^0-9\]\/g/,
+    )
+  })
+
   it('renders the recovery link with the actual request_uri, not a placeholder', () => {
     // The "Recover with backup email" link must round-trip the
     // active OAuth flow's request_uri, so the recovery page's
