@@ -912,6 +912,26 @@ Then(
 // post-cookie-expiry callback path without a 10-minute wall-clock wait.
 
 When(
+  'the user navigates to the demo callback with code and state but no cookie',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    // Visit the demo origin first so document.cookie has the right
+    // origin context (needed for clearCookies to work reliably).
+    await page.goto(testEnv.demoUrl)
+    // Make sure no oauth_state cookie is present.
+    await page.context().clearCookies({ name: 'oauth_state' })
+    // Land on /api/oauth/callback with plausible-looking query params.
+    // The callback's first thing it checks (after `error`) is
+    // !code || !state — both present here. Then it tries to read the
+    // signed cookie, which is gone, and routes to session_expired.
+    const url = new URL('/api/oauth/callback', testEnv.demoUrl)
+    url.searchParams.set('code', 'test-code')
+    url.searchParams.set('state', 'test-state')
+    await page.goto(url.toString())
+  },
+)
+
+When(
   "the demo client's OAuth state cookie has expired",
   async function (this: EpdsWorld) {
     const page = getPage(this)

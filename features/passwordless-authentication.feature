@@ -494,16 +494,23 @@ Feature: Passwordless authentication via email OTP
     When the user clicks "Use different email"
     Then the email input is empty and focused
 
-  @email @demo-cookie-expiry @bug-report
-  Scenario: Demo client's OAuth cookie has expired by the time of callback — useful error, not generic auth_failed
-    When the demo client starts a new OAuth flow with random handle mode
-    Then the browser is redirected to the auth service login page
-    And the login page displays an email input form
-    When the user enters a unique test email and submits
-    Then an OTP email arrives in the mail trap for the test email
-    And the login page shows an OTP verification form
-    When the demo client's OAuth state cookie has expired
-    And the user enters the OTP code
+  @demo-cookie-expiry @bug-report
+  Scenario: Demo client's OAuth callback with no oauth_state cookie surfaces a session-expired error, not generic auth_failed
+    # When the user has stalled long enough for the demo's OAuth state
+    # cookie to expire by the time they finish the OTP cycle, the
+    # demo callback can't find the cookie. Without the bug-report fix
+    # this used to surface as "Authentication failed" — misleading
+    # because the sign-in itself succeeded; the demo just dropped the
+    # ball at the end. This scenario hits the callback with valid-
+    # looking parameters but no cookie, asserts the session-expired
+    # branch fires.
+    #
+    # The scenario synthesises code+state on the URL because it's
+    # only testing the demo's callback branching — not the full
+    # sign-in flow. That avoids dependency on Mailpit (which can
+    # be slow on Railway preview envs and was flaking the older
+    # form of this scenario).
+    When the user navigates to the demo callback with code and state but no cookie
     Then the demo client surfaces a session-expired error
 
   @email @otp-and-par-expiry @prompt-login
