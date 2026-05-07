@@ -116,9 +116,19 @@ export function createAccountLoginRouter(
       return
     } catch (err: unknown) {
       logger.warn({ err, email }, 'OTP verification failed')
-      const errMsg =
-        err instanceof Error && err.message.includes('invalid')
-          ? 'Invalid or expired code. Please try again.'
+      const errText = err instanceof Error ? err.message.toLowerCase() : ''
+      // Distinguish the lockout / aged-out path ("Too many attempts"
+      // and the followup INVALID_OTP-against-deleted-row) from a
+      // recoverable typo. Both surface as Error messages from
+      // better-auth; the lockout / expired path needs a Resend, the
+      // typo path just needs a re-type. Showing "Invalid or expired"
+      // for both let the user fight an error that more typing
+      // couldn't fix.
+      const isUnrecoverable = /too many|attempt|expir/.test(errText)
+      const errMsg = isUnrecoverable
+        ? 'That code can no longer be used. Click "Resend code" below to get a fresh one.'
+        : errText.includes('invalid')
+          ? 'Invalid code. Please try again.'
           : 'Verification failed. Please try again.'
       res.type('html').send(
         renderOtpForm({
