@@ -154,6 +154,7 @@ function renderLoginForm(opts: { csrfToken: string; error?: string }): string {
         <div class="field">
           <label for="email">Email address</label>
           <input type="email" id="email" name="email" required autofocus
+                 autocomplete="email"
                  placeholder="you@example.com">
         </div>
         <button type="submit" class="btn-primary">Continue with email</button>

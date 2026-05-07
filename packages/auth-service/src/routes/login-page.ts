@@ -683,6 +683,7 @@ export function renderLoginPage(opts: {
         <div class="field">
           <label for="email">Enter your email address</label>
           <input type="email" id="email" name="email" required autofocus
+                 autocomplete="email"
                  placeholder="you@example.com"
                  value="${escapeHtml(opts.loginHint)}">
         </div>

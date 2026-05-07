@@ -358,6 +358,7 @@ export function renderRecoveryForm(opts: {
         <div class="field">
           <label for="email">Backup email address</label>
           <input type="email" id="email" name="email" required autofocus
+                 autocomplete="email"
                  placeholder="backup@example.com">
         </div>
         <button type="submit" class="btn-primary">Send recovery code</button>
