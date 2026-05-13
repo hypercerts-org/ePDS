@@ -28,6 +28,7 @@ export function PageShell({ children }: PageShellProps) {
         '--theme-text-muted': t.textMuted,
         '--theme-text-hint': t.textHint,
         '--theme-primary': t.primary,
+        '--theme-primary-text': t.primaryText,
         '--theme-primary-hover': t.primaryHover,
         '--theme-input-bg': t.inputBg,
         '--theme-input-border': t.inputBorder,

@@ -40,6 +40,10 @@ export const DEFAULT_BRANDING_CSS = [
   // Right-side <main>: lift it onto a card surface with the same
   // colour, border, radius and soft shadow as the login card.
   'main { background: #F8F8F8; border: 1px solid #E5E5E5; border-radius: 20px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); margin: 16px; }',
+  // Completion states such as "Login complete" render plain text rather
+  // than a form, so nudge that card up to sit on the same optical plane
+  // as the left-side title without moving form-heavy consent screens.
+  '@media (min-width: 768px) { main:not(:has(form)) { transform: translateY(-26px); } }',
   // Three-tone text hierarchy. Provider-UI uses Tailwind slate / gray /
   // neutral utility classes for primary / muted / hint text — remap to
   // the same shades the login page uses.
