@@ -28,12 +28,10 @@ Scenario: User views their account information
   When they view the /account page
   Then the page displays their DID
   And the page displays their primary email
-  # And the page displays their current handle
+  And the page displays their current handle
 
   # --- Handle management ---
 
-# Known gap: handle update on /account is not implemented yet.
-@pending
 Scenario: User changes their handle
   Given the user is logged into account settings
   And their current handle is a random subdomain of the PDS domain

@@ -54,6 +54,28 @@ Feature: Client branding — CSS injection and custom email templates
     Given a user is logged into the account settings page
     Then the account settings page includes the trusted client's custom CSS
 
+  # --- Favicon injection ---
+
+  Scenario: Trusted client's favicon is applied to the login page
+    When the trusted demo client initiates an OAuth login
+    Then the login page HTML contains the trusted client's custom favicon
+    And the login page HTML contains the trusted client's dark-theme favicon
+    And the login page HTML does not contain the default ePDS favicon links
+
+  @untrusted-client
+  Scenario: Untrusted client does not get favicon injection
+    When the untrusted demo client initiates an OAuth login to the auth service
+    Then the login page HTML does not contain the trusted client's custom favicon
+    And the login page HTML contains the default ePDS favicon links
+
+  Scenario: Trusted client's favicon is applied to the choose-handle page
+    When a new user reaches the handle selection page via the trusted demo client
+    Then the page HTML contains the trusted client's custom favicon
+
+  Scenario: Trusted client's favicon is applied to the recovery page
+    When a user navigates to the account recovery page via the trusted demo client
+    Then the page HTML contains the trusted client's custom favicon
+
   # --- Custom email templates ---
 
   @email @pending
@@ -95,3 +117,17 @@ Feature: Client branding — CSS injection and custom email templates
     Given the user is logging into account settings (no OAuth client context)
     When the user requests an OTP
     Then the default PDS email template is used
+
+  @email @untrusted-client @pending
+  Scenario: Untrusted client's email_template_uri is ignored
+    # Security gate: the email_template_uri / email_subject_template /
+    # client_name-as-From-display-name fields must only be honoured for
+    # clients on PDS_OAUTH_TRUSTED_CLIENTS, matching the CSS-injection
+    # gate. An untrusted client that advertises these fields must get
+    # the default PDS OTP email, not its own template — otherwise any
+    # registered client_id could phish via the PDS's own From: address.
+    Given the untrusted demo client's metadata advertises an "email_template_uri"
+    When a user requests an OTP via the untrusted demo client
+    Then the OTP email in the mail trap uses the default PDS template
+    And the email From display name is the default PDS name
+    And the OTP email subject does not come from the untrusted client's template

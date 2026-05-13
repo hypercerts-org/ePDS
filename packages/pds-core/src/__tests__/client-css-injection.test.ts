@@ -118,20 +118,33 @@ describe('injectStyleTagIntoHtml', () => {
 describe('createClientCssInjectionMiddleware', () => {
   const trustedClient = 'https://trusted.app/client-metadata.json'
 
-  function createResponseDouble() {
+  function createResponseDouble({
+    headersSent = false,
+  }: { headersSent?: boolean } = {}) {
     const setHeaderSpy = vi.fn()
     const endSpy = vi.fn()
-    const removeHeaderSpy = vi.fn()
-    return {
-      res: {
-        setHeader: setHeaderSpy,
-        end: endSpy,
-        removeHeader: removeHeaderSpy,
-      },
-      setHeaderSpy,
-      endSpy,
-      removeHeaderSpy,
+    const res: {
+      headersSent: boolean
+      setHeader: typeof setHeaderSpy
+      end: typeof endSpy
+      removeHeader: (name: string) => void
+    } = {
+      headersSent,
+      setHeader: setHeaderSpy,
+      end: endSpy,
+      removeHeader: () => {},
     }
+    const removeHeaderSpy = vi.fn((_name: string) => {
+      if (res.headersSent) {
+        // Mirror Node's real behaviour so the middleware's headersSent
+        // guard is actually exercised.
+        throw new Error(
+          'Cannot remove headers after they are sent to the client',
+        )
+      }
+    })
+    res.removeHeader = removeHeaderSpy
+    return { res, setHeaderSpy, endSpy, removeHeaderSpy }
   }
 
   it('calls next immediately when request does not match injection criteria', async () => {
@@ -248,6 +261,64 @@ describe('createClientCssInjectionMiddleware', () => {
     await middleware(req, res, next)
     expect(logger.warn).toHaveBeenCalledOnce()
     expect(next).toHaveBeenCalledOnce()
+  })
+
+  // ─── Regression: ERR_HTTP_HEADERS_SENT crash ─────────────────────────
+  //
+  // @atproto/oauth-provider flushes response headers before calling
+  // res.end() for some paths. Before this guard, our wrapped end()
+  // called removeHeader('Content-Length') afterwards, which throws
+  // ERR_HTTP_HEADERS_SENT from Node's HTTP layer. That throw escapes
+  // the Express error pipeline (it's raised from a method replacement
+  // on `res`, not from middleware body) and lands as an uncaught
+  // exception, crashing pds-core. See chooser-enrichment.ts for the
+  // matching guard — same bug pattern.
+  it('does not throw when upstream flushes headers before end()', async () => {
+    const middleware = createClientCssInjectionMiddleware({
+      trustedClients: [trustedClient],
+      resolveClientMetadata: vi.fn().mockResolvedValue({
+        branding: { css: 'body { color: red; }' },
+      }),
+      getClientCss: vi.fn().mockReturnValue('body { color: red; }'),
+      logger: mockLogger(),
+    })
+    const req = {
+      method: 'GET',
+      path: '/oauth/authorize',
+      query: { client_id: trustedClient },
+    }
+    const { res } = createResponseDouble({ headersSent: true })
+    const next = vi.fn()
+
+    await middleware(req, res, next)
+    expect(() => {
+      res.end('<!DOCTYPE html><html><head></head><body></body></html>')
+    }).not.toThrow()
+  })
+
+  it('skips Content-Length rewrite once headers have been flushed', async () => {
+    const middleware = createClientCssInjectionMiddleware({
+      trustedClients: [trustedClient],
+      resolveClientMetadata: vi.fn().mockResolvedValue({
+        branding: { css: 'body { color: red; }' },
+      }),
+      getClientCss: vi.fn().mockReturnValue('body { color: red; }'),
+      logger: mockLogger(),
+    })
+    const req = {
+      method: 'GET',
+      path: '/oauth/authorize',
+      query: { client_id: trustedClient },
+    }
+    const { res, removeHeaderSpy, endSpy } = createResponseDouble({
+      headersSent: true,
+    })
+    const next = vi.fn()
+
+    await middleware(req, res, next)
+    res.end('<!DOCTYPE html><html><head></head><body></body></html>')
+    expect(removeHeaderSpy).not.toHaveBeenCalled()
+    expect(endSpy).toHaveBeenCalledOnce()
   })
 })
 

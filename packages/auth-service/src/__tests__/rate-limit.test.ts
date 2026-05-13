@@ -2,6 +2,7 @@
  * Tests for the in-memory request rate limiter middleware.
  */
 import { describe, it, expect } from 'vitest'
+import { randomUUID } from 'node:crypto'
 import { requestRateLimit } from '../middleware/rate-limit.js'
 
 function makeReq(ip?: string) {
@@ -127,5 +128,33 @@ describe('requestRateLimit', () => {
     })
 
     expect(nextCalled).toBe(true)
+  })
+
+  it('is a no-op when EPDS_DISABLE_RATE_LIMIT=true', () => {
+    // E2E / docker-compose stacks fire hundreds of requests from a single
+    // source IP per scenario; the bypass keeps the limiter mounted in the
+    // pipeline (so middleware order stays identical to production) while
+    // skipping the per-IP counter increment.
+    const previous = process.env.EPDS_DISABLE_RATE_LIMIT
+    process.env.EPDS_DISABLE_RATE_LIMIT = 'true'
+    try {
+      const limiter = requestRateLimit({ windowMs: 60000, maxRequests: 1 })
+      const ip = `bypass-${Date.now()}-${randomUUID()}`
+
+      // Many requests from one IP, all should pass.
+      for (let i = 0; i < 5; i++) {
+        const req = makeReq(ip)
+        const res = makeRes()
+        let nextCalled = false
+        limiter(req as never, res as never, () => {
+          nextCalled = true
+        })
+        expect(nextCalled).toBe(true)
+        expect(res._status).toBe(200)
+      }
+    } finally {
+      if (previous === undefined) delete process.env.EPDS_DISABLE_RATE_LIMIT
+      else process.env.EPDS_DISABLE_RATE_LIMIT = previous
+    }
   })
 })

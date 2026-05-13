@@ -4,6 +4,52 @@
         ask http://{$PDS_UPSTREAM:core:3000}/tls-check
     }
 }
+# Demo app (dedicated vhost — not part of the on-demand TLS block so it
+# bypasses /tls-check). Only active when DEMO_HOSTNAME is set; in its
+# absence Caddy just skips this site. Used for local e2e runs where the
+# demo container needs a real hostname under the shared parent domain
+# so HYPER-268 @session-reuse scenarios can exercise cross-client
+# device-session sharing.
+{$DEMO_HOSTNAME} {
+    reverse_proxy {$DEMO_UPSTREAM:demo:3002} {
+        header_up Connection {http.request.header.Connection}
+        header_up Upgrade {http.request.header.Upgrade}
+    }
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+    }
+}
+
+# Second demo vhost for e2e scenarios that need an untrusted OAuth client
+# (HYPER-268 session-reuse, trusted-vs-untrusted branding tests). Only
+# active when DEMO_UNTRUSTED_HOSTNAME is set. Same container image as the
+# trusted demo, different PUBLIC_URL.
+{$DEMO_UNTRUSTED_HOSTNAME} {
+    reverse_proxy {$DEMO_UNTRUSTED_UPSTREAM:demo-untrusted:3002} {
+        header_up Connection {http.request.header.Connection}
+        header_up Upgrade {http.request.header.Upgrade}
+    }
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+    }
+}
+
+# Mailpit UI for manual email inspection during local dev / e2e runs.
+# Mailpit's own HTTP Basic auth (MP_UI_AUTH) protects the endpoint so no
+# extra Caddy-level auth is needed. Only active when MAILPIT_HOSTNAME is set.
+{$MAILPIT_HOSTNAME} {
+    reverse_proxy {$MAILPIT_UPSTREAM:mailpit:8025} {
+        header_up Connection {http.request.header.Connection}
+        header_up Upgrade {http.request.header.Upgrade}
+    }
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+    }
+}
+
 # PDS API + handle subdomains (on-demand TLS for handle resolution)
 :443 {
     tls {

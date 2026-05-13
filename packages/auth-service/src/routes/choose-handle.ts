@@ -8,11 +8,12 @@
  *   2. User picks a local-part handle; client-side JS checks availability in real-time
  *   3. On POST, server validates format + availability, then:
  *      a. Signs the epds-callback URL with the chosen handle included in HMAC
- *      b. Deletes auth_flow row + clears cookie (deferred cleanup from complete.ts)
+ *      b. Auth_flow row is left intact for handle_taken retry — TTL cleanup handles expiry
  *      c. Redirects to pds-core /oauth/epds-callback
  *
- * The auth_flow cookie and row are intentionally kept alive through the GET
- * (complete.ts deferred cleanup) and only cleaned up on successful POST.
+ * The auth_flow cookie and row are intentionally kept alive so that if pds-core
+ * redirects back with ?error=handle_taken, the user can retry with a different handle.
+ * Stale rows are cleaned up by cleanupExpiredAuthFlows() every 5 minutes.
  */
 import { Router, type Request, type Response } from 'express'
 import type { AuthServiceContext } from '../context.js'
@@ -21,14 +22,21 @@ import {
   escapeHtml,
   signCallback,
   validateLocalPart,
+  type CallbackParams,
   type HandleMode,
 } from '@certified-app/shared'
 import { fromNodeHeaders } from 'better-auth/node'
+import { cleanExit } from '../lib/clean-exit.js'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
 import { pingParRequest } from '../lib/ping-par-request.js'
 import { requireInternalEnv } from '../lib/require-internal-env.js'
 import { resolveClientBranding } from '../lib/client-metadata.js'
-import { renderOptionalStyleTag } from '../lib/page-helpers.js'
+import {
+  renderOptionalStyleTag,
+  renderFaviconTag,
+  POWERED_BY_CSS,
+  POWERED_BY_HTML,
+} from '../lib/page-helpers.js'
 
 const logger = createLogger('auth:choose-handle')
 
@@ -64,10 +72,16 @@ export function createChooseHandleRouter(
     const flowId = req.cookies[AUTH_FLOW_COOKIE] as string | undefined
     if (!flowId) {
       logger.warn('No epds_auth_flow cookie on choose-handle')
-      res
-        .status(400)
-        .type('html')
-        .send(renderError('Session expired, please start over'))
+      // No clientId in scope; clean-exit falls through to a Start
+      // Over page with no recoverable button.
+      await cleanExit({
+        res,
+        clientId: null,
+        pdsUrl,
+        code: 'access_denied',
+        description:
+          'Your sign-in took too long to complete. Please start sign-in again.',
+      })
       return null
     }
 
@@ -76,10 +90,14 @@ export function createChooseHandleRouter(
     if (!flow) {
       logger.warn({ flowId }, 'auth_flow not found or expired on choose-handle')
       res.clearCookie(AUTH_FLOW_COOKIE)
-      res
-        .status(400)
-        .type('html')
-        .send(renderError('Session expired, please start over'))
+      await cleanExit({
+        res,
+        clientId: null,
+        pdsUrl,
+        code: 'access_denied',
+        description:
+          'Your sign-in took too long to complete. Please start sign-in again.',
+      })
       return null
     }
 
@@ -95,19 +113,34 @@ export function createChooseHandleRouter(
         { err },
         'Failed to get better-auth session on choose-handle',
       )
-      res
-        .status(500)
-        .type('html')
-        .send(renderError('Authentication failed. Please try again.'))
+      // Internal failure — flow.clientId is in scope so we can
+      // bounce back to the OAuth client with server_error.
+      await cleanExit({
+        res,
+        clientId: flow.clientId,
+        pdsUrl,
+        code: 'server_error',
+        description:
+          'Authentication failed because of a server error. Please try again.',
+        fallbackStatus: 500,
+      })
       return null
     }
 
     if (!session?.user?.email) {
       logger.warn({ flowId }, 'No authenticated session on choose-handle')
-      res
-        .status(401)
-        .type('html')
-        .send(renderError('Session expired, please start over'))
+      // The flow row is still alive so we have a clientId to bounce
+      // back to. User-paced timeout (most likely cause: better-auth
+      // session expired while user was on the picker), not server fault.
+      await cleanExit({
+        res,
+        clientId: flow.clientId,
+        pdsUrl,
+        code: 'access_denied',
+        description:
+          'Your sign-in took too long to complete. Please start sign-in again.',
+        fallbackStatus: 401,
+      })
       return null
     }
 
@@ -162,10 +195,16 @@ export function createChooseHandleRouter(
         },
         'Failed to extend request_uri on choose-handle',
       )
-      res
-        .status(400)
-        .type('html')
-        .send(renderError('Session expired, please start over'))
+      // Cluster B: PAR died before the user even saw the picker.
+      // We have flow.clientId, so bounce them back to the OAuth client.
+      await cleanExit({
+        res,
+        clientId: result.flow.clientId,
+        pdsUrl,
+        code: 'access_denied',
+        description:
+          'Your sign-in took too long to complete. Please start sign-in again.',
+      })
       return
     }
 
@@ -178,12 +217,11 @@ export function createChooseHandleRouter(
       : undefined
     const showRandomButton = result.flow.handleMode === 'picker-with-random'
 
-    // CSS injection for trusted clients — clientId is already in the flow row
+    // Branding injection for trusted clients — clientId is already in the flow row
     const clientId = result.flow.clientId
-    const customCss = clientId
-      ? (await resolveClientBranding(clientId, ctx.config.trustedClients))
-          .customCss
-      : null
+    const branding = clientId
+      ? await resolveClientBranding(clientId, ctx.config.trustedClients)
+      : { customCss: null, customFaviconUrl: null, customFaviconUrlDark: null }
 
     res
       .type('html')
@@ -192,11 +230,10 @@ export function createChooseHandleRouter(
           handleDomain,
           error,
           res.locals.csrfToken,
-          ctx.config.brandColor,
-          ctx.config.backgroundColor,
-          ctx.config.panelColor,
           showRandomButton,
-          customCss,
+          branding.customCss,
+          branding.customFaviconUrl,
+          branding.customFaviconUrlDark,
         ),
       )
   })
@@ -222,11 +259,10 @@ export function createChooseHandleRouter(
 
     const showRandomButton = flow.handleMode === 'picker-with-random'
 
-    // CSS injection for trusted clients
-    const customCss = flow.clientId
-      ? (await resolveClientBranding(flow.clientId, ctx.config.trustedClients))
-          .customCss
-      : null
+    // Branding injection for trusted clients — clientId is already in the flow row
+    const branding = flow.clientId
+      ? await resolveClientBranding(flow.clientId, ctx.config.trustedClients)
+      : { customCss: null, customFaviconUrl: null, customFaviconUrlDark: null }
 
     // Guard: if PDS account already exists, bounce back to /auth/complete
     // (mirrors the same check in the GET handler — prevents signing a
@@ -250,10 +286,16 @@ export function createChooseHandleRouter(
         { status: ping.status, err: ping.err, requestUri: flow.requestUri },
         'Failed to extend request_uri on POST choose-handle',
       )
-      res
-        .status(400)
-        .type('html')
-        .send(renderError('Session expired, please start over'))
+      // Cluster B: PAR died while user was picking a handle. We have
+      // flow.clientId, so bounce them back to the OAuth client.
+      await cleanExit({
+        res,
+        clientId: flow.clientId,
+        pdsUrl,
+        code: 'access_denied',
+        description:
+          'Your sign-in took too long to complete. Please start sign-in again.',
+      })
       return
     }
 
@@ -271,11 +313,10 @@ export function createChooseHandleRouter(
             handleDomain,
             'Invalid handle format. Use 5-20 lowercase letters, numbers, or hyphens.',
             res.locals.csrfToken,
-            ctx.config.brandColor,
-            ctx.config.backgroundColor,
-            ctx.config.panelColor,
             showRandomButton,
-            customCss,
+            branding.customCss,
+            branding.customFaviconUrl,
+            branding.customFaviconUrlDark,
           ),
         )
       return
@@ -307,11 +348,10 @@ export function createChooseHandleRouter(
               handleDomain,
               'Could not verify handle availability. Please try again.',
               res.locals.csrfToken,
-              ctx.config.brandColor,
-              ctx.config.backgroundColor,
-              ctx.config.panelColor,
               showRandomButton,
-              customCss,
+              branding.customCss,
+              branding.customFaviconUrl,
+              branding.customFaviconUrlDark,
             ),
           )
         return
@@ -325,11 +365,10 @@ export function createChooseHandleRouter(
             handleDomain,
             'Could not verify handle availability. Please try again.',
             res.locals.csrfToken,
-            ctx.config.brandColor,
-            ctx.config.backgroundColor,
-            ctx.config.panelColor,
             showRandomButton,
-            customCss,
+            branding.customCss,
+            branding.customFaviconUrl,
+            branding.customFaviconUrlDark,
           ),
         )
       return
@@ -343,11 +382,10 @@ export function createChooseHandleRouter(
             handleDomain,
             'That handle is already taken.',
             res.locals.csrfToken,
-            ctx.config.brandColor,
-            ctx.config.backgroundColor,
-            ctx.config.panelColor,
             showRandomButton,
-            customCss,
+            branding.customCss,
+            branding.customFaviconUrl,
+            branding.customFaviconUrlDark,
           ),
         )
       return
@@ -356,23 +394,23 @@ export function createChooseHandleRouter(
     // Step 5: Sign callback with handle local part included in HMAC payload.
     // Only the local part (e.g. 'alice') is sent — pds-core appends its own
     // trusted handleDomain, eliminating any possibility of domain mismatch.
-    const callbackParams = {
+    // client_id is included so pds-core's catch block can mount a
+    // clean-exit redirect to the OAuth client when Step 2's PAR
+    // requestManager.get() throws. See complete.ts for the same
+    // pattern on the no-handle-picker paths.
+    const callbackParams: CallbackParams = {
       request_uri: flow.requestUri,
       email,
       approved: '1',
       new_account: '1',
       handle: normalizedLocal,
     }
+    if (flow.clientId) callbackParams.client_id = flow.clientId
     const { sig, ts } = signCallback(
       callbackParams,
       ctx.config.epdsCallbackSecret,
     )
     const params = new URLSearchParams({ ...callbackParams, ts, sig })
-
-    // auth_flow row and cookie are intentionally kept alive here.
-    // If pds-core redirects back with ?error=handle_taken, the user still has
-    // their session and can retry with a different handle. Stale rows are
-    // cleaned up by cleanupExpiredAuthFlows() every 5 minutes (10-min TTL).
 
     logger.info(
       { email, flowId, fullHandle },
@@ -454,571 +492,98 @@ export function renderChooseHandlePage(
   handleDomain: string,
   error?: string,
   csrfToken?: string,
-  brandColor?: string,
-  backgroundColor?: string,
-  panelColor?: string,
   showRandomButton?: boolean,
   customCss?: string | null,
+  customFaviconUrl?: string | null,
+  customFaviconUrlDark?: string | null,
 ): string {
-  let rootStyleProps = ''
-  if (brandColor && brandColor !== '#8338ec') {
-    rootStyleProps += `--color-primary:${escapeHtml(brandColor)};--color-primary-contrast:#fff;`
-  }
-  if (panelColor) {
-    rootStyleProps += `--color-panel:${escapeHtml(panelColor)};--color-panel-text:#fff;--color-panel-subtitle:rgba(255,255,255,0.8);`
-  }
-  const rootStyle = rootStyleProps ? ` style="${rootStyleProps}"` : ''
-  const bgColorStyle = backgroundColor
-    ? `\n  <style>body { background: ${escapeHtml(backgroundColor)} !important; }</style>`
-    : ''
-  const errorAdmonition = error
-    ? `<div id="error-msg" class="admonition error">
-        <span class="admonition-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-            <path fill-rule="evenodd" clip-rule="evenodd" d="M11.14 4.494a.995.995 0 0 1 1.72 0l7.001 12.008a.996.996 0 0 1-.86 1.498H4.999a.996.996 0 0 1-.86-1.498L11.14 4.494Zm3.447-1.007c-1.155-1.983-4.019-1.983-5.174 0L2.41 15.494C1.247 17.491 2.686 20 4.998 20h14.004c2.312 0 3.751-2.509 2.587-4.506L14.587 3.487ZM13 9.019a1 1 0 1 0-2 0v2.994a1 1 0 1 0 2 0V9.02Zm-1 4.731a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5Z"/>
-          </svg>
-        </span>
-        <span id="error-text">${escapeHtml(error)}</span>
-      </div>`
-    : `<div id="error-msg" class="admonition error" style="display:none;">
-        <span class="admonition-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-            <path fill-rule="evenodd" clip-rule="evenodd" d="M11.14 4.494a.995.995 0 0 1 1.72 0l7.001 12.008a.996.996 0 0 1-.86 1.498H4.999a.996.996 0 0 1-.86-1.498L11.14 4.494Zm3.447-1.007c-1.155-1.983-4.019-1.983-5.174 0L2.41 15.494C1.247 17.491 2.686 20 4.998 20h14.004c2.312 0 3.751-2.509 2.587-4.506L14.587 3.487ZM13 9.019a1 1 0 1 0-2 0v2.994a1 1 0 1 0 2 0V9.02Zm-1 4.731a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5Z"/>
-          </svg>
-        </span>
-        <span id="error-text"></span>
-      </div>`
+  const errorHtml = error
+    ? `<div class="error" id="error-msg">${escapeHtml(error)}</div>`
+    : `<div class="error" id="error-msg" style="display:none;"></div>`
 
   return `<!DOCTYPE html>
-<html lang="en"${rootStyle}>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  ${renderFaviconTag(customFaviconUrl, customFaviconUrlDark)}
   <title>Choose your handle</title>
   <style>
-    /* ── CSS custom property color token system (mirrors atproto oauth-provider-ui) ── */
-    :root {
-      --hue-primary: 265;
-
-      --color-primary: #8338ec;
-      --color-primary-contrast: #fff;
-      --color-error: rgb(255 0 110);
-      --color-success: rgb(23 204 136);
-
-      --color-contrast-0:    hsl(var(--hue-primary) 20% 100%);
-      --color-contrast-25:   hsl(var(--hue-primary) 20% 95.3%);
-      --color-contrast-50:   hsl(var(--hue-primary) 20% 90.6%);
-      --color-contrast-100:  hsl(var(--hue-primary) 20% 85.9%);
-      --color-contrast-200:  hsl(var(--hue-primary) 20% 81.2%);
-      --color-contrast-300:  hsl(var(--hue-primary) 20% 71.8%);
-      --color-contrast-400:  hsl(var(--hue-primary) 20% 62.4%);
-      --color-contrast-500:  hsl(var(--hue-primary) 20% 53%);
-      --color-contrast-600:  hsl(var(--hue-primary) 20% 43.6%);
-      --color-contrast-700:  hsl(var(--hue-primary) 20% 34.2%);
-      --color-contrast-800:  hsl(var(--hue-primary) 20% 24.8%);
-      --color-contrast-900:  hsl(var(--hue-primary) 20% 20.1%);
-      --color-contrast-950:  hsl(var(--hue-primary) 20% 15.4%);
-      --color-contrast-975:  hsl(var(--hue-primary) 20% 10.7%);
-      --color-contrast-1000: hsl(var(--hue-primary) 20% 6%);
-
-      --color-text-default: var(--color-contrast-900);
-      --color-text-light:   var(--color-contrast-700);
-      --color-border-default: var(--color-contrast-200);
-
-      --color-panel: var(--color-contrast-25);
-      --color-panel-text: var(--color-primary);
-      --color-panel-subtitle: var(--color-text-light);
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .page-wrap { display: flex; flex-direction: column; align-items: stretch; max-width: max(420px, min(90vw, 600px)); width: 100%; }
+    ${POWERED_BY_CSS}
+    .container { background: white; border-radius: 12px; padding: 40px; width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    h1 { font-size: 24px; margin-bottom: 8px; color: #111; }
+    .subtitle { color: #666; margin-bottom: 24px; font-size: 15px; line-height: 1.5; }
+    .field { margin-bottom: 16px; }
+    .field label { display: block; font-size: 14px; font-weight: 500; color: #333; margin-bottom: 6px; }
+    .handle-row { display: flex; align-items: center; gap: 0; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; background: white; }
+    .handle-row:focus-within { border-color: #0f1828; }
+    .handle-row input { flex: 1; padding: 10px 12px; border: none; font-size: 16px; outline: none; background: transparent; min-width: 120px; }
+    .handle-suffix { padding: 10px 12px; background: #f8f9fa; color: #555; font-size: 15px; white-space: nowrap; border-left: 1px solid #ddd; overflow: hidden; text-overflow: ellipsis; }
+    @media (max-width: 480px) {
+      .container { padding: 24px; }
+      .handle-row { flex-wrap: wrap; }
+      .handle-row input { min-width: 100%; border-bottom: 1px solid #ddd; }
+      .handle-suffix { width: 100%; border-left: none; }
     }
-
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --color-contrast-1000: hsl(var(--hue-primary) 20% 100%);
-        --color-contrast-975:  hsl(var(--hue-primary) 20% 95.3%);
-        --color-contrast-950:  hsl(var(--hue-primary) 20% 90.6%);
-        --color-contrast-900:  hsl(var(--hue-primary) 20% 85.9%);
-        --color-contrast-800:  hsl(var(--hue-primary) 20% 81.2%);
-        --color-contrast-700:  hsl(var(--hue-primary) 20% 71.8%);
-        --color-contrast-600:  hsl(var(--hue-primary) 20% 62.4%);
-        --color-contrast-500:  hsl(var(--hue-primary) 20% 53%);
-        --color-contrast-400:  hsl(var(--hue-primary) 20% 43.6%);
-        --color-contrast-300:  hsl(var(--hue-primary) 20% 34.2%);
-        --color-contrast-200:  hsl(var(--hue-primary) 20% 24.8%);
-        --color-contrast-100:  hsl(var(--hue-primary) 20% 20.1%);
-        --color-contrast-50:   hsl(var(--hue-primary) 20% 15.4%);
-        --color-contrast-25:   hsl(var(--hue-primary) 20% 10.7%);
-        --color-contrast-0:    hsl(var(--hue-primary) 20% 6%);
-      }
-    }
-
-    /* ── Reset ── */
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    /* ── Body / layout ── */
-    body {
-      font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-      min-height: 100vh;
-      background: var(--color-contrast-0);
-      color: var(--color-text-default);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-
-    @media (prefers-color-scheme: light) {
-      body { background: white; }
-    }
-
-    /* ── Split-panel wrapper ── */
-    .layout {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      min-width: 100vw;
-      min-height: 100vh;
-    }
-
-    @media (min-width: 768px) {
-      .layout {
-        flex-direction: row;
-        align-items: stretch;
-      }
-    }
-
-    /* ── Left / title panel ── */
-    .title-panel {
-      width: 100%;
-      padding: 16px 24px;
-      display: flex;
-      flex-direction: row;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .title-panel-inner {
-      display: flex;
-      flex-direction: row;
-      align-items: center;
-      gap: 12px;
-    }
-
-    @media (min-width: 768px) {
-      .title-panel {
-        width: 50%;
-        max-width: 512px;
-        padding: 16px;
-        text-align: right;
-        background: var(--color-panel);
-        align-self: stretch;
-        display: grid;
-        align-content: center;
-        justify-items: end;
-      }
-
-      .title-panel-inner {
-        display: grid;
-        align-content: center;
-        justify-items: start;
-        text-align: left;
-      }
-    }
-
-    @media (min-width: 768px) and (prefers-color-scheme: dark) {
-      .title-panel {
-        border-right: 1px solid var(--color-contrast-200);
-      }
-    }
-
-    @media (min-width: 768px) and (prefers-color-scheme: light) {
-      .title-panel {
-        background: var(--color-panel, hsl(var(--hue-primary) 20% 95.3%));
-      }
-    }
-
-    .client-logo {
-      height: 48px;
-      width: 48px;
-      object-fit: contain;
-    }
-
-    @media (min-width: 768px) {
-      .client-logo {
-        height: 64px;
-        width: 64px;
-        margin-bottom: 16px;
-      }
-    }
-
-    .title-svg {
-      width: 200px;
-      height: auto;
-      margin: 8px 0;
-    }
-
-    @media (min-width: 768px) {
-      .title-svg {
-        width: 280px;
-        margin: 16px 0;
-      }
-    }
-
-    @media (min-width: 1024px) {
-      .title-svg {
-        width: 334px;
-      }
-    }
-
-    .title-panel .subtitle {
-      display: none;
-      font-size: 15px;
-      color: var(--color-panel-subtitle, var(--color-text-light));
-      max-width: 320px;
-      line-height: 1.5;
-    }
-
-    @media (min-width: 768px) {
-      .title-panel .subtitle { display: block; }
-    }
-
-    /* ── Right / form panel ── */
-    .form-panel {
-      width: 100%;
-      padding: 24px;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-    }
-
-    @media (min-width: 768px) {
-      .form-panel {
-        max-width: 600px;
-        padding: 24px 48px;
-      }
-    }
-
-    /* ── Form panel heading ── */
-    .form-panel h1 {
-      font-size: 22px;
-      font-weight: 600;
-      color: var(--color-text-default);
-      margin-bottom: 8px;
-      line-height: 1.2;
-    }
-
-    .form-panel .form-subtitle {
-      font-size: 15px;
-      color: var(--color-text-light);
-      margin-bottom: 24px;
-      line-height: 1.5;
-    }
-
-    /* ── Field label ── */
-    .field-label {
-      display: block;
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--color-text-light);
-      margin-bottom: 4px;
-    }
-
-    /* ── Pill input container (atproto InputContainer pattern) ── */
-    .input-container {
-      min-height: 48px;
-      border-radius: 8px;
-      background: var(--color-contrast-25);
-      overflow: hidden;
-      transition: all 0.3s ease-in-out;
-      outline: none;
-      cursor: text;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      .input-container { background: var(--color-contrast-50); }
-    }
-
-    .input-container:focus-within {
-      box-shadow: 0 0 0 2px var(--color-primary), 0 0 0 3px var(--color-contrast-0);
-    }
-
-    .input-inner {
-      display: flex;
-      align-items: center;
-      min-height: 48px;
-      padding: 0 4px;
-      border-radius: 8px;
-      color: var(--color-text-default);
-    }
-
-    /* Square off bottom corners when preview strip is visible below */
-    .input-inner.has-preview {
-      border-bottom-left-radius: 0;
-      border-bottom-right-radius: 0;
-    }
-
-    .input-icon {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      margin: 0 8px;
-      color: var(--color-text-light);
-      transition: color 0.3s ease-in-out;
-    }
-
-    .input-container:focus-within .input-icon {
-      color: var(--color-primary);
-    }
-
-    .input-field {
-      flex: 1;
-      background: transparent;
-      border: none;
-      outline: none;
-      font-size: 16px;
-      color: var(--color-text-default);
-      padding: 8px 8px 8px 0;
-      width: 100%;
-      min-width: 0;
-      text-overflow: ellipsis;
-      background-clip: padding-box;
-    }
-
-    .input-field::placeholder { color: var(--color-text-light); }
-
-    @media (prefers-color-scheme: dark) {
-      .input-field::placeholder { color: rgb(107 114 128); }
-    }
-
-    /* Domain suffix sitting inside the input row */
-    .handle-suffix {
-      flex-shrink: 0;
-      margin-left: 4px;
-      padding-right: 12px;
-      font-size: 16px;
-      color: var(--color-text-light);
-      white-space: nowrap;
-    }
-
-    /* Full-handle preview strip — attaches below .input-inner */
-    .handle-preview {
-      display: none;
-      background: var(--color-contrast-50);
-      padding: 8px 12px;
-      font-size: 14px;
-      font-style: italic;
-      color: var(--color-text-light);
-      border-radius: 0 0 8px 8px;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      .handle-preview { background: var(--color-contrast-100); }
-    }
-
-    .handle-preview strong {
-      font-style: normal;
-      color: var(--color-text-default);
-    }
-
-    /* ── Validation rules ── */
-    .validation-rules {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      margin-bottom: 12px;
-    }
-
-    .validation-rule {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 13px;
-      color: var(--color-text-light);
-    }
-
-    .rule-icon {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 16px;
-      height: 16px;
-      flex-shrink: 0;
-      font-size: 14px;
-    }
-
-    .validation-rule.pass { color: var(--color-success); }
-    .validation-rule.fail { color: var(--color-error); }
-
-    /* ── Availability status ── */
-    .status {
-      min-height: 20px;
-      font-size: 14px;
-      margin-top: 6px;
-    }
-
-    .status.available { color: var(--color-success); }
-    .status.taken     { color: var(--color-error); }
-    .status.format-error { color: var(--color-error); }
-    .status.checking  { color: var(--color-text-light); }
-
-    /* ── Form layout ── */
-    .form-group { display: flex; flex-direction: column; gap: 16px; }
-    .field { display: flex; flex-direction: column; gap: 4px; }
-
-    .form-actions {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      margin-top: 8px;
-    }
-
-    /* ── Primary button ── */
-    .btn-primary {
-      width: 100%;
-      background: var(--color-primary);
-      color: var(--color-primary-contrast);
-      border: none;
-      border-radius: 6px;
-      padding: 12px 24px;
-      min-height: 48px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.3s ease-in-out;
-      outline: none;
-      letter-spacing: 0.025em;
-      touch-action: manipulation;
-    }
-
-    .btn-primary:hover:not(:disabled) { opacity: 0.85; }
-
-    .btn-primary:focus-visible {
-      outline: 2px solid var(--color-contrast-1000);
-      outline-offset: 2px;
-    }
-
+    .status { min-height: 20px; font-size: 14px; margin-top: 6px; }
+    .status.available { color: #28a745; }
+    .status.taken { color: #dc3545; }
+    .status.checking { color: #888; }
+    .status.format-error { color: #dc3545; }
+    .error { color: #dc3545; background: #fdf0f0; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+    .btn-primary { width: 100%; padding: 12px; background: #0f1828; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; margin-top: 8px; }
+    .btn-primary:hover:not(:disabled) { background: #1a2a40; }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    /* ── Error / admonition ── */
-    .admonition {
-      border-radius: 8px;
-      padding: 12px;
-      border: 1px solid var(--color-border-default);
-      display: flex;
-      gap: 8px;
-      align-items: flex-start;
-      font-size: 14px;
-      margin-bottom: 16px;
-    }
-
-    .admonition.error {
-      border-color: var(--color-error);
-      color: var(--color-error);
-      background: rgba(255, 0, 110, 0.08);
-    }
-
-    .admonition-icon { flex-shrink: 0; margin-top: 1px; }
-    .btn-secondary { width: 100%; padding: 10px; background: white; color: #0f1828; border: 1px solid #0f1828; border-radius: 8px; font-size: 15px; font-weight: 500; cursor: pointer; }
+    .btn-secondary { width: 100%; padding: 10px; background: white; color: #0f1828; border: 1px solid #0f1828; border-radius: 8px; font-size: 15px; font-weight: 500; cursor: pointer; margin-top: 8px; }
     .btn-secondary:hover:not(:disabled) { background: #f0f2f5; }
     .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
-  </style>${bgColorStyle}${renderOptionalStyleTag(customCss)}
+  </style>${renderOptionalStyleTag(customCss)}
 </head>
 <body>
-  <div class="layout">
-
-    <!-- Left panel: branding -->
-    <div class="title-panel">
-      <div class="title-panel-inner">
-        <img src="/static/gainforest-logo.png" alt="GainForest" class="client-logo">
-        <div>
-          <img src="/static/sign-in-with-certified-title.svg" alt="Create account with Certified" class="title-svg">
-          <p class="subtitle">Create your account</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Right panel: form -->
-    <main class="form-panel">
-      ${errorAdmonition}
-
+  <div class="page-wrap">
+    <div class="container">
       <h1>Choose your handle</h1>
-      <p class="form-subtitle">Your handle is your public username on the AT Protocol network.</p>
+      <p class="subtitle">Your handle is your public username on the AT Protocol network.</p>
 
-      <form method="POST" action="/auth/choose-handle" id="handle-form" class="form-group">
+      ${errorHtml}
+
+      <form method="POST" action="/auth/choose-handle" id="handle-form">
         <input type="hidden" name="csrf" value="${escapeHtml(csrfToken || '')}">
-
-        <!-- Validation rules — neutral dots until user types, then checkmarks/X -->
-        <div class="validation-rules" id="validation-rules">
-          <div class="validation-rule" id="rule-length">
-            <span class="rule-icon" id="rule-length-icon">·</span>
-            <span>Between 5 and 20 characters</span>
-          </div>
-          <div class="validation-rule" id="rule-charset">
-            <span class="rule-icon" id="rule-charset-icon">·</span>
-            <span>Only letters, numbers, and hyphens. Cannot start or end with a hyphen.</span>
-          </div>
-        </div>
-
         <div class="field">
-          <label class="field-label" for="handle-input">Handle</label>
-          <div class="input-container">
-            <div class="input-inner" id="input-inner">
-              <span class="input-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                  <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10a1 1 0 1 0 0-2 8 8 0 1 1 5.263-1.977l-.39.39a2.104 2.104 0 0 1-2.976-2.976l2.658-2.658a1 1 0 0 0-1.414-1.414l-.22.22A3.98 3.98 0 0 0 12 8a4 4 0 1 0 2.745 6.904 4.1 4.1 0 0 0 5.703-.457A9.956 9.956 0 0 0 22 12C22 6.477 17.523 2 12 2Zm0 11a2 2 0 1 1 0-4 2 2 0 0 1 0 4Z"/>
-                </svg>
-              </span>
-              <input
-                type="text"
-                id="handle-input"
-                name="handle"
-                class="input-field"
-                placeholder="yourname"
-                autocomplete="off"
-                autocapitalize="none"
-                autocorrect="off"
-                spellcheck="false"
-                maxlength="20"
-                autofocus
-              >
-              <span class="handle-suffix" id="handle-suffix">.${escapeHtml(handleDomain)}</span>
-            </div>
-            <!-- Full handle preview — shown once user starts typing -->
-            <div class="handle-preview" id="handle-preview">
-              Your full handle will be: <strong id="preview-text"></strong>
-            </div>
+          <label for="handle-input">Handle</label>
+          <div class="handle-row">
+            <input
+              type="text"
+              id="handle-input"
+              name="handle"
+              placeholder="yourname"
+              autocomplete="off"
+              autocapitalize="none"
+              spellcheck="false"
+              minlength="5"
+              maxlength="20"
+            >
+            <span class="handle-suffix">.${escapeHtml(handleDomain)}</span>
           </div>
           <div class="status" id="handle-status"></div>
         </div>
-
-        <div class="form-actions">
-          ${showRandomButton ? `<button type="button" id="random-btn" class="btn-secondary">Generate random handle</button>` : ''}
-      <button type="submit" id="submit-btn" class="btn-primary" disabled>Continue</button>
-        </div>
+        ${showRandomButton ? `<button type="button" id="random-btn" class="btn-secondary">Generate random handle</button>` : ''}
+        <button type="submit" id="submit-btn" class="btn-primary">Create</button>
       </form>
-    </main>
-
+    </div>
+    ${POWERED_BY_HTML}
   </div>
 
   <script>
     (function() {
-      var HANDLE_DOMAIN = '${escapeHtml(handleDomain)}';
-      // Client-side regex for immediate visual rule feedback only.
-      // Authoritative validation happens server-side via validateLocalPart (atproto/syntax).
-      var HANDLE_REGEX = /^[a-z0-9][a-z0-9-]{3,18}[a-z0-9]$/;
-
       var input = document.getElementById('handle-input');
-      var inputInner = document.getElementById('input-inner');
       var statusEl = document.getElementById('handle-status');
       var submitBtn = document.getElementById('submit-btn');
       var errorMsg = document.getElementById('error-msg');
-      var handlePreview = document.getElementById('handle-preview');
-      var previewText = document.getElementById('preview-text');
-      var ruleLengthEl = document.getElementById('rule-length');
-      var ruleCharsetEl = document.getElementById('rule-charset');
-      var ruleLengthIcon = document.getElementById('rule-length-icon');
-      var ruleCharsetIcon = document.getElementById('rule-charset-icon');
+      var form = document.getElementById('handle-form');
       var debounceTimer = null;
       var currentAbort = null;
 
@@ -1034,44 +599,12 @@ export function renderChooseHandlePage(
       function updateSubmit() {
         submitBtn.disabled = isAvailable === false;
       }
-
-      function setRule(el, iconEl, state) {
-        // state: 'neutral' | 'pass' | 'fail'
-        el.className = 'validation-rule' + (state === 'pass' ? ' pass' : state === 'fail' ? ' fail' : '');
-        iconEl.textContent = state === 'pass' ? '\u2713' : state === 'fail' ? '\u2717' : '\u00b7';
-      }
-
-      function updateRules(raw) {
-        if (!raw) {
-          setRule(ruleLengthEl, ruleLengthIcon, 'neutral');
-          setRule(ruleCharsetEl, ruleCharsetIcon, 'neutral');
-          return;
-        }
-        var validLength = raw.length >= 5 && raw.length <= 20;
-        var validCharset = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(raw) || (raw.length >= 1 && /^[a-z0-9]+$/.test(raw));
-        var noLeadTrailHyphen = !/^-|-$/.test(raw);
-        setRule(ruleLengthEl, ruleLengthIcon, validLength ? 'pass' : 'fail');
-        setRule(ruleCharsetEl, ruleCharsetIcon, (validCharset && noLeadTrailHyphen) ? 'pass' : 'fail');
-      }
-
-      function updatePreview(raw) {
-        if (raw) {
-          previewText.textContent = '@' + raw + '.' + HANDLE_DOMAIN;
-          handlePreview.style.display = 'block';
-          inputInner.classList.add('has-preview');
-        } else {
-          handlePreview.style.display = 'none';
-          inputInner.classList.remove('has-preview');
-        }
-      }
+      updateSubmit();
 
       function checkAvailability(value) {
         // Cancel any in-flight request for a previous value
         if (currentAbort) currentAbort.abort();
         currentAbort = new AbortController();
-
-        isAvailable = null;
-        updateSubmit();
 
         setStatus('Checking\u2026', 'checking');
 
@@ -1084,16 +617,13 @@ export function renderChooseHandlePage(
             if (data.error === 'invalid_format') {
               isAvailable = false;
               setStatus('5\u201320 characters, letters, numbers, or hyphens. Cannot start or end with a hyphen.', 'format-error');
-            } else if (data.error === 'reserved') {
-              isAvailable = false;
-              setStatus('\u2717 That handle is reserved.', 'taken');
             } else if (data.error) {
-              // Service error: unknown state — don't block the button
+              // Service error: unknown state — don't block the button, show a hint
               isAvailable = null;
               setStatus('Could not check availability.', 'format-error');
             } else if (data.available) {
-              setStatus('\u2713 Available!', 'available');
               isAvailable = true;
+              setStatus('\u2713 Available!', 'available');
             } else {
               isAvailable = false;
               setStatus('\u2717 Already taken.', 'taken');
@@ -1103,7 +633,7 @@ export function renderChooseHandlePage(
           .catch(function(err) {
             if (err.name === 'AbortError') return; // silently ignore cancelled requests
             currentAbort = null;
-            // Network/timeout error: unknown state — don't block
+            // Network/timeout error: unknown state — don't block if handle isn't confirmed taken
             isAvailable = null;
             setStatus('Could not check availability.', 'format-error');
             updateSubmit();
@@ -1121,10 +651,8 @@ export function renderChooseHandlePage(
 
         // Reset state unconditionally on every keystroke
         isAvailable = null;
-        if (currentAbort) { currentAbort.abort(); currentAbort = null; }
         clearTimeout(debounceTimer);
-        updateRules(raw);
-        updatePreview(raw);
+        if (currentAbort) { currentAbort.abort(); currentAbort = null; }
 
         if (!raw) {
           setStatus('', '');
@@ -1132,7 +660,7 @@ export function renderChooseHandlePage(
           return;
         }
 
-        // Let the server validate format and reserved-word check via validateLocalPart
+        // Let the server validate format — kick off debounced availability check
         updateSubmit();
         debounceTimer = setTimeout(function() {
           checkAvailability(raw);
@@ -1210,14 +738,11 @@ export function renderChooseHandlePage(
       }
 
       // Disable buttons for the duration of the POST to prevent double-submit
-      var form = document.getElementById('handle-form');
-      if (form) {
-        form.addEventListener('submit', function() {
-          submitBtn.disabled = true;
-          submitBtn.textContent = 'Creating\u2026';
+      form.addEventListener('submit', function() {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Creating\u2026';
         if (randomBtn) { randomBtn.disabled = true; }
-        });
-      }
+      });
 
       // Hide server-rendered error once user starts typing
       input.addEventListener('input', function() {
@@ -1227,53 +752,6 @@ export function renderChooseHandlePage(
       }, { once: true });
     })();
   </script>
-</body>
-</html>`
-}
-
-function renderError(message: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Error</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: ui-sans-serif, system-ui, sans-serif;
-      min-height: 100vh;
-      background: white;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-    }
-    .admonition {
-      max-width: 480px;
-      width: 100%;
-      border-radius: 8px;
-      padding: 16px;
-      border: 1px solid rgb(255 0 110);
-      display: flex;
-      gap: 10px;
-      align-items: flex-start;
-      font-size: 15px;
-      color: rgb(255 0 110);
-      background: rgba(255, 0, 110, 0.08);
-    }
-    .admonition-icon { flex-shrink: 0; margin-top: 2px; }
-  </style>
-</head>
-<body>
-  <div class="admonition">
-    <span class="admonition-icon" aria-hidden="true">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-        <path fill-rule="evenodd" clip-rule="evenodd" d="M11.14 4.494a.995.995 0 0 1 1.72 0l7.001 12.008a.996.996 0 0 1-.86 1.498H4.999a.996.996 0 0 1-.86-1.498L11.14 4.494Zm3.447-1.007c-1.155-1.983-4.019-1.983-5.174 0L2.41 15.494C1.247 17.491 2.686 20 4.998 20h14.004c2.312 0 3.751-2.509 2.587-4.506L14.587 3.487ZM13 9.019a1 1 0 1 0-2 0v2.994a1 1 0 1 0 2 0V9.02Zm-1 4.731a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5Z"/>
-      </svg>
-    </span>
-    <span>${escapeHtml(message)}</span>
-  </div>
 </body>
 </html>`
 }

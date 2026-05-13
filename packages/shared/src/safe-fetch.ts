@@ -13,6 +13,17 @@ export type SafeFetchOptions = {
   timeoutMs?: number
   /** Maximum allowed response body in bytes. Default: 100_000 (100 KB) */
   maxBodyBytes?: number
+  /**
+   * Allow requests to private/loopback IP ranges. Default: false.
+   *
+   * **Production default is false** — SSRF protection should not be
+   * disabled on internet-facing deployments. The opt-out exists purely
+   * so local docker-compose e2e runs can exercise flows where services
+   * talk to each other via their public hostnames that resolve (on the
+   * compose network) to private docker IPs. Plumbed via the
+   * `EPDS_ALLOW_PRIVATE_IPS` env var in the auth-service factory.
+   */
+  allowPrivateIps?: boolean
 }
 
 /**
@@ -23,13 +34,17 @@ export type SafeFetchOptions = {
  * const res = await safeFetch('https://example.com/data.json')
  */
 export function makeSafeFetch(options: SafeFetchOptions = {}) {
-  const { timeoutMs = 5_000, maxBodyBytes = 100_000 } = options
+  const {
+    timeoutMs = 5_000,
+    maxBodyBytes = 100_000,
+    allowPrivateIps = false,
+  } = options
 
   const wrappedFetch = safeFetchWrap({
     timeout: timeoutMs,
     responseMaxSize: maxBodyBytes,
-    allowHttp: false,
-    allowPrivateIps: false,
+    allowHttp: allowPrivateIps,
+    allowPrivateIps,
     allowImplicitRedirect: false,
   })
 

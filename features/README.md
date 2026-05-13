@@ -62,7 +62,7 @@ The E2E tests assume an ephemeral test environment with:
 - **auth-service** — running with a test auth database
 - **demo client** — the Next.js demo app (optional, for OAuth flow tests)
 - **Caddy** — TLS-terminating reverse proxy with on-demand certificates
-- **Mail trap** — captures outbound emails (e.g. MailHog on port 8025)
+- **Mail trap** — captures outbound emails (e.g. Mailpit on port 8025)
 - **DNS** — configured so that `*.pds.test` resolves to the test environment
 
 ## File organization

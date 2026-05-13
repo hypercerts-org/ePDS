@@ -2,6 +2,7 @@
 
 import { useSearchParams } from 'next/navigation'
 import { useState, Suspense } from 'react'
+import { ForceLoginCheckbox } from './ForceLoginCheckbox'
 import { SignInButton } from './SignInButton'
 
 export interface FlowLink {
@@ -62,6 +63,7 @@ function FlowLogin({ subtitle, handleMode, navLinks }: FlowLoginPageProps) {
         {handleMode && (
           <input type="hidden" name="handle_mode" value={handleMode} />
         )}
+        <ForceLoginCheckbox disabled={submitting} />
         <SignInButton submitting={submitting} />
       </form>
 

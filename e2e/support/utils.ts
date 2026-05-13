@@ -33,6 +33,28 @@ export async function resetBrowserContext(
   world.page = await world.context.newPage()
   world.page.setDefaultNavigationTimeout(30_000)
   world.page.setDefaultTimeout(15_000)
+  if (world.consoleCapture) {
+    attachConsoleCapture(world.page, world.consoleCapture)
+  }
+}
+
+/** Attach a console-capture stream + stderr mirror to a Playwright page. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function attachConsoleCapture(page: any, stream: NodeJS.WritableStream) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  page.on('console', (msg: any) => {
+    stream.write(`[${msg.type()}] ${msg.text()}\n`)
+    if (process.env.E2E_CONSOLE_ECHO) {
+      process.stderr.write(`[page:${msg.type()}] ${msg.text()}\n`)
+    }
+  })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  page.on('pageerror', (err: any) => {
+    stream.write(`[pageerror] ${err.message}\n`)
+    if (process.env.E2E_CONSOLE_ECHO) {
+      process.stderr.write(`[pageerror] ${err.message}\n`)
+    }
+  })
 }
 
 /**

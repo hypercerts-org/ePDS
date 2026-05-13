@@ -27,6 +27,16 @@ import { getTheme } from '@/lib/theme'
 
 export const runtime = 'nodejs'
 
+// Force runtime rendering so EPDS_CLIENT_THEME (and the other env-fed
+// metadata fields) are read on each request rather than baked at
+// `next build` time. Without this, the route is statically
+// prerendered against whatever the env was when the docker image
+// was built — typically unset — so the published `brand_color`,
+// `background_color`, and `branding.css` fields stay frozen at the
+// defaults regardless of what the running container's env says.
+// Sibling `page.tsx` carries the same flag for the same reason.
+export const dynamic = 'force-dynamic'
+
 export async function GET() {
   const baseUrl = getBaseUrl()
   const theme = getTheme()
@@ -55,11 +65,33 @@ export async function GET() {
     dpop_bound_access_tokens: true,
     brand_color: theme?.page.primary ?? '#2563eb',
     background_color: theme?.page.bg ?? '#f8f9fa',
+    // Custom OTP email template, served from this same origin. Only
+    // honoured by auth-service when this client_id is on
+    // PDS_OAUTH_TRUSTED_CLIENTS (see `buildClientBrandedEmail` in
+    // packages/auth-service/src/email/client-template.ts); untrusted
+    // clients get the default PDS template regardless.
+    email_template_uri: `${baseUrl}/email-template.html`,
+    email_subject_template: '{{code}} — your {{app_name}} code',
+    // Opt in to the auth-service login page's "Or sign in with
+    // ATProto/Bluesky" button. Submitting a handle redirects here with
+    // ?handle=<value>, which our /api/oauth/login route already handles
+    // (resolves handle → PDS → fresh PAR against that PDS).
+    epds_handle_login_url: `${baseUrl}/api/oauth/login`,
     ...(process.env.EPDS_SKIP_CONSENT_ON_SIGNUP === 'true' && {
       epds_skip_consent_on_signup: true,
     }),
     ...(theme && {
-      branding: { css: theme.injectedCss },
+      branding: {
+        css: theme.injectedCss,
+        // Same-origin favicons: served from this demo's PUBLIC_URL so they
+        // share an origin with `client_id` (auth-service rejects
+        // cross-origin favicons because the CSP img-src only widens to
+        // the client_id origin). Light + dark variants let auth-service
+        // emit two `<link rel="icon" media="(prefers-color-scheme: ...)">`
+        // tags so browsers pick the one that matches the user's OS theme.
+        favicon_url: `${baseUrl}/favicon-demo.svg`,
+        favicon_url_dark: `${baseUrl}/favicon-demo-dark.svg`,
+      },
     }),
   }
 

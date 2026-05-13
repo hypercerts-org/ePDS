@@ -9,7 +9,10 @@ import {
 } from '@certified-app/shared'
 import { fromNodeHeaders } from 'better-auth/node'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
+import { getHandleByDid } from '../lib/get-handle-by-did.js'
 import { ensurePdsUrl } from '../lib/pds-url.js'
+import { renderError } from '../lib/render-error.js'
+import { POWERED_BY_CSS, POWERED_BY_HTML } from '../lib/page-helpers.js'
 
 const logger = createLogger('auth:account-settings')
 
@@ -63,6 +66,7 @@ export function createAccountSettingsRouter(
     // Look up DID from PDS
     const did = await getDidByEmail(email, pdsUrl, internalSecret)
     const backupEmails = did ? ctx.db.getBackupEmails(did) : []
+    const currentHandle = did ? await getHandleByDid(did, pdsUrl) : null
 
     // Get all better-auth sessions for this user
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth session type not exported
@@ -81,6 +85,7 @@ export function createAccountSettingsRouter(
         did: did ?? '(unknown)',
         email,
         handleDomain,
+        currentHandle,
         backupEmails,
         sessions,
         currentSessionToken: session.session.token,
@@ -142,7 +147,10 @@ export function createAccountSettingsRouter(
   router.get('/account/backup-email/verify', (req: Request, res: Response) => {
     const token = req.query.token as string | undefined
     if (!token) {
-      res.status(400).send('<p>Missing verification token.</p>')
+      res
+        .status(400)
+        .type('html')
+        .send(renderError('Missing verification token.'))
       return
     }
 
@@ -151,18 +159,23 @@ export function createAccountSettingsRouter(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/static/favicon.svg" media="(prefers-color-scheme: light)" type="image/svg+xml">
+  <link rel="icon" href="/static/favicon-dark.svg" media="(prefers-color-scheme: dark)" type="image/svg+xml">
   <title>Verify Backup Email</title>
   <style>${SETTINGS_CSS}</style>
 </head>
 <body>
-  <div class="container" style="max-width: 420px; text-align: center;">
-    <h1>Verify Backup Email</h1>
-    <p style="color: #666; margin: 16px 0;">Click the button below to confirm your backup email.</p>
-    <form method="POST" action="/account/backup-email/verify">
-      <input type="hidden" name="csrf" value="${escapeHtml(res.locals.csrfToken)}">
-      <input type="hidden" name="token" value="${escapeHtml(token)}">
-      <button type="submit" class="btn-primary-sm" style="padding: 12px 24px; font-size: 16px;">Confirm verification</button>
-    </form>
+  <div class="page-wrap" style="max-width: 420px;">
+    <div class="container" style="max-width: 420px; text-align: center;">
+      <h1>Verify Backup Email</h1>
+      <p style="color: #666; margin: 16px 0;">Click the button below to confirm your backup email.</p>
+      <form method="POST" action="/account/backup-email/verify">
+        <input type="hidden" name="csrf" value="${escapeHtml(res.locals.csrfToken)}">
+        <input type="hidden" name="token" value="${escapeHtml(token)}">
+        <button type="submit" class="btn-primary-sm" style="padding: 12px 24px; font-size: 16px;">Confirm verification</button>
+      </form>
+    </div>
+    ${POWERED_BY_HTML}
   </div>
 </body>
 </html>`)
@@ -172,7 +185,10 @@ export function createAccountSettingsRouter(
   router.post('/account/backup-email/verify', (req: Request, res: Response) => {
     const token = ((req.body.token as string) || '').trim()
     if (!token) {
-      res.status(400).send('<p>Missing verification token.</p>')
+      res
+        .status(400)
+        .type('html')
+        .send(renderError('Missing verification token.'))
       return
     }
 
@@ -401,6 +417,7 @@ function renderSettingsPage(opts: {
   did: string
   email: string
   handleDomain: string
+  currentHandle: string | null
   backupEmails: Array<{ email: string; verified: number; id: number }>
   sessions: Array<{
     token: string
@@ -456,11 +473,14 @@ function renderSettingsPage(opts: {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/static/favicon.svg" media="(prefers-color-scheme: light)" type="image/svg+xml">
+  <link rel="icon" href="/static/favicon-dark.svg" media="(prefers-color-scheme: dark)" type="image/svg+xml">
   <title>Account Settings</title>
   <style>${SETTINGS_CSS}</style>
 </head>
 <body>
-  <div class="container">
+  <div class="page-wrap">
+    <div class="container">
     <div class="header">
       <h1>Account Settings</h1>
       <form method="POST" action="/account/logout" style="display:inline">
@@ -478,6 +498,7 @@ function renderSettingsPage(opts: {
     <section class="section">
       <h2>Handle</h2>
       <p class="info">Your handle is your public username on the AT Protocol network.</p>
+      <div class="setting-row"><strong>Current Handle:</strong> <code>${escapeHtml(opts.currentHandle ?? '(unknown)')}</code></div>
       <form method="POST" action="/account/handle" class="inline-form">
         <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
         <input type="text" name="handle" placeholder="yourname" autocomplete="off" autocapitalize="none" spellcheck="false" required>
@@ -521,6 +542,8 @@ function renderSettingsPage(opts: {
         <button type="submit" class="btn-danger">Revoke all sessions</button>
       </form>
     </section>
+    </div>
+    ${POWERED_BY_HTML}
   </div>
 </body>
 </html>`
@@ -532,19 +555,26 @@ function renderDeletedPage(): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/static/favicon.svg" media="(prefers-color-scheme: light)" type="image/svg+xml">
+  <link rel="icon" href="/static/favicon-dark.svg" media="(prefers-color-scheme: dark)" type="image/svg+xml">
   <title>Account Deleted</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-    .container { background: white; border-radius: 12px; padding: 40px; max-width: 420px; width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: center; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .page-wrap { display: flex; flex-direction: column; align-items: stretch; max-width: 420px; width: 100%; }
+    ${POWERED_BY_CSS}
+    .container { background: white; border-radius: 12px; padding: 40px; width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: center; }
     h1 { font-size: 24px; margin-bottom: 12px; color: #111; }
     p { color: #666; font-size: 15px; line-height: 1.5; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Account Deleted</h1>
-    <p>Your account and all associated data have been permanently deleted.</p>
+  <div class="page-wrap">
+    <div class="container">
+      <h1>Account Deleted</h1>
+      <p>Your account and all associated data have been permanently deleted.</p>
+    </div>
+    ${POWERED_BY_HTML}
   </div>
 </body>
 </html>`
@@ -553,6 +583,8 @@ function renderDeletedPage(): string {
 const SETTINGS_CSS = `
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; padding: 40px 20px; }
+  .page-wrap { display: flex; flex-direction: column; align-items: stretch; max-width: 640px; margin: 0 auto; }
+  ${POWERED_BY_CSS}
   .container { background: white; border-radius: 12px; padding: 32px; max-width: 640px; margin: 0 auto; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
   .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; border-bottom: 1px solid #eee; padding-bottom: 16px; }
   h1 { font-size: 24px; color: #111; }

@@ -201,6 +201,167 @@ res.json({ ...provider!.metadata, authorization_endpoint: '...' })
 Assumes `metadata` is a plain spreadable object containing standard AS
 metadata fields.
 
+### 15. Device-session cookie names for cross-subdomain rewrite
+
+**File:** `packages/pds-core/src/cookie-domain.ts`, wired in
+`packages/pds-core/src/index.ts`
+
+When `AUTH_HOSTNAME` is a subdomain of `PDS_HOSTNAME`, pds-core installs a
+middleware that rewrites outbound `Set-Cookie` headers to inject
+`Domain=<parent>` so the auth-service sibling subdomain can read the upstream
+device-session cookies. The set of cookie names to rewrite is **hardcoded**:
+
+```ts
+export const DEVICE_COOKIE_NAMES = new Set<string>([
+  'dev-id',
+  'ses-id',
+  'dev-id:hash',
+  'ses-id:hash',
+])
+```
+
+These names are `@atproto/oauth-provider` internals — the two device-session
+cookies and their signed-`:hash` sidecars. The middleware also wraps
+`res.appendHeader` because upstream's cookie helper writes via Node's
+`appendHeader` directly rather than through `setHeader`.
+
+**Breakage scenario:** Upstream renames `dev-id`/`ses-id`, adds a new
+session cookie (e.g. a rotated second device ID), or drops the `:hash`
+sidecar convention. The rewrite silently no-ops for the renamed cookies,
+they stay host-only on the pds-core hostname, the auth-service cannot see
+them, and cross-client session reuse regresses to "email/OTP every time"
+without any error. Also at risk if upstream switches from `appendHeader` to
+a different Node API for writing `Set-Cookie`.
+
+### 16. `/account` chooser HTML rewrite and `__deviceSessions` payload
+
+**File:** `packages/pds-core/src/chooser-enrichment.ts`, wired in
+`packages/pds-core/src/index.ts`
+
+Middleware intercepts HTML responses for `GET /oauth/authorize` and
+`GET /account*` and injects a `<script>` tag at the start of `<head>` that
+(a) appends each bound account's email next to its handle in the chooser UI,
+(b) hides upstream's "Sign up" button on the chooser (ePDS routes signup
+through auth-service, not upstream), and (c) rebinds upstream's "Another
+account" button (`<div role="button" aria-label="Login to account that is
+not listed">`) with a capture-phase click listener that hard-navigates to
+`auth.<host>/oauth/authorize?prompt=login&<orig params>`, beating React's
+delegated root-level click handler and preventing the SPA from swapping
+the chooser for its stock sign-in form. The injected script reads two
+upstream globals set by the server-rendered SPA:
+
+```ts
+// /oauth/authorize inline chooser
+interceptGlobal('__sessions')
+// /account standalone SPA
+interceptGlobal('__deviceSessions')
+```
+
+Both carry `{ account: { sub, email, preferred_username, ... } }` entries.
+The enrichment script then walks the rendered DOM looking for leaf elements
+whose own text contains a known handle or DID, and appends the email as a
+sibling span. The middleware also appends a `sha256-<hash>` of the injected
+script to the response's CSP `script-src` directive.
+
+Per-request, the middleware additionally resolves the current OAuth flow's
+handle-assignment mode (query `epds_handle_mode` → client metadata
+`epds_handle_mode` → `EPDS_DEFAULT_HANDLE_MODE` env → `picker-with-random`,
+shared with auth-service via `resolveHandleMode` in
+`@certified-app/shared`) and injects a `<meta name="epds-handle-mode">`
+tag alongside the enrichment script. When the mode resolves to `random`,
+the runtime script hides each handle row and exposes the handle via a
+`title=` tooltip on the email label — the email remains the primary
+identifier. `meta` elements do not contribute to `script-src`, so the
+enrichment script stays hash-stable across all requests.
+
+Depends on:
+
+- The `/account` and `/oauth/authorize` chooser routes being server-rendered
+  HTML that the middleware can rewrite in-flight (not a pure SPA fetching
+  JSON post-load).
+- The global variable names `__sessions` and `__deviceSessions`.
+- The account payload shape (`sub`, `email`, `preferred_username`).
+- The chooser rendering handle text as visible DOM text that a tree-walker
+  can find.
+
+**Breakage scenario:** Upstream renames the globals, changes the account
+payload shape, restructures the chooser into a JSON-fetching SPA, or drops
+the `/account` route. The enrichment silently fails — the page still
+renders because the script is fail-safe — and users see stock upstream
+handle-only rows again with no email disambiguation and no "Use a different
+account" escape hatch.
+
+### 17. `dev-id` cookie detection on the auth-service side
+
+**File:** `packages/auth-service/src/lib/session-reuse.ts`, called from
+`packages/auth-service/src/routes/login-page.ts`
+
+The auth-service's `GET /oauth/authorize` route reads the upstream
+`dev-id` cookie directly to decide whether to bypass its own email/OTP form
+and redirect to pds-core's stock `/oauth/authorize`:
+
+```ts
+export function hasDeviceSessionCookie(req: SessionReuseRequest): boolean {
+  if (req.cookies && typeof req.cookies['dev-id'] === 'string') return true
+  const raw = req.headers.cookie ?? ''
+  return /(?:^|;\s*)dev-id=/.test(raw)
+}
+```
+
+The auth-service does not parse or verify the cookie; it just treats
+presence as "the browser has an upstream device session, defer to pds-core".
+
+**Breakage scenario:** Same `dev-id` rename/removal risk as item 15. If
+upstream renames or splits the device-session cookie, this check returns
+`false` for all requests, session reuse silently regresses, and every
+re-authorization prompts for email/OTP again. If upstream starts setting
+`dev-id` under circumstances that don't actually indicate a usable device
+session, we'd redirect unconditionally and the user would bounce through
+pds-core back to the auth-service in a loop.
+
+### 18. Welcome-page guard pre-routes `/oauth/authorize` and `/account*`
+
+**File:** `packages/pds-core/src/auth-ui-guard.ts`, wired in
+`packages/pds-core/src/index.ts`
+
+A pre-route Express middleware intercepts `GET /oauth/authorize` and
+`GET /account*` before upstream's signin handler runs, parses the
+`dev-id`/`ses-id` cookie pair side-effect-free, and calls
+`provider.accountManager.listDeviceAccounts(deviceId)` to count bound
+accounts on the device. If the cookies are missing/malformed or the
+device has zero bindings, it responds `303` to auth-service's email
+form and clears the stale cookies. This makes upstream's three-button
+stock welcome page ("Authenticate / Create new account / Sign in /
+Cancel") structurally unreachable. See
+`docs/design/session-reuse-bugs.md` for the full failure-mode taxonomy.
+
+Depends on:
+
+- The public exports `DEVICE_ID_PREFIX`, `DEVICE_ID_BYTES_LENGTH`,
+  `SESSION_ID_PREFIX`, `SESSION_ID_BYTES_LENGTH`, and the `DeviceId`
+  branded type from `@atproto/oauth-provider`. Regex built from the
+  prefix and hex byte-length must keep parity with upstream's Zod
+  schemas in `device-id.ts` / `session-id.ts`.
+- `provider.accountManager.listDeviceAccounts(deviceId)` — the public
+  method that returns the DeviceAccount rows for a device. This is the
+  same call used by upstream's own chooser to populate `__sessions`.
+- `/oauth/authorize` and `/account*` remaining the only routes through
+  which upstream can render the stock welcome page.
+- Express `_router.stack` manipulation to splice this middleware right
+  after `expressInit` (same technique as items 4, 5, 15, 16).
+
+**Breakage scenario:** Upstream renames a constant, changes the DeviceId
+cookie format (e.g. switches from hex to base64url or from a "dev-"
+prefix), introduces a third route that can render the welcome page, or
+renames/removes `listDeviceAccounts` on the public AccountManager. The
+regex stops matching valid cookies — every request fails the parse step
+and bounces to auth-service, trapping users in a tight redirect loop
+even for completely valid sessions. A renamed `listDeviceAccounts` fails
+at build time (typecheck catches it), a changed signature fails
+similarly. Silent regression risk: a new upstream route that shows the
+welcome page without being `/oauth/authorize` or `/account*` is not
+caught by the guard and the stock page reappears.
+
 ## Moderate Risk (public APIs, less likely to break)
 
 ### 11. `@atproto/syntax` exports

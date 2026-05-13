@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect } from 'vitest'
 import {
   generateVerificationToken,
   hashToken,
   timingSafeEqual,
+  verifyInternalSecret,
   generateCsrfToken,
   generateRandomHandle,
   signCallback,
@@ -55,6 +56,52 @@ describe('timingSafeEqual', () => {
 
   it('returns false for different lengths', () => {
     expect(timingSafeEqual('short', 'longer-string')).toBe(false)
+  })
+})
+
+describe('verifyInternalSecret', () => {
+  let originalSecret: string | undefined
+
+  beforeEach(() => {
+    originalSecret = process.env.EPDS_INTERNAL_SECRET
+  })
+
+  afterEach(() => {
+    if (originalSecret === undefined) delete process.env.EPDS_INTERNAL_SECRET
+    else process.env.EPDS_INTERNAL_SECRET = originalSecret
+  })
+
+  it('returns true when the header matches the env secret', () => {
+    process.env.EPDS_INTERNAL_SECRET = 'shared-secret-123'
+    expect(verifyInternalSecret('shared-secret-123')).toBe(true)
+  })
+
+  it('returns false for a mismatched header', () => {
+    process.env.EPDS_INTERNAL_SECRET = 'shared-secret-123'
+    expect(verifyInternalSecret('wrong-secret')).toBe(false)
+  })
+
+  it('returns false when the header is undefined', () => {
+    process.env.EPDS_INTERNAL_SECRET = 'shared-secret-123'
+    expect(verifyInternalSecret(undefined)).toBe(false)
+  })
+
+  it('returns false when the header is an array (e.g. duplicated headers)', () => {
+    process.env.EPDS_INTERNAL_SECRET = 'shared-secret-123'
+    expect(verifyInternalSecret(['shared-secret-123', 'extra'])).toBe(false)
+  })
+
+  it('returns false when the env secret is unset, even with a header', () => {
+    delete process.env.EPDS_INTERNAL_SECRET
+    expect(verifyInternalSecret('any-value')).toBe(false)
+  })
+
+  it('handles different-length values without throwing (hashed before compare)', () => {
+    process.env.EPDS_INTERNAL_SECRET = 'short'
+    expect(() =>
+      verifyInternalSecret('a-much-longer-supplied-value'),
+    ).not.toThrow()
+    expect(verifyInternalSecret('a-much-longer-supplied-value')).toBe(false)
   })
 })
 
@@ -134,6 +181,7 @@ describe('signCallback / verifyCallback', () => {
       params.approved,
       params.new_account,
       '', // handle sentinel (absent)
+      '', // client_id sentinel (absent)
       staleTs,
     ].join('\n')
     const { createHmac } = await import('node:crypto')
@@ -149,6 +197,7 @@ describe('signCallback / verifyCallback', () => {
       params.approved,
       params.new_account,
       '', // handle sentinel (absent)
+      '', // client_id sentinel (absent)
       futureTs,
     ].join('\n')
     const { createHmac } = await import('node:crypto')
@@ -255,5 +304,76 @@ describe('signCallback / verifyCallback with handle', () => {
     }
     const result = verifyCallback(tamperedParams, ts, sig, secret)
     expect(result.valid).toBe(false)
+  })
+})
+
+describe('signCallback / verifyCallback with client_id', () => {
+  const secret = 'test-secret-32bytes-padding-here'
+
+  it('signs and verifies callback with a client_id', () => {
+    const params: CallbackParams = {
+      request_uri: 'urn:ietf:params:oauth:request_uri:test',
+      email: 'alice@example.com',
+      approved: '1',
+      new_account: '0',
+      client_id: 'https://demo.example.com/client-metadata.json',
+    }
+    const { sig, ts } = signCallback(params, secret)
+    expect(verifyCallback(params, ts, sig, secret).valid).toBe(true)
+  })
+
+  it('rejects tampered client_id (attacker cannot redirect victim flow at a different OAuth client)', () => {
+    const params: CallbackParams = {
+      request_uri: 'urn:ietf:params:oauth:request_uri:test',
+      email: 'alice@example.com',
+      approved: '1',
+      new_account: '0',
+      client_id: 'https://demo.example.com/client-metadata.json',
+    }
+    const { sig, ts } = signCallback(params, secret)
+    const tampered: CallbackParams = {
+      ...params,
+      client_id: 'https://attacker.example.com/client-metadata.json',
+    }
+    expect(verifyCallback(tampered, ts, sig, secret).valid).toBe(false)
+  })
+
+  it('client_id sentinel: omitting and undefined produce the same signature', () => {
+    // Mirrors the handle sentinel contract — an absent client_id and
+    // an explicit client_id:undefined must both verify against the
+    // same signature, so a caller that forgets to set the field
+    // doesn't accidentally invalidate everything.
+    const baseParams: CallbackParams = {
+      request_uri: 'urn:ietf:params:oauth:request_uri:test',
+      email: 'alice@example.com',
+      approved: '1',
+      new_account: '0',
+    }
+    const withUndefined: CallbackParams = {
+      ...baseParams,
+      client_id: undefined,
+    }
+    const { sig, ts } = signCallback(baseParams, secret)
+    expect(verifyCallback(withUndefined, ts, sig, secret).valid).toBe(true)
+    const { sig: sig2, ts: ts2 } = signCallback(withUndefined, secret)
+    expect(verifyCallback(baseParams, ts2, sig2, secret).valid).toBe(true)
+  })
+
+  it('a sig produced WITH a client_id does not verify WITHOUT one', () => {
+    const withClient: CallbackParams = {
+      request_uri: 'urn:ietf:params:oauth:request_uri:test',
+      email: 'alice@example.com',
+      approved: '1',
+      new_account: '0',
+      client_id: 'https://demo.example.com/client-metadata.json',
+    }
+    const { sig, ts } = signCallback(withClient, secret)
+    const withoutClient: CallbackParams = {
+      request_uri: withClient.request_uri,
+      email: withClient.email,
+      approved: withClient.approved,
+      new_account: withClient.new_account,
+    }
+    expect(verifyCallback(withoutClient, ts, sig, secret).valid).toBe(false)
   })
 })

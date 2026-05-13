@@ -35,6 +35,7 @@ COPY --from=build /app/packages/shared/dist ./packages/shared/dist
 COPY --from=build /app/packages/shared/package.json ./packages/shared/
 COPY --from=build /app/packages/pds-core/dist ./packages/pds-core/dist
 COPY --from=build /app/packages/pds-core/package.json ./packages/pds-core/
+COPY packages/pds-core/public ./packages/pds-core/public
 COPY --from=build /app/package.json ./
 COPY --from=build /app/pnpm-workspace.yaml ./
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh

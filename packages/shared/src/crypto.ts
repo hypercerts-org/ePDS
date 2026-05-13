@@ -34,6 +34,26 @@ export function timingSafeEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b))
 }
 
+/**
+ * Timing-safe verification of an `x-internal-secret` request header against
+ * the configured `EPDS_INTERNAL_SECRET`. Returns false when the env var is
+ * unset, the header is missing, or the value is an array (Node parses repeated
+ * headers as `string[]`, which we never expect for this header).
+ *
+ * Both values are SHA-256-hashed before comparison so timingSafeEqual always
+ * sees equal-length buffers — avoids length-leak side-channels and the
+ * ERR_INVALID_ARG_VALUE throws that node:crypto raises on multibyte length
+ * mismatches.
+ */
+export function verifyInternalSecret(
+  header: string | string[] | undefined,
+): boolean {
+  const secret = process.env.EPDS_INTERNAL_SECRET
+  if (!secret || typeof header !== 'string') return false
+  const hash = (v: string) => crypto.createHash('sha256').update(v).digest()
+  return crypto.timingSafeEqual(hash(header), hash(secret))
+}
+
 /** Generate an 8-digit OTP code. Returns the code and its SHA-256 hash. */
 export function generateOtpCode(): { code: string; codeHash: string } {
   const num = crypto.randomInt(0, 100_000_000)
@@ -53,15 +73,16 @@ export interface CallbackParams {
   approved: string
   new_account: string
   handle?: string // only set for new account creation with chosen handle
+  client_id?: string // OAuth client this flow belongs to; carried only so a clean-exit redirect from the catch block on /oauth/epds-callback can recover the client's redirect_uri when the upstream PAR row is gone. Signed so an attacker cannot redirect a victim's flow at a different OAuth client.
 }
 
 /**
  * Sign the epds-callback redirect parameters with HMAC-SHA256.
  * Returns the hex signature and the Unix timestamp (seconds) used.
  *
- * Payload: request_uri, email, approved, new_account, handle (empty string when absent), and ts joined by newlines.
+ * Payload: request_uri, email, approved, new_account, handle (empty when absent), client_id (empty when absent), and ts, joined by newlines.
  * A timestamp is included so signatures expire (see verifyCallback).
- * handle uses empty string as sentinel when absent so existing flows still produce valid signatures.
+ * handle and client_id use empty string as sentinel when absent so existing flows still produce valid signatures and so the payload shape stays stable across releases.
  */
 export function signCallback(
   params: CallbackParams,
@@ -74,6 +95,7 @@ export function signCallback(
     params.approved,
     params.new_account,
     params.handle ?? '', // empty string when absent
+    params.client_id ?? '', // empty string when absent
     ts,
   ].join('\n')
   const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex')
@@ -113,6 +135,7 @@ export function verifyCallback(
     params.approved,
     params.new_account,
     params.handle ?? '', // empty string when absent — matches signCallback sentinel
+    params.client_id ?? '', // empty string when absent — matches signCallback sentinel
     ts,
   ].join('\n')
   const expected = crypto

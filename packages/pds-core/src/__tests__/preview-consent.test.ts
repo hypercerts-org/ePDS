@@ -4,31 +4,7 @@ import {
   createPreviewConsentHandler,
   renderPreviewIndex,
 } from '../lib/preview-consent.js'
-
-function mockLogger() {
-  return { info: vi.fn(), warn: vi.fn(), debug: vi.fn() }
-}
-
-type CapturedRes = {
-  headers: Record<string, string>
-  body: string | null
-  setHeader: (name: string, value: string) => void
-  send: (body: string) => void
-}
-
-function mockRes(): CapturedRes {
-  const res: CapturedRes = {
-    headers: {},
-    body: null,
-    setHeader(name, value) {
-      this.headers[name] = value
-    },
-    send(body) {
-      this.body = body
-    },
-  }
-  return res
-}
+import { mockLogger, mockRes } from './preview-test-helpers.js'
 
 describe('createPreviewConsentHandler', () => {
   // Snapshot + restore per-test so a mid-test throw cannot leak env state
@@ -306,9 +282,13 @@ describe('renderPreviewIndex', () => {
     expect(html).toContain(
       'href="https://auth.pds.example/preview/recovery-otp"',
     )
+    // /preview/choose-handle no longer enumerates ?error= variants;
+    // the dropdown bound to the `error` param replaces them. Assert
+    // both the link and the bound control instead.
     expect(html).toContain(
-      'href="https://auth.pds.example/preview/choose-handle?error=Handle+already+taken"',
+      'href="https://auth.pds.example/preview/choose-handle"',
     )
+    expect(html).toContain('data-preview-param="error"')
   })
 
   it('seeds the client_id input from ?client_id= on the page URL', () => {

@@ -11,6 +11,11 @@ export default tseslint.config(
       'node_modules/',
       'tmp/',
       'coverage/',
+      // Claude Code creates sibling worktrees here, each a full checkout
+      // with its own packages/, node_modules/, and tsconfigs. Without
+      // this ignore, eslint's projectService discovers every tsconfig in
+      // every worktree and OOMs on `eslint .`.
+      '.claude/worktrees/',
       'vitest.config.ts',
       'eslint.config.js',
       '**/next-env.d.ts',

@@ -14,6 +14,8 @@ import {
   clearClientMetadataCache,
   _seedClientMetadataCacheForTest,
   getClientCss,
+  getClientFaviconUrl,
+  getClientFaviconUrlDark,
 } from '../client-metadata.js'
 
 beforeEach(() => {
@@ -224,5 +226,210 @@ describe('getClientCss', () => {
       TRUSTED,
     )
     expect(result).toBe(atLimit)
+  })
+})
+
+describe('getClientFaviconUrl', () => {
+  const TRUSTED = ['https://trusted.app/client-metadata.json']
+  const CLIENT_ID = 'https://trusted.app/client-metadata.json'
+
+  it('returns null for untrusted clients', () => {
+    expect(
+      getClientFaviconUrl(
+        'https://untrusted.app/client-metadata.json',
+        { branding: { favicon_url: 'https://untrusted.app/icon.svg' } },
+        TRUSTED,
+      ),
+    ).toBeNull()
+  })
+
+  it('returns null when branding.favicon_url is absent', () => {
+    expect(getClientFaviconUrl(CLIENT_ID, {}, TRUSTED)).toBeNull()
+    expect(getClientFaviconUrl(CLIENT_ID, { branding: {} }, TRUSTED)).toBeNull()
+  })
+
+  it('returns the URL for trusted client with same-origin HTTPS favicon', () => {
+    expect(
+      getClientFaviconUrl(
+        CLIENT_ID,
+        { branding: { favicon_url: 'https://trusted.app/icon.svg' } },
+        TRUSTED,
+      ),
+    ).toBe('https://trusted.app/icon.svg')
+  })
+
+  // Rejection cases share the same {input → null} shape, so a table-driven
+  // suite is both more readable and avoids duplicated boilerplate (Sonar
+  // flagged the per-case repetition above the 3% threshold).
+  const longPath = 'a'.repeat(2100)
+  it.each<[string, string, string[], unknown]>([
+    [
+      'cross-origin favicon (CSP img-src only allows client_id origin)',
+      CLIENT_ID,
+      TRUSTED,
+      'https://cdn.app/icon.svg',
+    ],
+    [
+      'favicon on a sibling subdomain of client_id',
+      CLIENT_ID,
+      TRUSTED,
+      'https://assets.trusted.app/icon.svg',
+    ],
+    [
+      'favicon on the same host but a different port',
+      CLIENT_ID,
+      TRUSTED,
+      'https://trusted.app:8443/icon.svg',
+    ],
+    [
+      'when client_id is not a parseable URL',
+      'not-a-url',
+      ['not-a-url'],
+      'https://trusted.app/icon.svg',
+    ],
+    [
+      'http:// (mixed content)', // NOSONAR — testing the mixed-content gate
+      CLIENT_ID,
+      TRUSTED,
+      'http://trusted.app/icon.svg', // NOSONAR — testing the mixed-content gate
+    ],
+    [
+      'data: URIs (could smuggle SVG with script)',
+      CLIENT_ID,
+      TRUSTED,
+      'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>', // NOSONAR — fixed SVG xmlns identifier (the URL is W3C's namespace, not a fetched resource)
+    ],
+    ['javascript: URIs', CLIENT_ID, TRUSTED, 'javascript:alert(1)'],
+    [
+      'URLs carrying userinfo credentials',
+      CLIENT_ID,
+      TRUSTED,
+      'https://user:pass@trusted.app/icon.svg',
+    ],
+    ['malformed URLs', CLIENT_ID, TRUSTED, 'not a url'],
+    [
+      'URLs over 2048 chars',
+      CLIENT_ID,
+      TRUSTED,
+      `https://trusted.app/${longPath}.svg`,
+    ],
+    [
+      // Raw input is exactly 2048 chars but url.href percent-encodes the
+      // trailing kanji (1 byte → 9 chars), pushing the normalised form
+      // past the cap. Caught by the post-parse url.href.length check.
+      'URLs whose normalised form exceeds 2048 chars',
+      CLIENT_ID,
+      TRUSTED,
+      `https://trusted.app/${'a'.repeat(2027)}日`,
+    ],
+    ['non-string favicon_url values', CLIENT_ID, TRUSTED, 42],
+  ])('rejects %s', (_name, clientId, trusted, faviconUrl) => {
+    expect(
+      getClientFaviconUrl(
+        clientId,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- table covers both string and non-string inputs
+        { branding: { favicon_url: faviconUrl as any } },
+        trusted,
+      ),
+    ).toBeNull()
+  })
+})
+
+describe('getClientFaviconUrlDark', () => {
+  const TRUSTED = ['https://trusted.app/client-metadata.json']
+  const CLIENT_ID = 'https://trusted.app/client-metadata.json'
+
+  it('returns null for untrusted clients', () => {
+    expect(
+      getClientFaviconUrlDark(
+        'https://untrusted.app/client-metadata.json',
+        {
+          branding: { favicon_url_dark: 'https://untrusted.app/icon-dark.svg' },
+        },
+        TRUSTED,
+      ),
+    ).toBeNull()
+  })
+
+  it('returns null when branding.favicon_url_dark is absent', () => {
+    expect(getClientFaviconUrlDark(CLIENT_ID, {}, TRUSTED)).toBeNull()
+    expect(
+      getClientFaviconUrlDark(CLIENT_ID, { branding: {} }, TRUSTED),
+    ).toBeNull()
+  })
+
+  it('returns null when only favicon_url is set (no fallback to light)', () => {
+    expect(
+      getClientFaviconUrlDark(
+        CLIENT_ID,
+        { branding: { favicon_url: 'https://trusted.app/icon.svg' } },
+        TRUSTED,
+      ),
+    ).toBeNull()
+  })
+
+  it('returns the URL for trusted client with same-origin HTTPS dark favicon', () => {
+    expect(
+      getClientFaviconUrlDark(
+        CLIENT_ID,
+        { branding: { favicon_url_dark: 'https://trusted.app/icon-dark.svg' } },
+        TRUSTED,
+      ),
+    ).toBe('https://trusted.app/icon-dark.svg')
+  })
+
+  it('resolves light and dark independently from the same metadata', () => {
+    const metadata = {
+      branding: {
+        favicon_url: 'https://trusted.app/icon.svg',
+        favicon_url_dark: 'https://trusted.app/icon-dark.svg',
+      },
+    }
+    expect(getClientFaviconUrl(CLIENT_ID, metadata, TRUSTED)).toBe(
+      'https://trusted.app/icon.svg',
+    )
+    expect(getClientFaviconUrlDark(CLIENT_ID, metadata, TRUSTED)).toBe(
+      'https://trusted.app/icon-dark.svg',
+    )
+  })
+
+  // Same rejection rules as the light variant — exercise a representative
+  // subset to prove the shared validateFaviconUrl helper covers both fields.
+  const longPath = 'a'.repeat(2100)
+  it.each<[string, string, string[], unknown]>([
+    [
+      'cross-origin dark favicon',
+      CLIENT_ID,
+      TRUSTED,
+      'https://cdn.app/icon-dark.svg',
+    ],
+    [
+      'http:// dark favicon (mixed content)', // NOSONAR — testing the mixed-content gate
+      CLIENT_ID,
+      TRUSTED,
+      'http://trusted.app/icon-dark.svg', // NOSONAR — testing the mixed-content gate
+    ],
+    [
+      'dark favicon URLs over 2048 chars',
+      CLIENT_ID,
+      TRUSTED,
+      `https://trusted.app/${longPath}.svg`,
+    ],
+    [
+      'dark favicon with userinfo credentials',
+      CLIENT_ID,
+      TRUSTED,
+      'https://user:pass@trusted.app/icon-dark.svg',
+    ],
+    ['non-string dark favicon values', CLIENT_ID, TRUSTED, 42],
+  ])('rejects %s', (_name, clientId, trusted, faviconUrl) => {
+    expect(
+      getClientFaviconUrlDark(
+        clientId,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- table covers both string and non-string inputs
+        { branding: { favicon_url_dark: faviconUrl as any } },
+        trusted,
+      ),
+    ).toBeNull()
   })
 })

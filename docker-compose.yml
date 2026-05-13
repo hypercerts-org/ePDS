@@ -8,6 +8,14 @@ services:
     env_file: .env
     environment:
       - PDS_PORT=3000
+      # Optional /_internal/test/* hooks used by the e2e suite (e.g.
+      # backdating account_device.updatedAt past upstream's 7-day
+      # authenticationMaxAge so checkLoginRequired returns true).
+      # Defaults OFF so the local docker-compose stack matches a
+      # production deployment by default; opt in for e2e runs by setting
+      # EPDS_TEST_HOOKS=1 in your .env or shell. The router additionally
+      # throws at startup if NODE_ENV=production, regardless of this var.
+      - EPDS_TEST_HOOKS=${EPDS_TEST_HOOKS:-0}
     volumes:
       - pds-data:/data
     restart: unless-stopped
@@ -27,6 +35,12 @@ services:
     env_file: .env
     environment:
       - AUTH_PORT=3001
+      # Optional /_internal/test/* hooks used by the e2e suite (e.g. forcing
+      # OTP expiry without a 10-minute wait). Defaults OFF — opt in for e2e
+      # runs by setting EPDS_TEST_HOOKS=1 in your .env or shell. The router
+      # additionally throws at startup if NODE_ENV=production, regardless
+      # of this var.
+      - EPDS_TEST_HOOKS=${EPDS_TEST_HOOKS:-0}
     volumes:
       - auth-data:/data
     restart: unless-stopped
@@ -48,11 +62,35 @@ services:
       - caddy-config:/config
     env_file: .env
     restart: unless-stopped
+    networks:
+      # Surface public service hostnames inside the compose network so
+      # sibling containers can reach each other via their real public URLs
+      # without NAT-hairpinning back out to the public IP.
+      default:
+        aliases:
+          - ${PDS_HOSTNAME:-pds.example}
+          - auth.${PDS_HOSTNAME:-pds.example}
+          - ${MAILPIT_HOSTNAME:-mailpit.pds.example}
     depends_on:
       core:
         condition: service_healthy
       auth:
         condition: service_healthy
+
+  # Local email trap for development + e2e tests
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - '1025:1025'
+      - '8025:8025'
+    environment:
+      # Basic-auth creds for the HTTP UI + API. E2E suite reads these via
+      # E2E_MAILPIT_USER / E2E_MAILPIT_PASS. Plaintext is fine for a
+      # dev-only email trap.
+      - MP_UI_AUTH=${MAILPIT_USER:-admin}:${MAILPIT_PASS:-admin}
+      - MP_MAX_MESSAGES=5000
+    profiles:
+      - dev
 
 volumes:
   pds-data:

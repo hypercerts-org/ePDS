@@ -41,7 +41,7 @@ jobs:
   gate:
     name: gate
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       pull-requests: read
     outputs:
@@ -72,8 +72,19 @@ jobs:
     #
     # `always()` is needed because `gate` is skipped on non-PR
     # events, and GitHub would otherwise cascade-skip this job.
-    if: always() && (needs.gate.outputs.relevant == 'true' || github.event_name != 'pull_request')
-    runs-on: ubuntu-latest
+    #
+    # Skip the changesets/action "Version Packages" PR (head ref
+    # `changeset-release/main`): no Railway preview is provisioned
+    # for that bot-generated branch, so the "Find Railway preview
+    # deployment" step would always fail with "No Railway
+    # deployments exist for PR #N preview at all". A skipped *job*
+    # still reports conclusion=skipped to branch protection, which
+    # is treated as passing — same pattern as the `gate` job above.
+    if: >-
+      always() &&
+      github.event.pull_request.head.ref != 'changeset-release/main' &&
+      (needs.gate.outputs.relevant == 'true' || github.event_name != 'pull_request')
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     permissions:
       # actions:read is needed by dorny/test-reporter to look up the
@@ -84,13 +95,47 @@ jobs:
       # needs checks:write.
       checks: write
     steps:
+      # On pull_request, `actions/checkout`'s default is the GitHub-synthesized
+      # merge commit (refs/pull/N/merge = base + head). Railway, however,
+      # deploys the PR *branch head* — there's no way to point it at a merge
+      # commit (see https://docs.railway.com/deployments/github-autodeploys).
+      # Running E2E test code from the merge commit against a Railway
+      # deployment of the head commit means main-advancing tests fail against
+      # a pre-merge-commit runtime (e.g. a new scenario asserting UI that
+      # exists on main but not yet on the PR branch). Pin checkout to the PR
+      # head SHA so both sides share one SHA. Trade-off: we won't catch
+      # main-incompatibilities until the branch is rebased — but the rebase
+      # is already the mitigation, so this makes the contract explicit.
+      # On push / workflow_dispatch, `ref` is empty → default behaviour.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Empty on push / workflow_dispatch → falls back to checkout's
+          # default (GITHUB_SHA for the triggering event).
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+
+      - name: Seed empty e2e report
+        # If a later step (Railway deployment lookup, service health
+        # check, cucumber startup crash) fails before cucumber writes
+        # its real reports/e2e.junit.xml, the `Publish e2e test report`
+        # step below errors with "No test report files were found" —
+        # a red reporter check on top of the already-red test job,
+        # with no diagnostic value. Seed a zero-scenario stub so the
+        # reporter always has something to parse; cucumber overwrites
+        # it with real results whenever it actually runs.
+        run: |
+          mkdir -p reports
+          printf '%s' \
+            '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<testsuites name="e2e" tests="0" failures="0" errors="0" time="0">' \
+            '<testsuite name="placeholder (overwritten by cucumber)" tests="0" failures="0" errors="0" skipped="0" time="0"/>' \
+            '</testsuites>' \
+            > reports/e2e.junit.xml
 
       - name: Cache Playwright browsers
         id: playwright-cache
@@ -262,7 +307,7 @@ jobs:
           # walk depth (we also hard-fail).
 
           GRACE_ATTEMPTS=4   # 4 × 5s = 20 seconds
-          MAX_ATTEMPTS=36    # 36 × 5s = 3 minutes
+          MAX_ATTEMPTS=72    # 72 × 5s = 6 minutes
           FALLBACK_WALK=10   # max depth when walking back to find a success
 
           # Event-type-specific query configuration.
@@ -605,6 +650,11 @@ jobs:
           E2E_MAILPIT_URL: ${{ steps.urls.outputs.mailpit_url }}
           E2E_MAILPIT_USER: ${{ secrets.E2E_MAILPIT_USER }}
           E2E_MAILPIT_PASS: ${{ secrets.E2E_MAILPIT_PASS }}
+          # Required by @otp-expiry scenarios that call the auth-service
+          # /_internal/test/* hooks. Must match the EPDS_INTERNAL_SECRET set
+          # on the target Railway env. When unset, e2e/cucumber.mjs auto-
+          # excludes @otp-expiry so the rest of the suite still runs.
+          E2E_INTERNAL_SECRET: ${{ secrets.E2E_INTERNAL_SECRET }}
           E2E_HEADLESS: 'true'
         run: pnpm test:e2e:headless
 

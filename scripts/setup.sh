@@ -62,7 +62,8 @@ inject_shared_vars() {
              EPDS_CALLBACK_SECRET EPDS_INTERNAL_SECRET PDS_ADMIN_PASSWORD \
              PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX \
              EPDS_INVITE_CODE PDS_INTERNAL_URL \
-             SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASS SMTP_FROM SMTP_FROM_NAME PDS_EMAIL_FROM_ADDRESS; do
+             SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASS SMTP_FROM SMTP_FROM_NAME PDS_EMAIL_FROM_ADDRESS \
+             PDS_TERMS_OF_SERVICE_URL PDS_PRIVACY_POLICY_URL PDS_LEGAL_ENTITY_NAME; do
     # Skip if the var isn't in the target AND isn't in the package's .env.example.
     # This avoids injecting vars a package doesn't use, while still handling
     # .env files created from an older .env.example that lacked the var.
@@ -433,6 +434,22 @@ setup_package_envs() {
     jwk=$(generate_es256_private_jwk)
     set_env_var EPDS_CLIENT_PRIVATE_JWK "$jwk" packages/demo/.env
     echo "  Generated EPDS_CLIENT_PRIVATE_JWK"
+  fi
+
+  # The docker-compose stack runs a SECOND demo container (demo-untrusted,
+  # gated behind the `dev` profile) that shares packages/demo/.env via
+  # env_file. To keep the two demos as cryptographically distinct OAuth
+  # clients, override demo-untrusted's EPDS_CLIENT_PRIVATE_JWK from the
+  # top-level .env via DEMO_UNTRUSTED_PRIVATE_JWK (see docker-compose.yml).
+  # Generate that second key here so docker compose up works out of the box.
+  local existing_untrusted_jwk
+  existing_untrusted_jwk=$(read_env_var DEMO_UNTRUSTED_PRIVATE_JWK .env)
+  if [ -z "$existing_untrusted_jwk" ]; then
+    echo "Generating DEMO_UNTRUSTED_PRIVATE_JWK (ES256 P-256 private JWK)..."
+    local untrusted_jwk
+    untrusted_jwk=$(generate_es256_private_jwk)
+    set_env_var DEMO_UNTRUSTED_PRIVATE_JWK "$untrusted_jwk" .env
+    echo "  Generated DEMO_UNTRUSTED_PRIVATE_JWK"
   fi
 
   prompt_demo

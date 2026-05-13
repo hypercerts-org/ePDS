@@ -25,16 +25,18 @@ auto-generate secrets. Safe to re-run — existing secrets are preserved.
 These must have **identical values** in pds-core and auth-service. They are
 marked `[shared]` in the per-package `.env.example` files.
 
-| Variable               | Description                                                                                                                                                                                                                                                  |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `EPDS_VERSION`         | Override the version string returned by `/health`. In Docker/Railway builds this is set automatically to `<package.json version>+<8-char commit SHA>`. In dev it falls back to the root `package.json` version. Only set this if you need a custom override. |
-| `PDS_HOSTNAME`         | Your PDS domain — handles will be `<random>.PDS_HOSTNAME`                                                                                                                                                                                                    |
-| `PDS_PUBLIC_URL`       | Full public URL of the PDS, used as OAuth issuer (e.g. `https://pds.example.com`)                                                                                                                                                                            |
-| `EPDS_CALLBACK_SECRET` | HMAC-SHA256 secret signing the `/oauth/epds-callback` redirect — generate with `openssl rand -hex 32`                                                                                                                                                        |
-| `EPDS_INTERNAL_SECRET` | Shared secret for internal service-to-service calls (auth → PDS) — generate with `openssl rand -hex 32`                                                                                                                                                      |
-| `PDS_ADMIN_PASSWORD`   | PDS admin API password (auth-service uses it for account provisioning)                                                                                                                                                                                       |
-| `NODE_ENV`             | Set to `development` for dev mode (disables secure cookies)                                                                                                                                                                                                  |
-| `LOG_LEVEL`            | Log verbosity: `fatal`, `error`, `warn`, `info` (default), `debug`, or `trace`. Applied to both pds-core and auth-service.                                                                                                                                   |
+| Variable                   | Description                                                                                                                                                                                                                                                                 |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EPDS_VERSION`             | Override the version string returned by `/health`. In Docker/Railway builds this is set automatically to `<package.json version>+<8-char commit SHA>`. In dev it falls back to the root `package.json` version. Only set this if you need a custom override.                |
+| `PDS_HOSTNAME`             | Your PDS domain — handles will be `<random>.PDS_HOSTNAME`                                                                                                                                                                                                                   |
+| `PDS_PUBLIC_URL`           | Full public URL of the PDS, used as OAuth issuer (e.g. `https://pds.example.com`)                                                                                                                                                                                           |
+| `EPDS_CALLBACK_SECRET`     | HMAC-SHA256 secret signing the `/oauth/epds-callback` redirect — generate with `openssl rand -hex 32`                                                                                                                                                                       |
+| `EPDS_INTERNAL_SECRET`     | Shared secret for internal service-to-service calls (auth → PDS) — generate with `openssl rand -hex 32`                                                                                                                                                                     |
+| `PDS_ADMIN_PASSWORD`       | PDS admin API password (auth-service uses it for account provisioning)                                                                                                                                                                                                      |
+| `NODE_ENV`                 | Set to `development` for dev mode (disables secure cookies)                                                                                                                                                                                                                 |
+| `LOG_LEVEL`                | Log verbosity: `fatal`, `error`, `warn`, `info` (default), `debug`, or `trace`. Applied to both pds-core and auth-service.                                                                                                                                                  |
+| `PDS_TERMS_OF_SERVICE_URL` | Public URL of your terms of service. Read by upstream PDS for its own surfaces and by auth-service for the login-page footer line. Both this and `PDS_PRIVACY_POLICY_URL` must be set for the login-page line to render; if either is missing the line is omitted entirely. |
+| `PDS_PRIVACY_POLICY_URL`   | Public URL of your privacy policy. See `PDS_TERMS_OF_SERVICE_URL` above for the join condition.                                                                                                                                                                             |
 
 ## PDS Core
 
@@ -61,28 +63,49 @@ marked `[shared]` in the per-package `.env.example` files.
 
 | Variable                        | Description                                                                                                                                                                                                                                                                                  |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PDS_OAUTH_TRUSTED_CLIENTS`     | Comma-separated list of OAuth `client_id` URLs. Trusted clients get relaxed consent handling and [CSS branding injection](#css-branding-injection). Has no effect on public clients (`token_endpoint_auth_method: "none"`).                                                                  |
+| `PDS_OAUTH_TRUSTED_CLIENTS`     | Comma-separated list of OAuth `client_id` URLs. Trusted clients get relaxed consent handling and [branding injection](#branding-injection-css-and-favicon) (CSS + favicon). Has no effect on public clients (`token_endpoint_auth_method: "none"`).                                          |
 | `PDS_SIGNUP_ALLOW_CONSENT_SKIP` | When `true` (or `1`), trusted clients whose metadata includes `"epds_skip_consent_on_signup": true` can skip the consent screen on initial sign-up. All three conditions must be met: this env var is truthy, the client is in `PDS_OAUTH_TRUSTED_CLIENTS`, and the client metadata opts in. |
 
-### CSS branding injection
+### Branding injection (CSS and favicon)
 
 Trusted clients (listed in `PDS_OAUTH_TRUSTED_CLIENTS`) can provide
-custom CSS in their `client-metadata.json` under `branding.css`. When
-present, ePDS injects a `<style>` tag into:
+custom CSS and one or two custom favicons in their `client-metadata.json`
+under `branding.css`, `branding.favicon_url`, and (optionally)
+`branding.favicon_url_dark`. When present, ePDS:
 
-- auth-service pages: login, OTP, choose-handle, recovery
-- PDS stock consent page (`/oauth/authorize`)
+- Injects the CSS as a `<style>` tag into the auth-service login,
+  OTP, choose-handle, and recovery pages, plus the PDS stock consent
+  page (`/oauth/authorize`).
+- Replaces the default ePDS `<link rel="icon">` tags on the
+  auth-service login, choose-handle, and recovery pages with the
+  client-supplied favicon(s). When both `favicon_url` and
+  `favicon_url_dark` are set, two `<link>` tags are emitted gated by
+  `prefers-color-scheme` so browsers automatically pick the variant
+  matching the user's OS theme. When only `favicon_url` is set, a
+  single bare `<link>` is emitted and the browser uses it for both
+  schemes.
 
 The CSS is size-capped at 32 KB and sanitised to prevent `</style>`
-tag closure. The CSP `style-src` directive is updated with a SHA-256
-hash of the injected CSS. Untrusted clients never get CSS injection
-regardless of what their metadata contains.
+tag closure; the CSP `style-src` directive is updated with a SHA-256
+hash of the injected CSS.
 
-Client-app developers can iterate on their `branding.css` without
-walking through a real OAuth flow each time by setting
-`AUTH_PREVIEW_ROUTES=1` on the auth-service (covers login / OTP /
-choose-handle / recovery) and `PDS_PREVIEW_ROUTES=1` on pds-core
-(covers the consent page). See the
+The favicon URLs must each be absolute HTTPS, at most 2048 chars
+post-URL-normalisation, no userinfo credentials, and **same-origin
+as the `client_id`** — the auth-service Content-Security-Policy
+only widens `img-src` to the `client_id` origin, so a cross-origin
+favicon would be silently blocked by the browser. URLs failing
+validation are dropped with a warning logged, and the page falls
+back to the default ePDS favicon.
+
+Untrusted clients never get either form of injection regardless of
+what their metadata contains.
+
+Client-app developers can iterate on their `branding.css` (and on
+`branding.favicon_url`) without walking through a real OAuth flow
+each time by setting `AUTH_PREVIEW_ROUTES=1` on the auth-service
+(covers login / OTP / choose-handle / recovery) and
+`PDS_PREVIEW_ROUTES=1` on pds-core (covers the consent page). See
+the
 ["Iterating on `branding.css`" section of the client tutorial](./tutorial.md#iterating-on-brandingcss)
 for the list of preview routes and example URLs. Intended for preview
 envs and dev instances only, not production.
@@ -113,6 +136,17 @@ Optional PDS email variables:
 | -------------------------- | ---------------------------------------------------------- |
 | `EPDS_LINK_EXPIRY_MINUTES` | Link expiry in minutes (default `10`)                      |
 | `EPDS_LINK_BASE_URL`       | Base URL for verification links — must match AUTH_HOSTNAME |
+
+### Legal links
+
+The login page renders a "By signing in, you agree to …" line below the
+card when both `PDS_TERMS_OF_SERVICE_URL` and `PDS_PRIVACY_POLICY_URL`
+(see [Shared variables](#shared-variables)) are set. The optional
+`PDS_LEGAL_ENTITY_NAME` controls the possessive in that line:
+
+| Variable                | Description                                                                                                                                                                                                                                                                         |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PDS_LEGAL_ENTITY_NAME` | Optional. When set, the login-page terms line reads "By signing in, you agree to **\<name\>'s** Terms of Use and Privacy Policy." When unset, falls back to "By signing in, you agree to **the** Terms of Use and Privacy Policy." Auth-service only — pds-core does not read this. |
 
 ### OTP code
 

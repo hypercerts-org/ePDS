@@ -184,18 +184,52 @@ The abbreviated version:
 3. Redirect browser to `/oauth/authorize?...&login_hint=<email>`
 4. Handle callback: verify state, exchange code for tokens (with DPoP nonce retry)
 
+## Forcing a Fresh Sign-In (`prompt=login`)
+
+When a previous sign-in's cookies are present in the browser, ePDS skips
+the email code form and lands the user on the account chooser to confirm
+which identity to reuse. To force the email code form instead, use the
+standard OIDC `prompt=login` parameter.
+
+**Important — where to put it:** ePDS's auth service decides whether to
+engage session reuse by inspecting the **query string** of the
+`/oauth/authorize` redirect. PAR-body `prompt=login` is ignored.
+
+If your OAuth library (e.g. `NodeOAuthClient`) only supports passing
+`prompt` via the PAR body, you must also append `&prompt=login` to the
+authorization URL the library returns before redirecting the user.
+
+**Hand-rolled (Flow 1):**
+
+```typescript
+const authUrl =
+  `${authEndpoint}?client_id=${encodeURIComponent(clientId)}` +
+  `&request_uri=${encodeURIComponent(parData.request_uri)}` +
+  (forceLogin ? '&prompt=login' : '')
+```
+
+**With `NodeOAuthClient` (Flow 2):**
+
+```typescript
+const url = await client.authorize(input, { prompt: 'login' })
+// Library puts prompt in PAR; also append it to the URL query string
+// so ePDS's session-reuse short-circuit fires.
+url.searchParams.set('prompt', 'login')
+```
+
 ## Common Pitfalls
 
-| Pitfall                            | Fix                                                                                           |
-| ---------------------------------- | --------------------------------------------------------------------------------------------- |
-| Consent screen on every login      | Switch to `private_key_jwt` — public clients force consent unless in the PDS trusted list     |
-| Flash of email form (Flow 1)       | Include `login_hint` on the **auth redirect URL only** (never in the PAR body)                |
-| `Invalid login_hint` from PAR      | Remove `login_hint` from the PAR body — PDS core only accepts handles/DIDs, not emails        |
-| `auth_failed` immediately          | Check Caddy logs — likely a DNS/upstream name mismatch                                        |
-| DPoP rejected (hand-rolled only)   | Always implement the nonce retry loop (ePDS always demands a nonce)                           |
-| Token exchange fails (hand-rolled) | Restore the DPoP key pair from the session cookie, don't generate a new one                   |
-| `Cannot find package` in tests     | Run `pnpm build` before `pnpm test` — vitest needs `dist/`                                    |
-| `NodeOAuthClient` callback 401     | Ensure `stateStore` and `sessionStore` persist across requests (not in-memory for serverless) |
+| Pitfall                                     | Fix                                                                                                               |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Consent screen on every login               | Switch to `private_key_jwt` — public clients force consent unless in the PDS trusted list                         |
+| Flash of email form (Flow 1)                | Include `login_hint` on the **auth redirect URL only** (never in the PAR body)                                    |
+| `Invalid login_hint` from PAR               | Remove `login_hint` from the PAR body — PDS core only accepts handles/DIDs, not emails                            |
+| `auth_failed` immediately                   | Check Caddy logs — likely a DNS/upstream name mismatch                                                            |
+| DPoP rejected (hand-rolled only)            | Always implement the nonce retry loop (ePDS always demands a nonce)                                               |
+| Token exchange fails (hand-rolled)          | Restore the DPoP key pair from the session cookie, don't generate a new one                                       |
+| `Cannot find package` in tests              | Run `pnpm build` before `pnpm test` — vitest needs `dist/`                                                        |
+| `NodeOAuthClient` callback 401              | Ensure `stateStore` and `sessionStore` persist across requests (not in-memory for serverless)                     |
+| `prompt=login` ignored, chooser still shown | Append `&prompt=login` to the **authorize URL** query string — PAR body alone doesn't engage ePDS's short-circuit |
 
 ## Handles
 

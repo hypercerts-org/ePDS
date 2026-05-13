@@ -142,6 +142,32 @@ export async function extractOtp(messageId: string): Promise<string> {
 }
 
 /**
+ * Fetch the plain-text body of a Mailpit message by ID.
+ */
+export async function fetchEmailBody(messageId: string): Promise<string> {
+  const messageUrl = `${testEnv.mailpitUrl}/view/${messageId}.txt`
+  const res = await fetch(messageUrl, {
+    headers: { Authorization: mailpitAuthHeader() },
+  })
+  if (!res.ok) {
+    throw new Error(
+      `Mailpit message fetch failed: status=${res.status} statusText=${res.statusText || 'unknown'} messageId=${messageId} url=${messageUrl}`,
+    )
+  }
+  return res.text()
+}
+
+/**
+ * Return the number of Mailpit messages currently matching a search query.
+ * Used by scenarios that must assert no new mail has arrived (e.g. HYPER-268
+ * session-reuse: the second OAuth flow must not send a fresh OTP email).
+ */
+export async function countMessages(query: string): Promise<number> {
+  const messages = await searchMessages(query, 100, { timeoutMs: 10_000 })
+  return messages.length
+}
+
+/**
  * Delete all Mailpit messages addressed to a specific recipient.
  * Uses the search-based delete endpoint to avoid wiping the entire inbox,
  * which would cause race conditions when scenarios run in parallel workers.

@@ -253,6 +253,78 @@ It is fine to reference documentation (e.g. `.env.example`) for
 long details, but the changeset itself must still name the thing
 and describe the change. Do not offload the entire explanation.
 
+### Depth check: adaptation detail, not architecture detail
+
+Per-audience sections answer "what do I need to do differently"
+for that audience. They are **not** PR descriptions, design docs,
+or architecture overviews. Even when writing for a technical
+audience (Client app developers, Operators), keep the focus on
+the adaptation surface and resist the urge to explain how the
+change is implemented.
+
+The bar to clear before including any technical detail in a
+per-audience section: **does the reader's adaptation depend on
+knowing this?** If they could change their config / code
+correctly without it, leave it out.
+
+Avoid in per-audience sections:
+
+- Internal package, module, or middleware names (`pds-core
+mounts a pre-route guard…`, `the welcome-page-guard…`,
+  `auth-service's session-detection middleware…`) — readers
+  consume ePDS as a single product, not a monorepo.
+- References to upstream-source-code paths, function names, or
+  internal upstream behaviour (`upstream's request-manager.js
+force-overrides…`, `the SPA's delegated click listener…`).
+- Step-by-step request-flow narratives (`A redirects to B
+which mounts C which calls D…`) — these belong in
+  `docs/design/*.md`, not in release notes.
+- "Why" explanations of internal mechanics (`…to prevent the
+React SPA from intercepting the click`) — readers need to
+  know the observable contract, not the trick used to deliver
+  it.
+
+Useful in per-audience sections (the things readers _do_
+adapt against):
+
+- The exact env vars, query params, metadata fields, error
+  messages they will see or set.
+- Defaults, validation ranges, fail-fast errors.
+- "Old behaviour vs new behaviour" framed as observable
+  effects, not internal causes.
+- Conditions under which a feature self-disables or activates.
+
+Test the section by asking: if a downstream consumer pasted this
+section into their team's "what changed" channel, would they
+know what to do, without anyone needing to ask "but what does
+that mean for us?" If the answer is no, the section is too
+implementation-flavoured.
+
+### Structure dense sections as bullets
+
+Per-audience sections frequently end up holding 3+ distinct
+points (a behaviour change, a config knob, a fallback condition,
+a related caveat). Rendered as one wall-of-text paragraph these
+are hard to scan in release notes — readers skim for the points
+that affect them and lose them in dense prose.
+
+When a per-audience section has 3+ distinct points, structure
+them as a bullet list under the bold audience label. Keep one
+short framing sentence on the same line as the label if useful;
+put each distinct point on its own bullet. One short bullet per
+point is much easier to scan than a long paragraph that mixes
+them.
+
+Two- or one-point sections can stay as inline prose under the
+label — the bullet structure is for the dense case, not a
+mandatory shape.
+
+Bullet lists survive the 2-space indent that
+`@changesets/changelog-github` applies to changeset body lines
+(see the `##` heading restriction in **Body structure** above),
+so they render correctly in the generated `CHANGELOG.md` and on
+GitHub release pages.
+
 ## Example
 
 ```markdown
@@ -267,6 +339,34 @@ Longer sign-in codes, optionally mixing letters and numbers.
 **End users:** OTP codes may now be longer than 6 digits and may include uppercase letters if the operator has opted into the `alphanumeric` charset. Codes of length 8 or more are displayed with a space in the middle (e.g. `1234 5678`) for readability; copy-paste still yields the flat code.
 
 **Operators:** two new environment variables on the auth service — `OTP_LENGTH` (integer, range 4–12, default 8) and `OTP_CHARSET` (`numeric` (default) or `alphanumeric`). Values outside the range cause the service to fail on startup. The OTP input form fields adapt automatically; no template changes required.
+```
+
+A denser change with several distinct points per audience is
+better as bullets:
+
+```markdown
+---
+'ePDS': minor
+---
+
+A second app sign-in in your browser now skips the email code step.
+
+**Affects:** End users, Client app developers, Operators
+
+**End users:**
+
+- After signing in once, a second app asking you to sign in skips the email code step.
+- You either land on the "approve this app" screen or on a chooser where you confirm which identity to reuse.
+- A "Use a different account" link on the chooser takes you back to the email form.
+
+**Client app developers:** no client-side changes required.
+
+- When a previous sign-in's cookies are present, the user lands on the account chooser to confirm which identity to reuse.
+- To force the email code form instead, set the standard OIDC `prompt` parameter to `login` on the authorization request your OAuth library sends.
+
+**Operators:** no new required configuration.
+
+- ePDS auto-detects whether the auth service shares a parent domain with the PDS (`AUTH_HOSTNAME` ends with `.<PDS_HOSTNAME>`) and broadens the device-session cookies to that parent. On unrelated hostnames the feature self-disables.
 ```
 
 ## What the `**Affects:**` line feeds
@@ -290,8 +390,10 @@ fixable error, not silently-missing release notes.
 ## Publishing
 
 See `docs/PUBLISHING.md` for how changesets are consumed at
-release time and how the manual-dispatch release workflow produces
-the git tag and GitHub Release.
+release time and how the release workflow (manual phase 1 to open
+the Release PR, automatic phase 2 to tag + publish the GitHub
+Release on Release-PR merge) produces the git tag and GitHub
+Release.
 
 ## Key files
 

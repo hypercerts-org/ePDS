@@ -116,8 +116,14 @@ document the decision.
 
 ## Cutting a release
 
-Releases are manually triggered to give maintainers full control
-over timing.
+Releases happen in two phases:
+
+- **Phase 1 (open the Release PR)** is triggered manually by a
+  maintainer via `workflow_dispatch`. This gives you control over
+  _when_ a release starts collecting changesets into a PR.
+- **Phase 2 (tag + publish the GitHub Release)** is triggered
+  automatically when the Release PR is merged. No second manual
+  click is needed.
 
 1. **Prerequisites (one-time setup):**
    - The `hypercerts-release-bot` GitHub App must be installed on
@@ -127,24 +133,25 @@ over timing.
      repository secrets. This bot is used by the release workflow
      so that its automated "Version Packages" PR can bypass
      branch protection on `main`.
-2. **Run the workflow:**
+2. **Run the workflow (phase 1 — open the Release PR):**
    - Navigate to the
      [Release workflow](https://github.com/hypercerts-org/ePDS/actions/workflows/release.yml).
    - Click "Run workflow" and select the `main` branch.
-3. **What happens:**
+3. **What happens in phase 1:**
    - The workflow checks out the repo using the release-bot app
      token, runs `pnpm build / format:check / lint / typecheck /
 test` as a fail-fast gate, and then invokes
      `changesets/action`.
    - If there are pending changesets in `.changeset/`, the action
-     opens (or updates) a **"Release" PR** against `main`. This
-     PR applies the pending changesets: it bumps the root
-     `ePDS` version, consumes the changeset files, and updates
-     the root `CHANGELOG.md`. After `changeset version` has
-     written the new release section, `scripts/changelog-audience-summary.mjs`
-     runs as part of `pnpm version-packages` to post-process the
-     section — it reads the `**Affects:**` line from each changeset
-     bullet, groups summaries by audience (End users → Client app
+     opens (or updates) a **"Release" PR** against `main` from the
+     `changeset-release/main` branch. This PR applies the pending
+     changesets: it bumps the root `ePDS` version, consumes the
+     changeset files, and updates the root `CHANGELOG.md`. After
+     `changeset version` has written the new release section,
+     `scripts/changelog-audience-summary.mjs` runs as part of
+     `pnpm version-packages` to post-process the section — it
+     reads the `**Affects:**` line from each changeset bullet,
+     groups summaries by audience (End users → Client app
      developers → Operators), prepends a "Who should read this
      release" block at the top of the section, and injects
      per-bullet HTML anchors so the summary links click through to
@@ -153,17 +160,25 @@ test` as a fail-fast gate, and then invokes
      workflow stops** — this is intentional so that a missed
      audience tag is surfaced immediately rather than becoming
      silently-missing release notes.
-   - Review and merge the Release PR. This is the checkpoint
-     where you verify the generated changelog and version number
-     before they become permanent.
-   - Re-run the Release workflow after the PR has been merged.
-     This time there are no pending changesets but the tag is
-     behind the `package.json` version, so the action runs
-     `pnpm release` (`changeset tag`), creates a `v<version>`
-     git tag, and publishes a single GitHub Release whose body
-     is the matching section of `CHANGELOG.md`.
-   - If there are no pending changesets and the tag is up to
-     date, the workflow is a no-op.
+   - If there are no pending changesets and the tag is up to date,
+     phase 1 is a no-op.
+4. **Phase 2 — automatic tag + GitHub Release:**
+   - Review and merge the Release PR when you're happy with the
+     generated changelog and version number. This is the checkpoint
+     where you verify them before they become permanent.
+   - When the Release PR (head branch `changeset-release/main`)
+     merges into `main`, the workflow re-runs automatically via
+     its `pull_request: closed` trigger. There are no pending
+     changesets at this point but the git tag is behind the
+     `package.json` version, so the action runs `pnpm release`
+     (`changeset tag`), creates a `v<version>` git tag, and
+     publishes a single GitHub Release whose body is the matching
+     section of `CHANGELOG.md`.
+   - The auto-trigger only fires for PRs whose head ref is
+     `changeset-release/main`. Merging any other PR into `main`
+     does **not** start a release run.
+   - You can re-trigger phase 2 manually via `workflow_dispatch` if
+     the auto-run failed transiently.
 
 ## Validating PRs
 

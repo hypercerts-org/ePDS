@@ -11,6 +11,7 @@ import { expect } from '@playwright/test'
 import type { EpdsWorld } from './world.js'
 import { testEnv } from './env.js'
 import { waitForEmail, extractOtp, clearMailpit } from './mailpit.js'
+import { fillOtp } from './otp.js'
 
 /**
  * Generate a valid handle local part for a new test account.
@@ -70,7 +71,8 @@ export async function pickHandle(world: EpdsWorld): Promise<void> {
  *   2. Fill #email with the provided email, submit
  *   3. Wait for #step-otp.active (30 s)
  *   4. Fetch OTP from Mailpit via waitForEmail + extractOtp
- *   5. Fill #code with OTP, click #form-verify-otp .btn-primary
+ *   5. Fill the segmented OTP boxes via fillOtp (page auto-submits on
+ *      the last digit; no explicit verify click needed)
  *   6. Wait for /auth/choose-handle, fill #handle-input with a generated
  *      local part, wait for the availability check to confirm "available",
  *      then click #submit-btn
@@ -116,8 +118,7 @@ export async function startSignUpAwaitingConsent(
 
   const message = await waitForEmail(`to:${email}`)
   const otp = await extractOtp(message.ID)
-  await page.fill('#code', otp)
-  await page.click('#form-verify-otp .btn-primary')
+  await fillOtp(page, otp)
 
   await pickHandle(world)
 
@@ -153,8 +154,7 @@ export async function createAccountViaOAuth(
 
   const message = await waitForEmail(`to:${email}`)
   const otp = await extractOtp(message.ID)
-  await page.fill('#code', otp)
-  await page.click('#form-verify-otp .btn-primary')
+  await fillOtp(page, otp)
 
   // Pick a handle on the /auth/choose-handle page. The handle-picking logic
   // is shared with the "When the user picks a handle" step definition.
