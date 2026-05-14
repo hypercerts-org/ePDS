@@ -98,10 +98,6 @@ function isSafeHttpUrl(value: string | undefined): boolean {
   }
 }
 
-function isEmailLikeLoginHint(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
-}
-
 export async function safeResolveClientMetadata(
   clientId: string | undefined,
 ): Promise<ClientMetadata> {
@@ -226,15 +222,13 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     )
     const internalSecret = process.env.EPDS_INTERNAL_SECRET ?? ''
 
-    let parLoginHint: string | null = null
     let effectiveLoginHint = loginHint ?? null
     if (!skipParHint && !effectiveLoginHint && requestUri) {
-      parLoginHint = await fetchParLoginHint(
+      effectiveLoginHint = await fetchParLoginHint(
         pdsInternalUrl,
         requestUri,
         internalSecret,
       )
-      effectiveLoginHint = parLoginHint
     }
     const resolvedEmail = effectiveLoginHint
       ? await resolveLoginHint(
@@ -300,25 +294,6 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
         },
         'HYPER-268 orphan device cookie detected, clearing on email-form response',
       )
-    }
-
-    // ClimateAI/GainForest compatibility: third-party ATProto-style clients
-    // may place a handle/DID login_hint only in the PAR body. In that case,
-    // keep the standard handle/password flow by sending the browser back to
-    // pds-core's upstream OAuth UI instead of converting the handle into an
-    // ePDS email OTP flow. PAR email hints still use the ePDS email path for
-    // pds-core's prompt=login guard-bounce flow.
-    if (parLoginHint && !loginHint && !isEmailLikeLoginHint(parLoginHint)) {
-      const target = buildPdsAuthorizeRedirect(
-        ctx.config.pdsPublicUrl,
-        req.query as Record<string, unknown>,
-      )
-      logger.info(
-        { loginHint: parLoginHint, redirectTo: target },
-        'PAR login_hint detected — redirecting to PDS built-in OAuth page',
-      )
-      res.redirect(302, target)
-      return
     }
 
     // Look up any existing flow for this request_uri early so we can fall back

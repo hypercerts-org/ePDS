@@ -198,7 +198,7 @@ describe('GET /oauth/authorize prompt=login handling (issue #138)', () => {
     expect(html).toMatch(/class="step-otp active"/)
   })
 
-  it('redirects PAR handle login_hint to the PDS password flow', async () => {
+  it('resolves PAR handle login_hint through the OTP flow', async () => {
     mocks.fetchParLoginHint.mockResolvedValue('alice.test.local')
     mocks.resolveLoginHint.mockResolvedValue('alice@example.com')
 
@@ -208,14 +208,20 @@ describe('GET /oauth/authorize prompt=login handling (issue #138)', () => {
       '&client_id=' +
       encodeURIComponent('https://app.example.com')
     const res = await fetch(url, { redirect: 'manual' })
+    expect(res.status).toBe(200)
+    const html = await res.text()
 
-    expect(res.status).toBe(302)
-    const location = res.headers.get('location')
-    expect(location).toContain('https://test.local/oauth/authorize?')
-    expect(location).toContain(
-      'request_uri=urn%3Aietf%3Aparams%3Aoauth%3Arequest_uri%3Aparhandle',
+    expect(mocks.fetchParLoginHint).toHaveBeenCalled()
+    expect(mocks.resolveLoginHint).toHaveBeenCalledWith(
+      'alice.test.local',
+      expect.any(String),
+      expect.any(String),
     )
-    expect(location).toContain('client_id=https%3A%2F%2Fapp.example.com')
+    expect(res.headers.get('location')).toBeNull()
+    expect(html).toMatch(/class="step-otp active"/)
+    expect(html).toContain(
+      'id="otp-email" name="email" value="alice@example.com"',
+    )
   })
 
   it('still resolves login_hint when prompt=login is absent (regression guard)', async () => {
