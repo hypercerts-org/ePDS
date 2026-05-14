@@ -131,6 +131,18 @@ Then(
 )
 
 Then(
+  'the browser is on the auth-service authorize page',
+  function (this: EpdsWorld) {
+    const page = getPage(this)
+    const current = new URL(page.url())
+    const expected = new URL('/oauth/authorize', testEnv.authUrl)
+    expect(current.origin + current.pathname).toBe(
+      expected.origin + expected.pathname,
+    )
+  },
+)
+
+Then(
   'an OTP email is auto-sent to the test email',
   async function (this: EpdsWorld) {
     if (!testEnv.mailpitPass) return 'pending'

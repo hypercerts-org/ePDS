@@ -27,8 +27,13 @@ Feature: Login hint resolution
     And an OTP email is auto-sent to the test email
 
   Scenario: Login hint from PAR body is used when not on query string
+    # Regression coverage for the handle-login redirect loop: when a client
+    # sends a handle/DID login_hint in PAR only, ePDS must keep the user on
+    # the passwordless auth-service page instead of bouncing to pds-core's
+    # stock OAuth UI and back until the browser reports too many redirects.
     When the demo client submits the test handle as login_hint in the PAR body only
     Then the login page renders directly at the OTP verification step
+    And the browser is on the auth-service authorize page
     And an OTP email is auto-sent to the test email
 
   Scenario: Unknown login hint falls back to email form
