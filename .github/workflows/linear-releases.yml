@@ -1,0 +1,55 @@
+name: Linear releases
+
+on:
+  deployment_status:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.deployment.environment }}-${{ github.event.deployment.sha }}
+  cancel-in-progress: false
+
+jobs:
+  staging:
+    name: staging
+    if: >-
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment.creator.login == 'railway-app[bot]' &&
+      github.event.deployment.environment == 'ePDS / pr-base'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.deployment.sha }}
+          fetch-depth: 0
+
+      # This reports what reached staging to Linear. Release-note generation
+      # stays in the existing Changesets/GitHub Release flow.
+      - uses: linear/linear-release-action@0917777589db006387af296dde440385f88d6ac4 # v0.10.0
+        with:
+          access_key: ${{ secrets.LINEAR_STAGING_ACCESS_KEY }}
+          name: staging-${{ github.event.deployment.sha }}
+          version: staging-${{ github.event.deployment.sha }}
+
+  production:
+    name: production
+    if: >-
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment.creator.login == 'railway-app[bot]' &&
+      github.event.deployment.environment == 'ePDS / production'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.deployment.sha }}
+          fetch-depth: 0
+
+      # This reports what reached production to Linear. Release-note generation
+      # stays in the existing Changesets/GitHub Release flow.
+      - uses: linear/linear-release-action@0917777589db006387af296dde440385f88d6ac4 # v0.10.0
+        with:
+          access_key: ${{ secrets.LINEAR_PRODUCTION_ACCESS_KEY }}
+          name: production-${{ github.event.deployment.sha }}
+          version: production-${{ github.event.deployment.sha }}

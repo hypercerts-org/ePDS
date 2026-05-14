@@ -26,7 +26,7 @@ export function SignInButton({
         padding: '14px 28px',
         fontSize: '16px',
         fontWeight: 500,
-        color: '#ffffff',
+        color: 'var(--theme-primary-text, #ffffff)',
         background: submitting ? '#4a4a4a' : 'var(--theme-primary, #2563eb)',
         border: 'none',
         borderRadius: '8px',

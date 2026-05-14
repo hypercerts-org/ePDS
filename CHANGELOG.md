@@ -1,5 +1,20 @@
 # ePDS
 
+## 0.6.3
+
+### Who should read this release
+
+- **End users:**
+  - [The final sign-in screen now lines up its message card with the page title.](#v0.6.3-the-final-sign-in-screen-now-lines-up-its-message-card-with)
+
+### Patch Changes
+
+- <a id="v0.6.3-the-final-sign-in-screen-now-lines-up-its-message-card-with"></a> [#169](https://github.com/hypercerts-org/ePDS/pull/169) [`cc65707`](https://github.com/hypercerts-org/ePDS/commit/cc65707ef4e0cfc7d4442bbb57ccd2c8639ec589) Thanks [@Kzoeps](https://github.com/Kzoeps)! - The final sign-in screen now lines up its message card with the page title.
+
+  **Affects:** End users
+
+  **End users:** After approving an app sign-in, the "Login complete" screen now keeps the "You are being redirected..." card visually aligned with the title instead of sitting slightly lower on the page.
+
 ## 0.6.2
 
 ### Who should read this release

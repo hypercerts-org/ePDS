@@ -135,7 +135,7 @@ export default async function Welcome() {
               padding: '14px 28px',
               fontSize: '16px',
               fontWeight: 500,
-              color: '#ffffff',
+              color: t?.primaryText ?? '#ffffff',
               background: t?.primary ?? '#2563eb',
               border: 'none',
               borderRadius: '8px',
