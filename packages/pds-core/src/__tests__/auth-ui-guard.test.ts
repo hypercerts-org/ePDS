@@ -4,6 +4,7 @@ import {
   appendCookieClearHeaders,
   buildBounceUrl,
   createAuthUiGuard,
+  isAtprotoPasswordLoginHint,
   isGuardedPath,
   parseDeviceCookies,
   parsePromptTokens,
@@ -262,6 +263,19 @@ describe('promptHasLogin', () => {
   })
 })
 
+describe('isAtprotoPasswordLoginHint', () => {
+  it('accepts handles and DIDs', () => {
+    expect(isAtprotoPasswordLoginHint('alice.test.local')).toBe(true)
+    expect(isAtprotoPasswordLoginHint('did:plc:abc123')).toBe(true)
+  })
+
+  it('rejects email-like and empty hints', () => {
+    expect(isAtprotoPasswordLoginHint('alice@example.com')).toBe(false)
+    expect(isAtprotoPasswordLoginHint('')).toBe(false)
+    expect(isAtprotoPasswordLoginHint(undefined)).toBe(false)
+  })
+})
+
 describe('appendCookieClearHeaders', () => {
   it('clears dev-id and ses-id (plus :hash sidecars) host-only when no cookie domain given', () => {
     const res = makeResStub()
@@ -467,6 +481,56 @@ describe('createAuthUiGuard', () => {
     // ses-id:hash in both host-only and domain-scoped variants.
     expect(res.append).toHaveBeenCalledTimes(8)
     expect(provider.accountManager.listDeviceAccounts).not.toHaveBeenCalled()
+  })
+
+  it('passes through to the stock password page when PAR has a handle login_hint', async () => {
+    const provider = makeProvider({
+      readRequest: () =>
+        Promise.resolve({ parameters: { login_hint: 'alice.test.local' } }),
+    })
+    const mw = createAuthUiGuard({
+      authHostname: AUTH,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      provider: provider as any,
+      cookieDomain: 'pds.example',
+    })
+    const res = makeRes()
+    const next = vi.fn()
+    await mw(
+      makeReq({
+        url: `/oauth/authorize?request_uri=${encodeURIComponent('urn:ietf:params:oauth:request_uri:req-password')}`,
+      }),
+      res,
+      next,
+    )
+    expect(next).toHaveBeenCalledOnce()
+    expect(res.status).not.toHaveBeenCalled()
+    expect(provider.deviceManager.store.readDevice).not.toHaveBeenCalled()
+    expect(provider.accountManager.listDeviceAccounts).not.toHaveBeenCalled()
+  })
+
+  it('still bounces missing cookies when PAR has an email-like login_hint', async () => {
+    const provider = makeProvider({
+      readRequest: () =>
+        Promise.resolve({ parameters: { login_hint: 'alice@example.com' } }),
+    })
+    const mw = createAuthUiGuard({
+      authHostname: AUTH,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      provider: provider as any,
+      cookieDomain: null,
+    })
+    const res = makeRes()
+    const next = vi.fn()
+    await mw(
+      makeReq({
+        url: `/oauth/authorize?request_uri=${encodeURIComponent('urn:ietf:params:oauth:request_uri:req-email')}`,
+      }),
+      res,
+      next,
+    )
+    expect(next).not.toHaveBeenCalled()
+    expect(res.status).toHaveBeenCalledWith(303)
   })
 
   it('passes /account* through when the URL carries no request_uri (direct nav)', async () => {
@@ -773,8 +837,10 @@ describe('createAuthUiGuard', () => {
   // Sign-in-view leak coverage. Every test below shares the same wiring —
   // fresh cookies + non-empty bindings + a request_uri-bearing URL — and
   // varies only in the stored PAR `prompt` / `login_hint` values and which
-  // bindings have loginRequired=true. The signinViewCase helper captures
-  // that wiring; each test just supplies the inputs and assertion.
+  // bindings have loginRequired=true. Handle/DID hints are the fork-specific
+  // exception that should preserve the stock password page. The
+  // signinViewCase helper captures the wiring; each test just supplies the
+  // inputs and assertion.
   // ---------------------------------------------------------------------------
 
   // Helper: build a binding fixture good enough for the guard's matchesHint
@@ -884,14 +950,14 @@ describe('createAuthUiGuard', () => {
     binding('did:plc:fresh', 'fresh.example'),
   ]
 
-  it('bounces when login_hint narrows to a stale binding among otherwise-fresh bindings', async () => {
-    const { res } = await signinViewCase({
+  it('passes through when login_hint narrows to a stale handle binding', async () => {
+    const { res, next } = await signinViewCase({
       bindings: () => Promise.resolve(TWO_BINDINGS),
       readRequest: () =>
         Promise.resolve({ parameters: { login_hint: 'stale.example' } }),
       checkLoginRequired: onlyStaleIsLoginRequired,
     })
-    expectBounce(res)
+    expectPassThrough(res, next)
   })
 
   it('passes through when login_hint matches a fresh binding', async () => {
@@ -917,8 +983,8 @@ describe('createAuthUiGuard', () => {
   })
 
   it('falls back to all bindings when login_hint matches none of them', async () => {
-    // matchesHint → empty set → upstream treats all bindings as candidates;
-    // with at least one fresh, the guard passes through.
+    // Fork compatibility lets handle/DID hints reach upstream; with at
+    // least one fresh binding, that remains a pass-through.
     const { next } = await signinViewCase({
       bindings: () =>
         Promise.resolve([binding('did:plc:fresh', 'fresh.example')]),

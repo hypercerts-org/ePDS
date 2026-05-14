@@ -32,8 +32,8 @@ PAR + DPoP requests.
 Flow 2 covers three input variants — all use the same `NodeOAuthClient` code:
 
 - **No identifier** — pass the PDS URL; auth server shows its own email form
-- **Handle** — pass an AT Protocol handle (e.g. `alice.pds.example.com`); auth server resolves it and sends OTP directly
-- **DID** — pass a DID (e.g. `did:plc:abc123...`); auth server resolves it and sends OTP directly
+- **Handle** — pass an AT Protocol handle (e.g. `alice.pds.example.com`); this fork shows the stock PDS handle/password page
+- **DID** — pass a DID (e.g. `did:plc:abc123...`); same behaviour as handle
 
 > **Important:** `login_hint` must **never** go in the PAR body when the value
 > is an email address. The PDS core validates `login_hint` as an ATProto
@@ -126,7 +126,7 @@ const client = new NodeOAuthClient({
 // No identifier — auth server shows email form
 const authUrl = await client.authorize('https://pds.example.com')
 
-// With a handle — auth server resolves and sends OTP
+// With a handle — stock PDS handle/password page
 const authUrl = await client.authorize('alice.pds.example.com')
 
 // With a DID — same behaviour as handle

@@ -98,6 +98,10 @@ function isSafeHttpUrl(value: string | undefined): boolean {
   }
 }
 
+function isEmailLikeLoginHint(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+}
+
 export async function safeResolveClientMetadata(
   clientId: string | undefined,
 ): Promise<ClientMetadata> {
@@ -212,9 +216,10 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     // stored in the PAR by the RP at OAuth init must be ignored. The
     // rebind also strips URL login_hint, so on that path effectiveLoginHint
     // ends up null and the spec-correct decision below renders the email
-    // form. This skip flag does NOT affect prompt=login alone: pds-core's
-    // sign-in-view bounce also sets prompt=login (without the skip flag)
-    // and expects the hint to resolve normally so the OTP step renders.
+    // form. This skip flag does NOT affect prompt=login alone: email-like
+    // PAR hints still resolve normally so the OTP step renders, while
+    // handle/DID PAR hints are redirected back to pds-core's stock
+    // handle/password page for ClimateAI/GainForest compatibility.
     const skipParHint = req.query.epds_skip_par_hint === '1'
     const pdsInternalUrl = ensurePdsUrl(
       process.env.PDS_INTERNAL_URL,
@@ -222,14 +227,34 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     )
     const internalSecret = process.env.EPDS_INTERNAL_SECRET ?? ''
 
+    let parLoginHint: string | null = null
     let effectiveLoginHint = loginHint ?? null
     if (!skipParHint && !effectiveLoginHint && requestUri) {
-      effectiveLoginHint = await fetchParLoginHint(
+      parLoginHint = await fetchParLoginHint(
         pdsInternalUrl,
         requestUri,
         internalSecret,
       )
+      effectiveLoginHint = parLoginHint
     }
+
+    // ClimateAI/GainForest compatibility: when a client starts from an
+    // ATProto handle or DID in the PAR-body login_hint, keep the stock PDS
+    // handle/password login flow instead of converting that hint into an
+    // ePDS email-code login. Email hints still use the passwordless flow.
+    if (parLoginHint && !loginHint && !isEmailLikeLoginHint(parLoginHint)) {
+      const target = buildPdsAuthorizeRedirect(
+        ctx.config.pdsPublicUrl,
+        req.query as Record<string, unknown>,
+      )
+      logger.info(
+        { requestUri, clientId, loginHint: parLoginHint, target },
+        'PAR ATProto login_hint detected, redirecting to PDS password login',
+      )
+      res.redirect(302, target)
+      return
+    }
+
     const resolvedEmail = effectiveLoginHint
       ? await resolveLoginHint(
           effectiveLoginHint,

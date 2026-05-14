@@ -15,11 +15,12 @@
  *      pre-selects an individually stale binding among otherwise-fresh
  *      bindings on the same device.
  *
- * Both UIs are unreachable from ePDS by design — every entry point should
+ * Both UIs are unreachable from ePDS by default — every entry point should
  * either show the enriched chooser (when the device has fresh bound
- * accounts) or fall back to auth-service's email/OTP form. ePDS accounts
- * are passwordless, so the password form in particular is a contract
- * violation: the user gets a form they cannot submit.
+ * accounts) or fall back to auth-service's email/OTP form. This fork keeps
+ * one compatibility exception: authorization requests whose stored PAR has
+ * an ATProto handle/DID login_hint are allowed to reach the stock PDS
+ * handle/password page.
  *
  * Upstream's DeviceManager.hasSession/getCookies has a side effect — it
  * deletes the device row on a partial cookie pair — so we re-parse the
@@ -177,6 +178,18 @@ function hasOauthContext(origUrl: string): boolean {
   }
 }
 
+export function isAtprotoPasswordLoginHint(
+  loginHint: string | undefined,
+): boolean {
+  const hint = loginHint?.trim()
+  if (!hint) return false
+  if (hint.includes('@')) return false
+  if (hint.startsWith('did:')) return true
+  return /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$/.test(
+    hint,
+  )
+}
+
 /** Emit Set-Cookie headers that clear dev-id and ses-id (plus their
  *  `:hash` sidecars) in both their host-only and domain-scoped variants.
  *  Browsers treat each scope as a distinct cookie, so clearing only one
@@ -246,6 +259,23 @@ export function createAuthUiGuard(opts: {
       res.setHeader('Cache-Control', 'no-store')
       res.end()
     }
+
+    // ClimateAI/GainForest compatibility: if the OAuth client supplied a
+    // handle/DID login_hint in the PAR body, deliberately preserve the stock
+    // PDS password login page instead of bouncing the request back to the
+    // ePDS email-code form.
+    const params = inOauthFlow
+      ? await loadStoredPar({
+          provider,
+          requestUrl: req.url,
+          logger,
+        })
+      : null
+    if (isAtprotoPasswordLoginHint(params?.login_hint)) {
+      next()
+      return
+    }
+
     const parsed = parseDeviceCookies(req.headers.cookie)
     if (!parsed) {
       bounceOrPass()
@@ -274,8 +304,9 @@ export function createAuthUiGuard(opts: {
     // At this point bindings exist, so upstream won't render the welcome
     // page. But it may still render its sign-in-view (handle + password
     // form) when every binding it would consider has loginRequired: true
-    // — see oauth-provider.ts:622-624. ePDS accounts are passwordless,
-    // so any path into that form is unusable. Three independent triggers
+    // — see oauth-provider.ts:622-624. Apart from the handle/DID
+    // compatibility path handled above, ePDS accounts are passwordless,
+    // so paths into that form are unusable. Three independent triggers
     // force upstream into that state:
     //
     //   - stored PAR `parameters.prompt === 'login'` (forces every
@@ -287,15 +318,10 @@ export function createAuthUiGuard(opts: {
     //     pre-selects the hinted account; clicking falls through to
     //     sign-in-view)
     //
-    // Read the stored PAR parameters and compute upstream's
+    // Use the stored PAR parameters to compute upstream's
     // candidate-binding set; bounce when every candidate would be
     // loginRequired. See features/session-reuse-bugs.feature for the
     // externally-reproducible scenarios under "Sign-in-view leaks".
-    const params = await loadStoredPar({
-      provider,
-      requestUrl: req.url,
-      logger,
-    })
     if (promptHasLogin(params?.prompt)) {
       bounceOrPass()
       return

@@ -10,13 +10,10 @@
  * With no hint resolving, `resolvedEmail` is null and the email step
  * falls out from the standard rendering decision.
  *
- * `prompt=login` ALONE (without the skip flag) must NOT suppress hint
- * resolution — pds-core's auth-ui-guard sign-in-view bounce appends
- * prompt=login while still expecting the hint to be honoured (the user
- * wants that account; upstream's password sign-in form is just
- * unreachable in a passwordless deployment). The third test below pins
- * this so a future "simplification" that conflates the two signals is
- * caught.
+ * `prompt=login` ALONE (without the skip flag) must NOT suppress email
+ * hint handling. Email-like PAR hints still render the code step, while
+ * handle/DID PAR hints are intentionally handed back to pds-core's stock
+ * handle/password page on this fork.
  *
  * Lives in its own file because the `vi.mock` calls below replace the
  * shared resolver modules wholesale, and we don't want that bleed into
@@ -175,13 +172,11 @@ describe('GET /oauth/authorize prompt=login handling (issue #138)', () => {
     expect(html).toMatch(/<input type="email" id="email"[^>]*value=""[^>]*>/)
   })
 
-  it('honours PAR login_hint when prompt=login arrives without the skip flag', async () => {
-    // pds-core's auth-ui-guard sign-in-view bounce appends prompt=login
-    // (no epds_skip_par_hint) and expects auth-service to resolve any
-    // PAR login_hint and serve the OTP step. A regression that
-    // conflated prompt=login with the rebind semantics would re-break
-    // the @session-reuse e2e scenario "login_hint narrows to a stale
-    // binding on a multi-account device".
+  it('honours PAR email login_hint when prompt=login arrives without the skip flag', async () => {
+    // pds-core's auth-ui-guard can append prompt=login without
+    // epds_skip_par_hint. That must not be treated like the "Another
+    // account" rebind opt-out: email-like PAR hints still serve the OTP
+    // step.
     mocks.fetchParLoginHint.mockResolvedValue('hinted@example.com')
     mocks.resolveLoginHint.mockResolvedValue('hinted@example.com')
 
@@ -198,7 +193,7 @@ describe('GET /oauth/authorize prompt=login handling (issue #138)', () => {
     expect(html).toMatch(/class="step-otp active"/)
   })
 
-  it('resolves PAR handle login_hint through the OTP flow', async () => {
+  it('redirects PAR handle login_hint to the PDS password flow', async () => {
     mocks.fetchParLoginHint.mockResolvedValue('alice.test.local')
     mocks.resolveLoginHint.mockResolvedValue('alice@example.com')
 
@@ -208,20 +203,16 @@ describe('GET /oauth/authorize prompt=login handling (issue #138)', () => {
       '&client_id=' +
       encodeURIComponent('https://app.example.com')
     const res = await fetch(url, { redirect: 'manual' })
-    expect(res.status).toBe(200)
-    const html = await res.text()
 
+    expect(res.status).toBe(302)
     expect(mocks.fetchParLoginHint).toHaveBeenCalled()
-    expect(mocks.resolveLoginHint).toHaveBeenCalledWith(
-      'alice.test.local',
-      expect.any(String),
-      expect.any(String),
+    expect(mocks.resolveLoginHint).not.toHaveBeenCalled()
+    const location = res.headers.get('location')
+    expect(location).toContain('https://test.local/oauth/authorize?')
+    expect(location).toContain(
+      'request_uri=urn%3Aietf%3Aparams%3Aoauth%3Arequest_uri%3Aparhandle',
     )
-    expect(res.headers.get('location')).toBeNull()
-    expect(html).toMatch(/class="step-otp active"/)
-    expect(html).toContain(
-      'id="otp-email" name="email" value="alice@example.com"',
-    )
+    expect(location).toContain('client_id=https%3A%2F%2Fapp.example.com')
   })
 
   it('still resolves login_hint when prompt=login is absent (regression guard)', async () => {

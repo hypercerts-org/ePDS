@@ -1,7 +1,8 @@
 Feature: Login hint resolution
-  ePDS resolves OAuth login_hint parameters so the auth service can skip
-  the email form and go straight to OTP verification. Hints can be emails,
-  AT Protocol handles, or DIDs.
+  ePDS resolves email OAuth login_hint parameters so the auth service can
+  skip the email form and go straight to code verification. AT Protocol
+  handle or DID hints in the PAR body are handed to the stock PDS
+  handle/password login page for this fork.
 
   The parsing and internal API call logic is unit-tested in
   resolve-login-hint.test.ts. These E2E scenarios test the observable
@@ -16,25 +17,13 @@ Feature: Login hint resolution
     Then the login page renders directly at the OTP verification step
     And an OTP email is auto-sent to the test email
 
-  Scenario: Handle login hint is resolved and skips the email form
-    When the demo client initiates OAuth with the test handle as login_hint
-    Then the login page renders directly at the OTP verification step
-    And an OTP email is auto-sent to the test email
-
-  Scenario: DID login hint is resolved and skips the email form
-    When the demo client initiates OAuth with the test DID as login_hint
-    Then the login page renders directly at the OTP verification step
-    And an OTP email is auto-sent to the test email
-
-  Scenario: Login hint from PAR body is used when not on query string
-    # Regression coverage for the handle-login redirect loop: when a client
-    # sends a handle/DID login_hint in PAR only, ePDS must keep the user on
-    # the passwordless auth-service page instead of bouncing to pds-core's
-    # stock OAuth UI and back until the browser reports too many redirects.
+  Scenario: Handle login hint in the PAR body opens the PDS password page
     When the demo client submits the test handle as login_hint in the PAR body only
-    Then the login page renders directly at the OTP verification step
-    And the browser is on the auth-service authorize page
-    And an OTP email is auto-sent to the test email
+    Then the browser is on the PDS authorize page
+
+  Scenario: DID login hint in the PAR body opens the PDS password page
+    When the demo client submits the test DID as login_hint in the PAR body only
+    Then the browser is on the PDS authorize page
 
   Scenario: Unknown login hint falls back to email form
     When the demo client initiates OAuth with an unknown handle as login_hint

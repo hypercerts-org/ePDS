@@ -108,6 +108,23 @@ When(
 )
 
 When(
+  'the demo client submits the test DID as login_hint in the PAR body only',
+  async function (this: EpdsWorld) {
+    if (!testEnv.mailpitPass) return 'pending'
+    if (!this.userDid || !this.testEmail) {
+      throw new Error(
+        'No userDid/testEmail — "a returning user has a PDS account" step must run first',
+      )
+    }
+    await clearMailpit(this.testEmail)
+    await initiateOAuthWithLoginHint(this, {
+      hint: this.userDid,
+      location: 'body',
+    })
+  },
+)
+
+When(
   'the demo client initiates OAuth with an unknown handle as login_hint',
   async function (this: EpdsWorld) {
     if (!testEnv.mailpitPass) return 'pending'
@@ -141,6 +158,15 @@ Then(
     )
   },
 )
+
+Then('the browser is on the PDS authorize page', function (this: EpdsWorld) {
+  const page = getPage(this)
+  const current = new URL(page.url())
+  const expected = new URL('/oauth/authorize', testEnv.pdsUrl)
+  expect(current.origin + current.pathname).toBe(
+    expected.origin + expected.pathname,
+  )
+})
 
 Then(
   'an OTP email is auto-sent to the test email',

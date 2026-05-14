@@ -2,10 +2,12 @@
 
 ## Overview
 
-ePDS lets users log in with their email address. There are no passwords — the
-user receives a one-time code by email and enters it to authenticate. Your app
-sends the user to ePDS, the user authenticates there, and ePDS sends them back
-to your app with a token you can use to make API calls on their behalf.
+ePDS lets users log in with their email address. For email-first sign-in,
+the user receives a one-time code by email and enters it to authenticate. This
+fork also preserves the stock PDS handle/password page when an app starts an
+OAuth flow from an AT Protocol handle or DID. Your app sends the user to ePDS,
+the user authenticates there, and ePDS sends them back to your app with a token
+you can use to make API calls on their behalf.
 
 ## Login Flows
 
@@ -13,7 +15,7 @@ There are two integration flows:
 
 | Flow | App provides            | User experience              | Implementation                             |
 | ---- | ----------------------- | ---------------------------- | ------------------------------------------ |
-| 1    | Email address           | OTP screen immediately       | Hand-rolled PAR/DPoP                       |
+| 1    | Email address           | Code screen immediately      | Hand-rolled PAR/DPoP                       |
 | 2    | Nothing, handle, or DID | Depends on input (see below) | `@atproto/oauth-client-node` (recommended) |
 
 **Flow 2** uses `@atproto/oauth-client-node`, which handles PAR, PKCE,
@@ -21,19 +23,16 @@ DPoP, nonce retry, and token exchange automatically. **Flow 1** requires
 hand-rolled code because the library's `authorize()` method does not
 support passing a raw email as `login_hint`.
 
-Both flows end the same way: the user enters their code, ePDS redirects
-back to your app, and your app exchanges that redirect for a token.
+Both flows end with ePDS redirecting back to your app, and your app exchanges that redirect for a token.
 
 ## Flow 1 — App has its own email form
 
-1. User enters email in your app and clicks "Sign in" — or your app
-   already knows the user's handle or DID from a previous session (see
-   [Identifying the user](#identifying-the-user))
+1. User enters email in your app and clicks "Sign in"
 2. Your login handler registers the login attempt with ePDS (passing the
-   identifier as `login_hint`)
+   email as `login_hint`)
 3. Your app redirects the user's browser to the ePDS auth page (with the
    same `login_hint`)
-4. ePDS immediately sends the OTP and shows the code-entry screen
+4. ePDS immediately sends the code and shows the code-entry screen
 5. User reads the code from their email and submits it
 6. ePDS verifies the code
 7. **New users only**: ePDS shows a handle picker — user chooses their handle
@@ -48,17 +47,16 @@ Flow 2 covers three input variants — all use the same code path:
 1. User clicks "Sign in" in your app (or your app already knows their handle/DID)
 2. Your login handler calls `client.authorize(input)` where `input` is:
    - The PDS URL (no identifier — auth server shows its own email form)
-   - A handle like `alice.pds.example.com` (auth server resolves it, sends OTP directly)
+   - A handle like `alice.pds.example.com` (the stock PDS handle/password page is shown)
    - A DID like `did:plc:abc123...` (same as handle)
 3. Library sends PAR request, stores state, returns auth URL
 4. Your app redirects the user's browser to the auth URL
-5. ePDS collects email if needed, sends the OTP, shows the code-entry screen
-6. User reads the code from their email and submits it
-7. ePDS verifies the code
-8. **New users only**: ePDS shows a handle picker — user chooses their handle
-9. ePDS redirects back to your app's callback URL
-10. Your callback calls `client.callback(params)` — library handles token exchange
-11. User is logged in
+5. ePDS collects email and sends a code when no identifier was supplied, or lets the stock PDS page handle a handle/DID hint
+6. User completes the relevant authentication step
+7. **New email-code users only**: ePDS shows a handle picker — user chooses their handle
+8. ePDS redirects back to your app's callback URL
+9. Your callback calls `client.callback(params)` — library handles token exchange
+10. User is logged in
 
 ## Sequence Diagrams
 
@@ -640,23 +638,17 @@ function derToRaw(der: Buffer): Buffer {
 In Flow 1 your app passes an identifier for the user to ePDS in the
 OAuth `login_hint` parameter. ePDS accepts three forms:
 
-| Form   | Example                 | When to use                                                                                       |
-| ------ | ----------------------- | ------------------------------------------------------------------------------------------------- |
-| Email  | `alice@example.com`     | Your app collects email addresses (e.g. via a sign-in form).                                      |
-| Handle | `alice.pds.example.com` | Your app already knows the user's AT Protocol handle (e.g. from a previous session, or a follow). |
-| DID    | `did:plc:abc123…`       | Your app stores users by DID and never sees their handle.                                         |
+| Form   | Example                 | When to use                                                                                 |
+| ------ | ----------------------- | ------------------------------------------------------------------------------------------- |
+| Email  | `alice@example.com`     | Your app collects email addresses (e.g. via a sign-in form).                                |
+| Handle | `alice.pds.example.com` | Your app already knows the user's AT Protocol handle and wants the stock PDS password page. |
+| DID    | `did:plc:abc123…`       | Your app stores users by DID and wants the stock PDS password page.                         |
 
-All three behave the same way from the client's perspective: ePDS sends
-the OTP to the account's email address and shows the code-entry screen
-directly. Handles and DIDs are resolved internally by the auth service.
+Email hints use ePDS's email-code flow: ePDS sends the code to the account's email address and shows the code-entry screen directly. Handle and DID hints stored in the PAR body are handed back to pds-core so the stock PDS handle/password page is shown.
 
-If the identifier doesn't match any existing account, ePDS falls back to
-its own email input form (the same form used in Flow 2), so passing a
-stale or unknown handle is safe.
+If an email identifier doesn't match any existing account, ePDS falls back to its own email input form (the same form used in Flow 2), so passing a stale or unknown email is safe.
 
-In Flow 2 you either omit `login_hint` entirely (pass the PDS URL to
-`client.authorize()`), or pass a handle or DID which the library resolves
-automatically.
+In Flow 2 you either pass the PDS URL to `client.authorize()` (no identifier), or pass a handle or DID. The library resolves handle/DID input and stores the resulting hint in the PAR body, which triggers this fork's stock PDS password-page path.
 
 ### Setting up `NodeOAuthClient`
 
@@ -724,7 +716,7 @@ app.get('/jwks.json', (req, res) => res.json(client.jwks))
 // No identifier — auth server shows email form
 const authUrl = await client.authorize('https://pds.example.com')
 
-// With a handle — auth server resolves and sends OTP
+// With a handle — stock PDS handle/password page
 const authUrl = await client.authorize('alice.pds.example.com')
 
 // With a DID — same behaviour as handle
@@ -776,10 +768,14 @@ const parBody = new URLSearchParams({
   state,
   code_challenge: codeChallenge,
   code_challenge_method: 'S256',
-  // Flow 1 only — omit for Flow 2.
-  // May be an email, an AT Protocol handle, or a DID — see above.
-  login_hint: identifier,
 })
+
+// Optional: for the stock PDS password flow, put an AT Protocol
+// handle or DID in the PAR body. Do not put email login_hint values
+// here; email hints belong on the auth redirect URL below.
+if (handleOrDid) {
+  parBody.set('login_hint', handleOrDid)
+}
 
 // First attempt (will get a 400 with dpop-nonce)
 let parRes = await fetch(parEndpoint, {
@@ -821,14 +817,13 @@ const { request_uri } = await parRes.json()
 > **Flow 2:** Skip this section — `NodeOAuthClient.authorize()` returns
 > the redirect URL directly.
 
-After registering the login attempt, redirect the user's browser to the ePDS
-auth page. Include the `login_hint` so ePDS skips its own email form and
-goes straight to OTP entry. The identifier may be an email, an AT Protocol
-handle, or a DID — see [Identifying the user](#identifying-the-user):
+After registering the login attempt, redirect the user's browser to the ePDS auth page. For email-code sign-in, include the email `login_hint` on this redirect URL so ePDS skips its own email form and goes straight to code entry:
 
 ```typescript
-const authUrl = `${authEndpoint}?client_id=${encodeURIComponent(clientId)}&request_uri=${encodeURIComponent(request_uri)}&login_hint=${encodeURIComponent(identifier)}`
+const authUrl = `${authEndpoint}?client_id=${encodeURIComponent(clientId)}&request_uri=${encodeURIComponent(request_uri)}&login_hint=${encodeURIComponent(email)}`
 ```
+
+For handle/DID sign-in, put the handle or DID in the PAR body instead and omit `login_hint` from this redirect URL; this fork redirects those hints to the stock PDS handle/password page.
 
 Store the DPoP private key, `codeVerifier`, and `state` in a signed HttpOnly
 session cookie so the callback handler can retrieve them:

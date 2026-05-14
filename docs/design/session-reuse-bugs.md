@@ -198,8 +198,7 @@ runs:
 Using upstream's own exported APIs and schemas (rather than forking
 `@atproto/oauth-provider` or monkey-patching internals) means this
 tracks upstream's definition of "device" across future versions. The
-stock welcome page is never rendered, so no response-body rewrite or
-HTML inspection is needed.
+stock welcome page is never rendered, so no response-body rewrite or HTML inspection is needed. This fork keeps one explicit exception for the stock sign-in-view: when the stored PAR carries an AT Protocol handle or DID `login_hint`, pds-core is allowed to render its handle/password page instead of bouncing back to the email-code flow.
 
 This catches **all** known causes because the checks are on observable
 invariants at decision time (cookie pair present and valid, ses-id

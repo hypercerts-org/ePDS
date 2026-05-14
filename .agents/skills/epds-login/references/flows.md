@@ -19,12 +19,10 @@ nonce retry, token exchange, and session management automatically. It
 covers three input variants — all use the same code path:
 
 - **No identifier** — pass the PDS URL; auth server shows its own email form
-- **Handle** — pass `alice.pds.example.com`; auth server resolves it, sends OTP directly
+- **Handle** — pass `alice.pds.example.com`; this fork shows the stock PDS handle/password page
 - **DID** — pass `did:plc:abc123...`; same as handle
 
-Both flows end the same way: the user enters an OTP, ePDS redirects
-back to your app, and your callback receives an authorization code to
-exchange for tokens.
+Both flows end with ePDS redirecting back to your app, and your callback receives an authorization code to exchange for tokens.
 
 ---
 
@@ -41,7 +39,7 @@ construction (client metadata, keyset, stores).
 // No identifier — auth server shows email form
 const authUrl = await client.authorize('https://pds.example.com')
 
-// With a handle — auth server resolves and sends OTP
+// With a handle — stock PDS handle/password page
 const authUrl = await client.authorize('alice.pds.example.com')
 
 // With a DID — same behaviour as handle
@@ -97,9 +95,7 @@ const session = await client.restore(userDid)
 9. Your callback calls `client.callback(params)` — library handles token exchange
 10. User is logged in
 
-When passing a handle or DID instead of the PDS URL, the flow is
-identical except the user skips the email form (the auth server resolves
-the handle/DID to an email and sends the OTP directly).
+When passing a handle or DID instead of the PDS URL, the flow is identical except the user skips the ePDS email form and lands on the stock PDS handle/password page.
 
 ---
 
@@ -348,4 +344,4 @@ Same as the diagram above except:
 
 - `authorize('alice.pds.example.com')` or `authorize('did:plc:abc123...')`
 - Library resolves the identity to the user's PDS
-- Auth server skips the email form and sends OTP directly
+- This fork skips the ePDS email form and shows the stock PDS handle/password page
