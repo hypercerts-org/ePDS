@@ -21,7 +21,7 @@ interface LoginHintOptions {
 }
 
 /**
- * Drive the demo client to initiate OAuth with a raw login_hint, bypassing
+ * Drive a demo client to initiate OAuth with a raw login_hint, bypassing
  * the ?email / ?handle query params so we can exercise email, handle, DID,
  * and "body-only" hint placement uniformly.
  *
@@ -30,22 +30,43 @@ interface LoginHintOptions {
  *
  * Resets the browser context first — all Background accounts were created
  * through a prior OAuth flow and the session cookie would short-circuit
- * login_hint behavior on the next visit.
+ * handle/DID PAR-body hints into the consent path instead of the stock
+ * PDS password form we need to assert here.
  */
 async function initiateOAuthWithLoginHint(
   world: EpdsWorld,
   opts: LoginHintOptions,
+  demoUrl: string = testEnv.demoUrl,
 ): Promise<void> {
   if (!testEnv.mailpitPass) {
     throw new Error('initiateOAuthWithLoginHint requires mailpit')
   }
   await resetBrowserContext(world, sharedBrowser)
+  world.lastLoginHint = opts.hint
   const page = getPage(world)
   const location = opts.location ?? 'query'
-  const url = new URL('/api/oauth/login', testEnv.demoUrl)
+  const url = new URL('/api/oauth/login', demoUrl)
   url.searchParams.set('login_hint', opts.hint)
   url.searchParams.set('login_hint_location', location)
   await page.goto(url.toString())
+}
+
+async function assertStockPdsPasswordForm(world: EpdsWorld): Promise<void> {
+  const expectedHint = world.lastLoginHint
+  if (!expectedHint) {
+    throw new Error('No lastLoginHint — login_hint step must run first')
+  }
+
+  const page = getPage(world)
+  const username = page.locator('input[name="username"]')
+  const password = page.locator('input[name="password"][type="password"]')
+
+  await expect(username).toBeVisible({ timeout: 30_000 })
+  await expect(username).toBeDisabled()
+  await expect(username).toHaveValue(expectedHint)
+  await expect(password).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Sign in$/ })).toBeVisible()
+  await expect(page.locator('#step-otp.active')).toHaveCount(0)
 }
 
 When(
@@ -125,6 +146,50 @@ When(
 )
 
 When(
+  'the untrusted demo client submits the test handle as login_hint in the PAR body only',
+  async function (this: EpdsWorld) {
+    if (!testEnv.mailpitPass) return 'pending'
+    if (!testEnv.demoUntrustedUrl) return 'pending'
+    if (!this.userHandle || !this.testEmail) {
+      throw new Error(
+        'No userHandle/testEmail — "a returning user has a PDS account" step must run first',
+      )
+    }
+    await clearMailpit(this.testEmail)
+    await initiateOAuthWithLoginHint(
+      this,
+      {
+        hint: this.userHandle,
+        location: 'body',
+      },
+      testEnv.demoUntrustedUrl,
+    )
+  },
+)
+
+When(
+  'the untrusted demo client submits the test DID as login_hint in the PAR body only',
+  async function (this: EpdsWorld) {
+    if (!testEnv.mailpitPass) return 'pending'
+    if (!testEnv.demoUntrustedUrl) return 'pending'
+    if (!this.userDid || !this.testEmail) {
+      throw new Error(
+        'No userDid/testEmail — "a returning user has a PDS account" step must run first',
+      )
+    }
+    await clearMailpit(this.testEmail)
+    await initiateOAuthWithLoginHint(
+      this,
+      {
+        hint: this.userDid,
+        location: 'body',
+      },
+      testEnv.demoUntrustedUrl,
+    )
+  },
+)
+
+When(
   'the demo client initiates OAuth with an unknown handle as login_hint',
   async function (this: EpdsWorld) {
     if (!testEnv.mailpitPass) return 'pending'
@@ -167,6 +232,13 @@ Then('the browser is on the PDS authorize page', function (this: EpdsWorld) {
     expected.origin + expected.pathname,
   )
 })
+
+Then(
+  'the stock PDS password form is displayed for the hinted identifier',
+  async function (this: EpdsWorld) {
+    await assertStockPdsPasswordForm(this)
+  },
+)
 
 Then(
   'an OTP email is auto-sent to the test email',

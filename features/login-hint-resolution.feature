@@ -20,10 +20,24 @@ Feature: Login hint resolution
   Scenario: Handle login hint in the PAR body opens the PDS password page
     When the demo client submits the test handle as login_hint in the PAR body only
     Then the browser is on the PDS authorize page
+    And the stock PDS password form is displayed for the hinted identifier
 
   Scenario: DID login hint in the PAR body opens the PDS password page
     When the demo client submits the test DID as login_hint in the PAR body only
     Then the browser is on the PDS authorize page
+    And the stock PDS password form is displayed for the hinted identifier
+
+  @untrusted-client
+  Scenario: Untrusted client PAR handle login hint opens the PDS password form
+    When the untrusted demo client submits the test handle as login_hint in the PAR body only
+    Then the browser is on the PDS authorize page
+    And the stock PDS password form is displayed for the hinted identifier
+
+  @untrusted-client
+  Scenario: Untrusted client PAR DID login hint opens the PDS password form
+    When the untrusted demo client submits the test DID as login_hint in the PAR body only
+    Then the browser is on the PDS authorize page
+    And the stock PDS password form is displayed for the hinted identifier
 
   Scenario: Unknown login hint falls back to email form
     When the demo client initiates OAuth with an unknown handle as login_hint

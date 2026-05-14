@@ -68,6 +68,9 @@ export class EpdsWorld extends World {
   /** Most recent PAR request_uri — set by PAR submission steps. */
   lastRequestUri?: string
 
+  /** Raw login_hint most recently sent through the demo login route. */
+  lastLoginHint?: string
+
   /** Computed background colors captured by client-branding scenarios, keyed by label. */
   capturedBgColors?: Record<string, string>
 
