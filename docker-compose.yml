@@ -61,6 +61,10 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     env_file: .env
+    environment:
+      - GOMEMLIMIT=384MiB
+    mem_limit: 512m
+    memswap_limit: 512m
     restart: unless-stopped
     networks:
       # Surface public service hostnames inside the compose network so

@@ -43,7 +43,9 @@ docker compose up -d
 docker compose logs -f
 ```
 
-Caddy handles TLS automatically via ACME/Let's Encrypt.
+Caddy handles TLS automatically via ACME/Let's Encrypt. The Docker Compose
+service caps Caddy at 512 MiB of memory and sets `GOMEMLIMIT=384MiB` so TLS
+storage maintenance or traffic spikes cannot exhaust the full VM.
 
 ### Updating
 
