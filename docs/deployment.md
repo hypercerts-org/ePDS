@@ -33,10 +33,11 @@ deployment contexts and a full variable reference.
 ### Build and Start
 
 ```bash
-# Build images (stamps the ePDS version automatically)
+# Build images with the current git SHA stamped into the ePDS version.
 pnpm docker:build
 
-# Start services
+# Start services. This can also build missing images directly; when no stamped
+# .epds-version file exists, Docker falls back to the package.json version.
 docker compose up -d
 
 # View logs
@@ -48,6 +49,7 @@ Caddy handles TLS automatically via ACME/Let's Encrypt.
 ### Updating
 
 ```bash
+# Preferred when rebuilding after a code update because it stamps the git SHA.
 pnpm docker:build
 docker compose up -d
 ```

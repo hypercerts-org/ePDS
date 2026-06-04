@@ -194,7 +194,10 @@ a feature), add tests for other code to compensate.
 ## Docker
 
 ```bash
-# Build images — use pnpm docker:build to auto-stamp the version.
+# Build images — use pnpm docker:build to auto-stamp the git SHA.
+# Direct docker compose builds fall back to the package.json version if no
+# .epds-version file exists, but pnpm docker:build keeps local image versions
+# traceable to a commit.
 # IMPORTANT: Only rebuild the services that changed. Check the diff to
 # determine which packages are affected, then pass service names:
 sudo -g docker bash -c "cd /data/projects/ePDS && pnpm docker:build auth"
@@ -439,8 +442,9 @@ GitHub Release per release.
 
 - `docker compose restart` does **not** pick up `.env` changes — use
   `docker compose up -d`.
-- Use `pnpm docker:build` instead of bare `docker compose build` — it
-  stamps the ePDS version before building.
+- Prefer `pnpm docker:build` over bare `docker compose build` when rebuilding
+  code changes — it stamps the ePDS version with the current git SHA. Direct
+  Compose builds fall back to the package version if `.epds-version` is absent.
 - better-auth does **not** auto-migrate — `runBetterAuthMigrations()` must be
   called explicitly on startup.
 - New PDS accounts need a real password passed to `createAccount()` (use
