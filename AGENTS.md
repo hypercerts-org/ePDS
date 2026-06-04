@@ -26,6 +26,12 @@ pnpm format                # format all files with Prettier
 pnpm format:check          # check formatting (CI)
 pnpm lint                  # lint all files with ESLint
 pnpm lint:fix              # lint and auto-fix where possible
+
+# Cold standby helpers (Railway read-only volume copy + local validation)
+ALLOW_RAILWAY_DOWNLOAD=1 node scripts/standby-clone.mjs --output-dir /tmp/epds-standby
+node scripts/standby-local-services.mjs start /tmp/epds-standby/current
+node scripts/standby-validate-xrpc.mjs --release-dir /tmp/epds-standby/current --target-url http://localhost:3100
+node scripts/standby-local-services.mjs stop /tmp/epds-standby/current
 ```
 
 ## Before Pushing
