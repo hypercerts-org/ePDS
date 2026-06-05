@@ -1,0 +1,35 @@
+app = "epds-tls-proxy-prod"
+primary_region = "ams"
+
+[build]
+
+[env]
+  ACME_EMAIL = "admin@certified.one"
+  PROXY_HOSTNAME = "certified.one"
+
+  # PDS backend (apex + handle subdomains)
+  BACKEND_URL = "https://certified-apppds-core-production.up.railway.app"
+  BACKEND_SNI = "certified-apppds-core-production.up.railway.app"
+
+  # Auth service backend (auth.$PROXY_HOSTNAME)
+  AUTH_BACKEND_URL = "https://certified-appauth-service-production.up.railway.app"
+  AUTH_BACKEND_SNI = "certified-appauth-service-production.up.railway.app"
+
+[[mounts]]
+  source = "caddy_data"
+  destination = "/data"
+
+[[services]]
+  internal_port = 443
+  protocol = "tcp"
+
+  # handlers = [] => Fly does NOT terminate TLS; raw TCP reaches Caddy, which
+  # terminates with our own cert. This is the whole point.
+  [[services.ports]]
+    port = 443
+    handlers = []
+
+[[services.tcp_checks]]
+  port = 443
+  interval = "15s"
+  timeout = "2s"

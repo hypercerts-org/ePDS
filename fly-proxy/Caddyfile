@@ -1,0 +1,89 @@
+# Standalone failover TLS-terminating front proxy (HYPER-477).
+#
+# Runs on Fly.io, OFF Railway's HTTP edge, so WE hold the public certs and run
+# renewal ourselves. This is distinct from the in-stack ../Caddyfile, which is
+# the PDS deployment's own ingress and runs BEHIND this proxy. The public
+# surface is identical, just terminated by certs we control.
+#
+# Why this exists: the 2026-06-02 Railway outage served the wrong cert for our
+# custom domain. Terminating TLS here removes that client-facing failure class
+# and makes failover a scriptable backend flip with no DNS change.
+#
+# Hostnames:
+#   * apex            $PROXY_HOSTNAME           (e.g. certified.one)   -> PDS backend
+#   * auth subdomain  auth.$PROXY_HOSTNAME                             -> auth backend
+#   * handle subdomains  <random>.$PROXY_HOSTNAME (1000s-100000s)      -> PDS backend
+#
+# Cert strategy: a single DNS-01 WILDCARD for *.$PROXY_HOSTNAME, plus a cert for
+# the apex. Handles number in the thousands+, so a cert-per-handle is infeasible
+# (Let's Encrypt allows only ~50 certs/week per domain) — one wildcard covers
+# them all. Wildcards can ONLY be issued via DNS-01, which is why Caddy needs a
+# Cloudflare API token: it writes a short-lived _acme-challenge TXT record to
+# prove domain control, then deletes it. This never touches the A/AAAA routing
+# records. Handles are single-level (<random>.$PROXY_HOSTNAME, confirmed in
+# pds-core), so a single-level wildcard suffices. The wildcard also covers the
+# auth subdomain.
+{
+	email {$ACME_EMAIL:admin@certified.one}
+
+	# DNS-01 issuer for all sites below. The Cloudflare token only writes the
+	# throwaway ACME TXT challenge records; it does not alter routing DNS.
+	acme_dns cloudflare {env.CF_API_TOKEN}
+}
+
+# Reusable backend transport: address Railway by its *.up.railway.app name so
+# its edge serves the HEALTHY platform wildcard, not the broken custom-domain
+# cert. The SNI pin is load-bearing — see README.
+(pds_backend) {
+	reverse_proxy {$BACKEND_URL} {
+		# Firehose is a long-lived WebSocket stream: don't buffer it.
+		flush_interval -1
+		header_up Connection {http.request.header.Connection}
+		header_up Upgrade {http.request.header.Upgrade}
+		health_uri /xrpc/_health
+		health_interval 10s
+		transport http {
+			tls
+			tls_server_name {$BACKEND_SNI}
+		}
+	}
+}
+
+(hsts) {
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+	}
+}
+
+# --- auth.$PROXY_HOSTNAME -> auth service backend --------------------------
+# Covered by the *.$PROXY_HOSTNAME wildcard cert. Listed as its own site so it
+# routes to the auth backend rather than the PDS, and keeps the stricter
+# auth-specific security headers from the in-stack Caddy.
+auth.{$PROXY_HOSTNAME} {
+	reverse_proxy {$AUTH_BACKEND_URL} {
+		transport http {
+			tls
+			tls_server_name {$AUTH_BACKEND_SNI}
+		}
+	}
+	header {
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+	}
+}
+
+# --- apex -> PDS backend ---------------------------------------------------
+{$PROXY_HOSTNAME} {
+	import pds_backend
+	import hsts
+}
+
+# --- handle subdomains -> PDS backend (wildcard cert) ----------------------
+# auth.* is matched by its own site above, so it never falls through here.
+*.{$PROXY_HOSTNAME} {
+	import pds_backend
+	import hsts
+}
