@@ -46,7 +46,9 @@ pds-core callback, full OAuth flow).
 - `checkHandleRoute()` — could be tested if `PDS` context were mockable,
   but the `pds.ctx.accountManager.getAccount()` and
   `pds.ctx.cfg.identity.serviceHandleDomains` lookups make this hard
-  without a real PDS instance.
+  without a real PDS instance. The extracted `/tls-check` observability
+  helpers are covered by `tls-check-observability.test.ts`; the route wiring
+  remains integration-level.
 - `renderError()` — trivial HTML template, easy to extract and test.
 
 **Recommended strategy:**

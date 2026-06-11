@@ -66,6 +66,7 @@ import { createAuthUiGuard, parsePromptTokens } from './auth-ui-guard.js'
 import { loadDeviceAccountEmails } from './lib/device-accounts.js'
 import { handleCallbackError } from './lib/epds-callback-error.js'
 import { installTestHooks } from './lib/test-hooks.js'
+import { TlsCheckObserver } from './lib/tls-check-observability.js'
 
 const logger = createLogger('pds-core')
 
@@ -1133,8 +1134,17 @@ async function main() {
   // TLS check - used by Caddy on-demand TLS to verify handle ownership
   // =========================================================================
 
+  const tlsCheckObserver = new TlsCheckObserver({
+    logger,
+    classifier: {
+      pdsHostname: pds.ctx.cfg.service.hostname,
+      authHostname,
+      serviceHandleDomains: pds.ctx.cfg.identity.serviceHandleDomains,
+    },
+  })
+
   pds.app.get('/tls-check', async (req, res) => {
-    await checkHandleRoute(pds, authHostname, req, res)
+    await checkHandleRoute(pds, authHostname, tlsCheckObserver, req, res)
   })
 
   pds.app.get('/health', (_req, res) => {
@@ -1146,6 +1156,7 @@ async function main() {
 
   const shutdown = async () => {
     logger.info('ePDS shutting down')
+    tlsCheckObserver.stop()
     await pds.destroy()
     process.exit(0)
   }
@@ -1160,14 +1171,29 @@ async function main() {
 async function checkHandleRoute(
   pds: PDS,
   authHostname: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Express types not directly available in this package
-  req: any,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Express types not directly available in this package
-  res: any,
+  tlsCheckObserver: TlsCheckObserver,
+  req: Request,
+  res: Response,
 ) {
+  const domain =
+    typeof req.query.domain === 'string' ? req.query.domain : undefined
+  const tlsCheckScope = tlsCheckObserver.begin(domain)
+  let responseFinished = false
+  req.once('aborted', () => {
+    tlsCheckScope.abort()
+  })
+  res.once('finish', () => {
+    responseFinished = true
+    tlsCheckScope.complete(res.statusCode)
+  })
+  res.once('close', () => {
+    if (!responseFinished) {
+      tlsCheckScope.abort()
+    }
+  })
+
   try {
-    const { domain } = req.query
-    if (!domain || typeof domain !== 'string') {
+    if (!domain) {
       return res.status(400).json({
         error: 'InvalidRequest',
         message: 'bad or missing domain query param',
@@ -1195,7 +1221,13 @@ async function checkHandleRoute(
         message: 'domain must have exactly one subdomain label',
       })
     }
-    const account = await pds.ctx.accountManager.getAccount(domain)
+    const accountLookupStartedAt = Date.now()
+    let account: Awaited<ReturnType<typeof pds.ctx.accountManager.getAccount>>
+    try {
+      account = await pds.ctx.accountManager.getAccount(domain)
+    } finally {
+      tlsCheckScope.recordAccountLookup(Date.now() - accountLookupStartedAt)
+    }
     if (!account) {
       return res.status(404).json({
         error: 'NotFound',
@@ -1204,7 +1236,8 @@ async function checkHandleRoute(
     }
     return res.json({ success: true })
   } catch (err) {
-    logger.error({ err }, 'check handle failed')
+    tlsCheckScope.fail(err)
+    logger.debug({ err }, 'check handle failed')
     return res
       .status(500)
       .json({ error: 'InternalServerError', message: 'Internal Server Error' })

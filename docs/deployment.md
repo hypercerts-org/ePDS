@@ -47,6 +47,24 @@ Caddy handles TLS automatically via ACME/Let's Encrypt. The Docker Compose
 service caps Caddy at 512 MiB of memory and sets `GOMEMLIMIT=384MiB` so TLS
 storage maintenance or traffic spikes cannot exhaust the full VM.
 
+### Caddy and TLS-check incident diagnostics
+
+pds-core emits aggregate `/tls-check` observability logs every 10 seconds while there is activity on Caddy's on-demand TLS permission endpoint. Look for `tls-check summary` to see started/completed/aborted/in-flight request counts, status-code buckets, hostname-shape buckets (`apex`, `auth`, `oneLabel`, `nested`, `unsupported`, `missing`), request-duration percentiles, account-lookup duration percentiles, event-loop lag, process memory, and suppressed individual-log counts. Individual `tls-check slow`, `tls-check aborted`, and `tls-check failed` logs are emitted when a permission check exceeds 1000 ms, the client disconnects before completion, or the handler throws; each category is capped at 50 individual warning logs per summary window to avoid turning an attack spike into a log flood.
+
+When investigating Caddy memory growth, run the read-only snapshot watcher from the Docker Compose host:
+
+```bash
+THRESHOLD_MIB=384 ./scripts/caddy-oom-snapshot.sh
+```
+
+The watcher polls the Caddy container memory cgroup and writes snapshots under `/tmp/epds-caddy-snapshots` by default when memory crosses the threshold. Set `SNAPSHOT_DIR=/var/log/epds/caddy-snapshots` if you want persistent host logs. Each snapshot captures Caddy `/debug/vars`, `/metrics`, heap and goroutine profiles, `docker stats`, selected container state without environment variables, connection state, recent Caddy/core compose logs, and recent kernel logs. It does not restart, reload, or reconfigure any containers. Treat snapshots as sensitive operational artifacts because recent logs can contain request metadata.
+
+For a one-off local smoke test of the watcher without waiting in a loop:
+
+```bash
+./scripts/caddy-oom-snapshot.sh --once
+```
+
 ### Updating
 
 ```bash
