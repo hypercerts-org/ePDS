@@ -5,8 +5,10 @@
     }
 }
 
-# PDS API + handle subdomains (on-demand TLS for handle resolution)
-:443 {
+# PDS API + one-label hosted handles (on-demand TLS for handle resolution).
+# Keep this scoped to the apex and one wildcard label so random nested SNI
+# names cannot force Caddy through the /tls-check path.
+{$PDS_HOSTNAME:pds.example}, *.{$PDS_HOSTNAME:pds.example} {
     tls {
         on_demand
     }

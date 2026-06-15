@@ -47,6 +47,14 @@ Caddy handles TLS automatically via ACME/Let's Encrypt. The Docker Compose
 service caps Caddy at 512 MiB of memory and sets `GOMEMLIMIT=384MiB` so TLS
 storage maintenance or traffic spikes cannot exhaust the full VM.
 
+The Caddy site address is intentionally scoped to `PDS_HOSTNAME` and
+`*.PDS_HOSTNAME`, not a catch-all `:443` listener. This still serves the PDS
+apex, the auth subdomain, and one-label hosted handles such as
+`alice.example.com`, while preventing random nested SNI names from forcing Caddy
+through the on-demand `/tls-check` path. If an operator adds more hosted handle
+domains, add those exact apex/wildcard addresses explicitly; do not restore a
+catch-all on-demand TLS site block.
+
 ### Caddy and TLS-check incident diagnostics
 
 pds-core emits aggregate `/tls-check` observability logs every 10 seconds while there is activity on Caddy's on-demand TLS permission endpoint. Look for `tls-check summary` to see started/completed/aborted/in-flight request counts, status-code buckets, hostname-shape buckets (`apex`, `auth`, `oneLabel`, `nested`, `unsupported`, `missing`), request-duration percentiles, account-lookup duration percentiles, event-loop lag, process memory, and suppressed individual-log counts. Individual `tls-check slow`, `tls-check aborted`, and `tls-check failed` logs are emitted when a permission check exceeds 1000 ms, the client disconnects before completion, or the handler throws; each category is capped at 50 individual warning logs per summary window to avoid turning an attack spike into a log flood.

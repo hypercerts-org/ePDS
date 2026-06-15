@@ -452,6 +452,9 @@ GitHub Release per release.
 - Caddy's on-demand TLS `ask` URL and reverse proxy upstreams must use the
   Docker Compose service name (`core`, `auth`) — if you rename services, update
   `Caddyfile` defaults too or Caddy will refuse all TLS connections.
+- Keep Caddy's HTTPS site address scoped to `{$PDS_HOSTNAME}` and
+  `*.{$PDS_HOSTNAME}`. Do not restore a catch-all `:443` on-demand TLS block;
+  random nested SNI scans can force `/tls-check` storms and Caddy OOMs.
 
 ## Landing the Plane (Session Completion)
 

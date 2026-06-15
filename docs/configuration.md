@@ -230,6 +230,8 @@ Optional:
 
 > These variables are for the Caddy reverse-proxy container only (not applicable on Railway).
 
+Caddy serves `PDS_HOSTNAME` and one-label subdomains of `PDS_HOSTNAME` for hosted handles. Additional hosted handle domains must be added to the Caddyfile explicitly as an apex plus one-label wildcard pair; avoid catch-all on-demand TLS listeners because random SNI scans can force excessive `/tls-check` traffic.
+
 | Variable        | Description                                                |
 | --------------- | ---------------------------------------------------------- |
 | `PDS_UPSTREAM`  | Override PDS reverse proxy upstream (default `core:3000`)  |
