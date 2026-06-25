@@ -2,31 +2,73 @@
 
 ## Which flow should I use?
 
-| Flow | App provides            | User experience              | Implementation       |
-| ---- | ----------------------- | ---------------------------- | -------------------- |
-| 1    | Email address           | OTP screen immediately       | Hand-rolled PAR/DPoP |
-| 2    | Nothing, handle, or DID | Depends on input (see below) | `NodeOAuthClient`    |
+| Path                 | App type                          | App provides                                               | Implementation                                                                                                                                                      |
+| -------------------- | --------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Browser OAuth client | Browser-only SPA or public client | PDS URL for email-first/no-identifier login, or handle/DID | `BrowserOAuthClient.authorize()`, append email `login_hint` and `prompt=login` to the returned authorize URL, then `init()` consumes the callback                   |
+| Node OAuth client    | Server app or confidential client | PDS URL for email-first/no-identifier login, or handle/DID | `NodeOAuthClient.authorize()`, append email `login_hint` and `prompt=login` to the returned authorize URL, then `callback()` consumes the callback                  |
+| Hand-rolled fallback | Any runtime                       | Email address                                              | Implement PAR, PKCE, DPoP, nonce retry, and token exchange yourself only if the OAuth client cannot expose the authorize URL or ePDS stops honoring URL-level hints |
 
-**Flow 1** is the only flow that requires hand-rolled PAR and DPoP code.
-`@atproto/oauth-client-node`'s `authorize()` method explicitly omits
-`login_hint` from its options — the library resolves handles and DIDs
-itself and overrides the hint. Since Flow 1 needs to pass a raw email
-as `login_hint` on the auth redirect URL (not in the PAR body), it
-cannot use the library.
+Use the OAuth clients first. They handle PAR, PKCE, DPoP, nonce retry, token
+exchange, and session management automatically. For email-first OTP, pass the
+PDS URL to `authorize()` and append the raw email as `login_hint` to the returned
+`/oauth/authorize` URL. Do **not** put email `login_hint` in the PAR body.
 
-**Flow 2** should use `NodeOAuthClient`, which handles PAR, PKCE, DPoP,
-nonce retry, token exchange, and session management automatically. It
-covers three input variants — all use the same code path:
+Use these input variants with the same client code:
 
-- **No identifier** — pass the PDS URL; auth server shows its own email form
-- **Handle** — pass `alice.pds.example.com`; this fork shows the stock PDS handle/password page
-- **DID** — pass `did:plc:abc123...`; same as handle
+- **Email-first OTP** — pass the PDS URL, then append `login_hint=<email>` and `prompt=login` to the returned URL.
+- **No identifier** — pass the PDS URL; auth server shows its own email form.
+- **Handle** — pass `alice.pds.example.com`; this fork shows the stock PDS handle/password page.
+- **DID** — pass `did:plc:abc123...`; same as handle.
 
-Both flows end with ePDS redirecting back to your app, and your callback receives an authorization code to exchange for tokens.
+All paths end with ePDS redirecting back to your app with an authorization code.
 
 ---
 
-## Flow 2 — Using `NodeOAuthClient`
+## Browser apps — Using `BrowserOAuthClient`
+
+### Setup
+
+Use `@atproto/oauth-client-browser` for browser-only apps. See the
+[SKILL.md quick start](../SKILL.md) for public browser client metadata.
+
+### Login handler
+
+```typescript
+import { BrowserOAuthClient } from '@atproto/oauth-client-browser'
+
+const client = await BrowserOAuthClient.load({
+  clientId: 'https://yourapp.example.com/client-metadata.json',
+})
+
+const url = await client.authorize('https://pds.example.com', {
+  scope: 'atproto transition:generic',
+  prompt: 'login',
+})
+url.searchParams.set('login_hint', email)
+url.searchParams.set('prompt', 'login')
+window.location.assign(url.toString())
+```
+
+Use `authorize()` rather than `signInRedirect()` when you need email-first OTP,
+because `signInRedirect()` redirects before you can append `login_hint`.
+
+### Restore or consume the callback
+
+```typescript
+const result = await client.init()
+const session = result?.session
+```
+
+The `init()` method:
+
+1. Detects OAuth callback parameters in the current URL.
+2. Validates state from browser storage.
+3. Exchanges the authorization code for tokens with DPoP.
+4. Restores any existing session when there is no callback to consume.
+
+---
+
+## Server apps — Using `NodeOAuthClient`
 
 ### Setup
 
@@ -36,22 +78,29 @@ construction (client metadata, keyset, stores).
 ### Login handler
 
 ```typescript
+// Email-first OTP — pass the PDS URL, then patch the authorize URL
+const emailUrl = await client.authorize('https://pds.example.com', {
+  prompt: 'login',
+})
+emailUrl.searchParams.set('login_hint', email)
+emailUrl.searchParams.set('prompt', 'login')
+
 // No identifier — auth server shows email form
-const authUrl = await client.authorize('https://pds.example.com')
+const pdsUrl = await client.authorize('https://pds.example.com')
 
 // With a handle — stock PDS handle/password page
-const authUrl = await client.authorize('alice.pds.example.com')
+const handleUrl = await client.authorize('alice.pds.example.com')
 
 // With a DID — same behaviour as handle
-const authUrl = await client.authorize('did:plc:abc123...')
+const didUrl = await client.authorize('did:plc:abc123...')
 ```
 
 The `authorize()` method:
 
-1. Resolves the input (handle → DID → PDS endpoint, or uses the PDS URL directly)
-2. Sends a PAR request with PKCE and DPoP (including nonce retry)
-3. Stores the OAuth state in your `stateStore`
-4. Returns the authorization URL to redirect the user to
+1. Resolves the input (handle → DID → PDS endpoint, or uses the PDS URL directly).
+2. Sends a PAR request with PKCE and DPoP (including nonce retry).
+3. Stores the OAuth state in your `stateStore`.
+4. Returns the authorization URL to redirect the user to.
 
 Redirect the user's browser to the returned URL.
 
@@ -82,27 +131,30 @@ const session = await client.restore(userDid)
 // session.signOut() to end the session
 ```
 
-### Step-by-step (no identifier)
+### Step-by-step (email-first OTP)
 
-1. User clicks "Sign in" in your app
-2. Your login handler calls `client.authorize('https://pds.example.com')`
-3. Library sends PAR request, gets `request_uri`, stores state
-4. Your app redirects browser to the returned auth URL
-5. Auth server shows email form
-6. User enters email, receives OTP, enters it
-7. **New users only**: ePDS shows a handle picker
-8. Auth server redirects to your `redirect_uri` with `?code=&state=&iss=`
-9. Your callback calls `client.callback(params)` — library handles token exchange
-10. User is logged in
+1. User enters an email and clicks "Sign in" in your app.
+2. Your login handler calls `client.authorize('https://pds.example.com')`.
+3. Library sends PAR request, gets `request_uri`, and stores state.
+4. Your app appends `login_hint=<email>` and `prompt=login` to the returned auth URL.
+5. Your app redirects browser to the patched auth URL.
+6. Auth server sends OTP and shows the OTP entry screen.
+7. User enters the OTP.
+8. **New users only**: ePDS shows a handle picker.
+9. Auth server redirects to your `redirect_uri` with `?code=&state=&iss=`.
+10. Your callback calls `client.callback(params)` — library handles token exchange.
+11. User is logged in.
 
 When passing a handle or DID instead of the PDS URL, the flow is identical except the user skips the ePDS email form and lands on the stock PDS handle/password page.
 
 ---
 
-## Flow 1 — Hand-rolled (email `login_hint`)
+## Fallback — Hand-rolled PAR/DPoP with email `login_hint`
 
-Flow 1 requires hand-rolled PAR and token exchange because the library
-cannot pass a raw email as `login_hint`.
+Hand-rolled PAR and token exchange are only needed when your OAuth client cannot
+expose the returned authorize URL before redirecting, when you need custom OAuth
+behavior the library cannot represent, or when you are debugging PAR/DPoP itself.
+Prefer `BrowserOAuthClient` or `NodeOAuthClient` for normal app login.
 
 ### Step-by-step
 
@@ -274,7 +326,7 @@ export async function handleCallback(params: { code: string; state: string }) {
 
 ## Sequence diagrams
 
-### Flow 1 — App passes email as `login_hint`
+### Hand-rolled fallback — App passes email as `login_hint`
 
 ```mermaid
 sequenceDiagram
@@ -302,13 +354,13 @@ sequenceDiagram
     App-->>User: Logged in
 ```
 
-### Flow 2 — No identifier (via `NodeOAuthClient`)
+### OAuth client — No identifier or email-first OTP
 
 ```mermaid
 sequenceDiagram
     actor User
     participant App as Your App
-    participant Lib as NodeOAuthClient
+    participant Lib as OAuth client
     participant PDS as ePDS
     participant Auth as Auth Server
     participant Inbox as User's Inbox
@@ -318,14 +370,19 @@ sequenceDiagram
     Lib->>PDS: POST /oauth/par (auto DPoP + PKCE)
     PDS-->>Lib: { request_uri }
     Lib-->>App: auth URL
+    App->>App: Optionally append login_hint=email and prompt=login
     App-->>User: Redirect to auth URL
 
     User->>Auth: GET /oauth/authorize
-    Auth-->>User: Shows email input form
-
-    User->>Auth: Submits email
-    Auth->>Inbox: Sends 8-digit OTP
-    Auth-->>User: Shows OTP entry screen
+    alt login_hint=email was appended
+        Auth->>Inbox: Sends 8-digit OTP
+        Auth-->>User: Shows OTP entry screen
+    else no login_hint
+        Auth-->>User: Shows email input form
+        User->>Auth: Submits email
+        Auth->>Inbox: Sends 8-digit OTP
+        Auth-->>User: Shows OTP entry screen
+    end
 
     User->>Auth: Submits OTP code
     Auth-->>User: Redirect to callback URL
@@ -338,7 +395,7 @@ sequenceDiagram
     App-->>User: Logged in
 ```
 
-### Flow 2 with handle or DID
+### OAuth client with handle or DID
 
 Same as the diagram above except:
 

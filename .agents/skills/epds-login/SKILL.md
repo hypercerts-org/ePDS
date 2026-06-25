@@ -1,6 +1,6 @@
 ---
 name: epds-login
-description: Implement AT Protocol OAuth login against an ePDS instance. Covers two flows — Flow 1 (email-first, hand-rolled PAR/DPoP) and Flow 2 (via @atproto/oauth-client-node, accepting no hint / handle / DID). Use when building passwordless OTP login, configuring client metadata (confidential vs public), or integrating NodeOAuthClient.
+description: Implement AT Protocol OAuth login against an ePDS instance. Covers email-first OTP with @atproto/oauth-client-browser or @atproto/oauth-client-node by appending login_hint to the returned authorize URL, plus hand-rolled PAR/DPoP only as a fallback. Use when building passwordless OTP login, configuring client metadata (confidential vs public), or integrating BrowserOAuthClient/NodeOAuthClient.
 ---
 
 # Implementing ePDS Login
@@ -15,36 +15,107 @@ AT Protocol universe (a DID, a handle, a data repository) automatically provisio
 From your app's perspective, ePDS uses standard AT Protocol OAuth (PAR + PKCE + DPoP).
 The reference implementation is `packages/demo` in the [ePDS repository](https://github.com/hypercerts-org/ePDS).
 
-## Two Flows
+## Recommended Login Paths
 
-| Flow | App provides            | How user starts              | Implementation       |
-| ---- | ----------------------- | ---------------------------- | -------------------- |
-| 1    | Email address           | OTP screen immediately       | Hand-rolled PAR/DPoP |
-| 2    | Nothing, handle, or DID | Depends on input (see below) | `NodeOAuthClient`    |
+| Path                 | App type                          | App provides                                               | Implementation                                                                                                                                                      |
+| -------------------- | --------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Browser OAuth client | Browser-only SPA or public client | PDS URL for email-first/no-identifier login, or handle/DID | `BrowserOAuthClient.authorize()`, append email `login_hint` and `prompt=login` to the returned authorize URL, then `init()` consumes the callback                   |
+| Node OAuth client    | Server app or confidential client | PDS URL for email-first/no-identifier login, or handle/DID | `NodeOAuthClient.authorize()`, append email `login_hint` and `prompt=login` to the returned authorize URL, then `callback()` consumes the callback                  |
+| Hand-rolled fallback | Any runtime                       | Email address                                              | Implement PAR, PKCE, DPoP, nonce retry, and token exchange yourself only if the OAuth client cannot expose the authorize URL or ePDS stops honoring URL-level hints |
 
-**Why the split?** `@atproto/oauth-client-node`'s `authorize()` method accepts
-a handle or DID as input but explicitly omits `login_hint` from its options —
-the library resolves the identity itself and overrides the hint. Flow 1 needs
-to pass a raw email as `login_hint` on the auth redirect URL (not in the PAR
-body), which the library cannot do. Flow 1 must therefore use hand-rolled
-PAR + DPoP requests.
+`@atproto/oauth-client-browser` and `@atproto/oauth-client-node` both create the
+PAR request, PKCE verifier, DPoP key, nonce retry, state, token exchange, and
+session storage path for you. For email-first ePDS login, call `authorize()`
+with the PDS URL and append the raw email to the returned `/oauth/authorize`
+URL as `login_hint`. Do **not** put an email in the PAR body.
 
-Flow 2 covers three input variants — all use the same `NodeOAuthClient` code:
+Use these input variants with the same OAuth client code:
 
-- **No identifier** — pass the PDS URL; auth server shows its own email form
-- **Handle** — pass an AT Protocol handle (e.g. `alice.pds.example.com`); this fork shows the stock PDS handle/password page
-- **DID** — pass a DID (e.g. `did:plc:abc123...`); same behaviour as handle
+- **Email-first OTP** — pass the PDS URL to `authorize()`, then append `login_hint=<email>` and `prompt=login` to the returned URL.
+- **No identifier** — pass the PDS URL; auth server shows its own email form.
+- **Handle** — pass an AT Protocol handle (e.g. `alice.pds.example.com`); this fork shows the stock PDS handle/password page.
+- **DID** — pass a DID (e.g. `did:plc:abc123...`); same behaviour as handle.
 
 > **Important:** `login_hint` must **never** go in the PAR body when the value
-> is an email address. The PDS core validates `login_hint` as an ATProto
+> is an email address. The PDS core validates PAR `login_hint` as an ATProto
 > identity (handle or DID) and rejects emails with `Invalid login_hint`. Put
 > email `login_hint` only on the **auth redirect URL** — that request goes to
 > the ePDS auth service (Better Auth layer), which accepts emails.
 
-## Quick Start — Flow 2 (recommended)
+## Quick Start — BrowserOAuthClient
 
-Use `@atproto/oauth-client-node` for any flow that does not require passing a
-raw email as `login_hint`.
+Use `@atproto/oauth-client-browser` for browser-only apps. It supports the
+ePDS email-first pattern as long as you call `authorize()` yourself and redirect
+after appending query parameters. Do not use `signInRedirect()` when you need to
+add email `login_hint`, because it redirects before you can patch the URL.
+
+### 1. Client Metadata (public browser client)
+
+Host at your `client_id` URL. Browser-only apps normally use a public client:
+
+```json
+{
+  "client_id": "https://yourapp.example.com/client-metadata.json",
+  "client_name": "Your App",
+  "redirect_uris": ["https://yourapp.example.com/"],
+  "scope": "atproto transition:generic",
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none",
+  "dpop_bound_access_tokens": true
+}
+```
+
+Public clients usually show consent on each login unless the PDS trusts the
+client. For server apps, prefer the confidential `NodeOAuthClient` setup below.
+
+### 2. Create the browser OAuth client
+
+```typescript
+import { BrowserOAuthClient } from '@atproto/oauth-client-browser'
+
+const client = await BrowserOAuthClient.load({
+  clientId: 'https://yourapp.example.com/client-metadata.json',
+})
+```
+
+### 3. Login handler with optional email-first OTP
+
+```typescript
+async function startLogin(input: {
+  pdsUrl: string
+  email?: string
+  forceLogin?: boolean
+}) {
+  const url = await client.authorize(input.pdsUrl, {
+    scope: 'atproto transition:generic',
+    ...(input.forceLogin ? { prompt: 'login' } : {}),
+  })
+
+  if (input.email?.trim()) {
+    url.searchParams.set('login_hint', input.email.trim())
+  }
+  if (input.forceLogin || input.email?.trim()) {
+    url.searchParams.set('prompt', 'login')
+  }
+
+  window.location.assign(url.toString())
+}
+```
+
+### 4. Restore or consume the callback
+
+```typescript
+const result = await client.init()
+const session = result?.session
+// session?.did — the user's DID
+// session?.fetchHandler() — authenticated fetch for AT Protocol API calls
+```
+
+## Quick Start — NodeOAuthClient
+
+Use `@atproto/oauth-client-node` for server apps, confidential clients, and
+frameworks that handle the OAuth callback on the server.
 
 ### 1. Client Metadata (confidential client)
 
@@ -123,17 +194,24 @@ const client = new NodeOAuthClient({
 ### 3. Login handler
 
 ```typescript
+// Email-first OTP — pass the PDS URL, then patch the authorize URL
+const emailUrl = await client.authorize('https://pds.example.com', {
+  prompt: 'login',
+})
+emailUrl.searchParams.set('login_hint', email)
+emailUrl.searchParams.set('prompt', 'login')
+
 // No identifier — auth server shows email form
-const authUrl = await client.authorize('https://pds.example.com')
+const pdsUrl = await client.authorize('https://pds.example.com')
 
 // With a handle — stock PDS handle/password page
-const authUrl = await client.authorize('alice.pds.example.com')
+const handleUrl = await client.authorize('alice.pds.example.com')
 
 // With a DID — same behaviour as handle
-const authUrl = await client.authorize('did:plc:abc123...')
+const didUrl = await client.authorize('did:plc:abc123...')
 ```
 
-Redirect the user's browser to `authUrl`.
+Redirect the user's browser to the returned URL for the path they chose.
 
 ### 4. Callback handler
 
@@ -169,20 +247,23 @@ app.get('/jwks.json', (req, res) => {
 })
 ```
 
-## Quick Start — Flow 1 (hand-rolled)
+## Fallback — Hand-rolled PAR/DPoP
 
-Flow 1 requires hand-rolled PAR and token exchange because the library
-cannot pass a raw email as `login_hint`. See
-[references/flows.md](references/flows.md) for the full walkthrough and
-[references/dpop-pkce.md](references/dpop-pkce.md) for the helper
-functions.
+Hand-rolled PAR and token exchange are no longer the default recommendation
+for email-first ePDS login. Use the Browser or Node OAuth client first and
+append email `login_hint` to the returned authorize URL. Only hand-roll when
+your OAuth client cannot expose that URL before redirecting, when you need a
+custom OAuth behavior the library cannot represent, or when you are debugging
+PAR/DPoP itself. See [references/flows.md](references/flows.md) for the full
+walkthrough and [references/dpop-pkce.md](references/dpop-pkce.md) for the
+helper functions.
 
-The abbreviated version:
+The abbreviated fallback version:
 
-1. Generate DPoP key pair and PKCE verifier
-2. POST to `/oauth/par` (with DPoP nonce retry)
-3. Redirect browser to `/oauth/authorize?...&login_hint=<email>`
-4. Handle callback: verify state, exchange code for tokens (with DPoP nonce retry)
+1. Generate DPoP key pair and PKCE verifier.
+2. POST to `/oauth/par` without email `login_hint` (with DPoP nonce retry).
+3. Redirect browser to `/oauth/authorize?...&login_hint=<email>`.
+4. Handle callback: verify state, exchange code for tokens (with DPoP nonce retry).
 
 ## Forcing a Fresh Sign-In (`prompt=login`)
 
@@ -195,11 +276,11 @@ standard OIDC `prompt=login` parameter.
 engage session reuse by inspecting the **query string** of the
 `/oauth/authorize` redirect. PAR-body `prompt=login` is ignored.
 
-If your OAuth library (e.g. `NodeOAuthClient`) only supports passing
-`prompt` via the PAR body, you must also append `&prompt=login` to the
-authorization URL the library returns before redirecting the user.
+Even when you pass `prompt` to `authorize()` options, also append
+`&prompt=login` to the authorization URL the library returns before redirecting
+the user.
 
-**Hand-rolled (Flow 1):**
+**Hand-rolled fallback:**
 
 ```typescript
 const authUrl =
@@ -208,28 +289,31 @@ const authUrl =
   (forceLogin ? '&prompt=login' : '')
 ```
 
-**With `NodeOAuthClient` (Flow 2):**
+**With `BrowserOAuthClient` or `NodeOAuthClient`:**
 
 ```typescript
 const url = await client.authorize(input, { prompt: 'login' })
-// Library puts prompt in PAR; also append it to the URL query string
+// The library puts prompt in PAR; also append it to the URL query string
 // so ePDS's session-reuse short-circuit fires.
 url.searchParams.set('prompt', 'login')
+
+// For email-first OTP, append the email to the returned authorize URL too.
+url.searchParams.set('login_hint', email)
 ```
 
 ## Common Pitfalls
 
-| Pitfall                                     | Fix                                                                                                               |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Consent screen on every login               | Switch to `private_key_jwt` — public clients force consent unless in the PDS trusted list                         |
-| Flash of email form (Flow 1)                | Include `login_hint` on the **auth redirect URL only** (never in the PAR body)                                    |
-| `Invalid login_hint` from PAR               | Remove `login_hint` from the PAR body — PDS core only accepts handles/DIDs, not emails                            |
-| `auth_failed` immediately                   | Check Caddy logs — likely a DNS/upstream name mismatch                                                            |
-| DPoP rejected (hand-rolled only)            | Always implement the nonce retry loop (ePDS always demands a nonce)                                               |
-| Token exchange fails (hand-rolled)          | Restore the DPoP key pair from the session cookie, don't generate a new one                                       |
-| `Cannot find package` in tests              | Run `pnpm build` before `pnpm test` — vitest needs `dist/`                                                        |
-| `NodeOAuthClient` callback 401              | Ensure `stateStore` and `sessionStore` persist across requests (not in-memory for serverless)                     |
-| `prompt=login` ignored, chooser still shown | Append `&prompt=login` to the **authorize URL** query string — PAR body alone doesn't engage ePDS's short-circuit |
+| Pitfall                                     | Fix                                                                                                                 |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Consent screen on every login               | Switch server apps to `private_key_jwt`; public browser clients force consent unless in the PDS trusted list        |
+| Flash of email form                         | Use `authorize()` instead of immediate redirect helpers, then append `login_hint` on the **auth redirect URL only** |
+| `Invalid login_hint` from PAR               | Remove email `login_hint` from the PAR body — PDS core only accepts handles/DIDs there                              |
+| `auth_failed` immediately                   | Check Caddy logs — likely a DNS/upstream name mismatch                                                              |
+| DPoP rejected (hand-rolled fallback only)   | Always implement the nonce retry loop (ePDS always demands a nonce)                                                 |
+| Token exchange fails (hand-rolled fallback) | Restore the DPoP key pair from the session cookie, don't generate a new one                                         |
+| `Cannot find package` in tests              | Run `pnpm build` before `pnpm test` — vitest needs `dist/`                                                          |
+| `NodeOAuthClient` callback 401              | Ensure `stateStore` and `sessionStore` persist across requests (not in-memory for serverless)                       |
+| `prompt=login` ignored, chooser still shown | Append `&prompt=login` to the **authorize URL** query string — PAR body alone doesn't engage ePDS's short-circuit   |
 
 ## Handles
 
@@ -248,5 +332,5 @@ Token: https://<pds-hostname>/oauth/token
 ## Reference Files
 
 - [Client metadata fields](references/client-metadata.md) — confidential vs public, JWKS, all fields, email branding
-- [Full flow walkthrough](references/flows.md) — sequence diagrams, Flow 1 hand-rolled code, Flow 2 library code
-- [PKCE and DPoP helpers](references/dpop-pkce.md) — Flow 1 only; Flow 2 should use `NodeOAuthClient` instead
+- [Full flow walkthrough](references/flows.md) — sequence diagrams, BrowserOAuthClient/NodeOAuthClient examples, and hand-rolled fallback code
+- [PKCE and DPoP helpers](references/dpop-pkce.md) — fallback only; prefer BrowserOAuthClient or NodeOAuthClient for normal app login
