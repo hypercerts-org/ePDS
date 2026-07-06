@@ -18,16 +18,15 @@ function makeLogger() {
 }
 
 describe('logBetterAuthApiError', () => {
-  it('logs an expired-OTP error at warn with the reason', () => {
+  it('logs an expired-OTP error at warn with the reason and the error object', () => {
     const log = makeLogger()
-    logBetterAuthApiError(
-      new APIError('BAD_REQUEST', { message: 'OTP expired' }),
-      log,
-    )
+    const error = new APIError('BAD_REQUEST', { message: 'OTP expired' })
+    logBetterAuthApiError(error, log)
 
     expect(log.warn).toHaveBeenCalledOnce()
     expect(log.warn).toHaveBeenCalledWith(
       expect.objectContaining({
+        err: error,
         status: 'BAD_REQUEST',
         statusCode: 400,
         message: 'OTP expired',

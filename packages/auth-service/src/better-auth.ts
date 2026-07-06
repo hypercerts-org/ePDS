@@ -5,9 +5,10 @@
  * - Email OTP plugin (for future migration from custom OTP implementation)
  * - Social providers (Google, GitHub — only when env vars are set)
  * - Session lifetime from env vars
+ * - An onAPIError hook that surfaces 4xx client errors in our logs
+ *   (see logBetterAuthApiError below)
  *
  * The instance is mounted at /api/auth/* alongside the existing custom routes.
- * No existing behavior is changed — this is a foundation-only step.
  */
 import type { EpdsDb } from '@certified-app/shared'
 import { createLogger } from '@certified-app/shared'
@@ -61,6 +62,7 @@ export function logBetterAuthApiError(
 
   log.warn(
     {
+      err: error,
       status: error.status,
       statusCode,
       message: error.body?.message ?? error.message,
