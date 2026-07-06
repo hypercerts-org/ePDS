@@ -12,6 +12,7 @@
 import type { EpdsDb } from '@certified-app/shared'
 import { createLogger } from '@certified-app/shared'
 import { betterAuth } from 'better-auth'
+import { APIError } from 'better-auth/api'
 import { generateRandomString } from 'better-auth/crypto'
 import { getMigrations } from 'better-auth/db'
 import { emailOTP } from 'better-auth/plugins'
@@ -22,7 +23,51 @@ import { ensurePdsUrl } from './lib/pds-url.js'
 
 export type BetterAuthInstance = ReturnType<typeof createBetterAuth>
 
+/** The logger type used across this module — avoids a direct pino dependency. */
+type BetterAuthLogger = ReturnType<typeof createLogger>
+
 const logger = createLogger('auth:better-auth')
+
+/**
+ * Surface better-auth 4xx client errors in our own logs.
+ *
+ * The main OAuth login flow posts straight from the browser to
+ * /api/auth/sign-in/email-otp, handled by better-auth's node handler. On
+ * verification failure better-auth throws an `APIError` whose message is the
+ * exact reason — "OTP expired", "Invalid OTP" or "Too many attempts" — but
+ * these never reach our logs because we set neither `logger` nor `onAPIError`.
+ * This is the only place that distinguishes a genuinely-late email (expired)
+ * from a user retyping a stale code (invalid), so we log it at `warn` (visible
+ * at prod's default `info` level) to make the split countable over time.
+ *
+ * Only 4xx `APIError`s are logged here. 3xx redirects (e.g. status "FOUND")
+ * are filtered by better-auth before this runs, and 5xx errors are already
+ * logged by better-auth's own error handler, so we skip them to avoid noise
+ * and double-logging. Non-`APIError` values are ignored for the same reason.
+ *
+ * The email address is deliberately not logged: better-auth invokes
+ * `onAPIError.onError` with the instance-wide auth context, not the per-request
+ * endpoint context, so the request body (and hence the email) is not available
+ * here without unsafe assumptions.
+ */
+export function logBetterAuthApiError(
+  error: unknown,
+  log: BetterAuthLogger,
+): void {
+  if (!(error instanceof APIError)) return
+
+  const statusCode = error.statusCode
+  if (statusCode < 400 || statusCode >= 500) return
+
+  log.warn(
+    {
+      status: error.status,
+      statusCode,
+      message: error.body?.message ?? error.message,
+    },
+    'better-auth API error',
+  )
+}
 
 const AUTH_FLOW_COOKIE = 'epds_auth_flow'
 
@@ -157,6 +202,14 @@ export function createBetterAuth(
     database: betterAuthDb as any,
     baseURL: `https://${authHostname}`,
     basePath: '/api/auth',
+
+    // Route better-auth's 4xx client errors (notably "OTP expired" vs
+    // "Invalid OTP") into our pino logs; see logBetterAuthApiError above.
+    onAPIError: {
+      onError(error) {
+        logBetterAuthApiError(error, logger)
+      },
+    },
 
     session: {
       expiresIn: sessionExpiresIn,
