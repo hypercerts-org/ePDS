@@ -393,6 +393,62 @@ function checkTosUri(metadata: ClientMetadata): PreviewCheck {
   })
 }
 
+/**
+ * `epds_handle_login_url` is the hand-off URL for the
+ * "Or sign in with ATProto/Bluesky" button on the login page. The
+ * real gate in auth-service is `isSafeHttpUrl` — accepts http and
+ * https so that localhost dev clients keep working — so this check
+ * mirrors that, rather than the stricter https-only check used for
+ * tos_uri / policy_uri (which render as consent-page links).
+ *
+ * Missing → warn (optional; users just see no ATProto/Bluesky
+ * button). Present + http(s) → ok. Present + any other scheme or
+ * unparseable → error (button silently won't render on real flows).
+ */
+function checkHandleLoginUrl(metadata: ClientMetadata): PreviewCheck {
+  const value = metadata.epds_handle_login_url
+  const label = 'epds_handle_login_url set'
+  const labelHtml = `${code('epds_handle_login_url')} set`
+
+  if (value === undefined || value === '') {
+    return {
+      id: 'handle-login-url',
+      label,
+      severity: 'warn',
+      detail:
+        'Optional. Without it, the login page doesn\'t render the "Or sign in with ATProto/Bluesky" button, so users coming from a different PDS can\'t hand off to your client.',
+      labelHtml,
+      detailHtml: `Optional. Without it, the login page doesn't render the "Or sign in with ATProto/Bluesky" button, so users coming from a different PDS can't hand off to your client.`,
+    }
+  }
+
+  let parsed: URL | null = null
+  try {
+    parsed = new URL(value)
+  } catch {
+    // fall through
+  }
+  if (parsed?.protocol !== 'https:' && parsed?.protocol !== 'http:') {
+    return {
+      id: 'handle-login-url',
+      label,
+      severity: 'error',
+      detail: `epds_handle_login_url="${value}" is not a valid http(s) URL. The login page rejects it via isSafeHttpUrl and the ATProto/Bluesky button silently won't render on real flows.`,
+      labelHtml,
+      detailHtml: `${code('epds_handle_login_url')}=${code('"' + value + '"')} is not a valid http(s) URL. The login page rejects it via ${code('isSafeHttpUrl')} and the ATProto/Bluesky button silently won't render on real flows.`,
+    }
+  }
+
+  return {
+    id: 'handle-login-url',
+    label,
+    severity: 'ok',
+    detail: `epds_handle_login_url="${value}". Login page will render the "Or sign in with ATProto/Bluesky" button and hand off to this URL with a handle=<value> query param.`,
+    labelHtml,
+    detailHtml: `${code('epds_handle_login_url')}=${code('"' + value + '"')}. Login page will render the "Or sign in with ATProto/Bluesky" button and hand off to this URL with a ${code('handle=<value>')} query param.`,
+  }
+}
+
 function checkPolicyUri(metadata: ClientMetadata): PreviewCheck {
   return checkUriField({
     id: 'policy-uri',
@@ -476,6 +532,7 @@ export async function validateClientMetadataForPreview(
     checkBrandingCss(metadata),
     checkTosUri(metadata),
     checkPolicyUri(metadata),
+    checkHandleLoginUrl(metadata),
   )
 
   // 4. Trusted-clients membership (optional; caller may skip)

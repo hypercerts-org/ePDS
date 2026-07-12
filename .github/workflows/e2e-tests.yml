@@ -656,6 +656,9 @@ jobs:
           # excludes @otp-expiry so the rest of the suite still runs.
           E2E_INTERNAL_SECRET: ${{ secrets.E2E_INTERNAL_SECRET }}
           E2E_HEADLESS: 'true'
+          # One retry gives transient Railway/browser timing issues another
+          # chance without masking persistent failures.
+          CUCUMBER_RETRY: '1'
         run: pnpm test:e2e:headless
 
       - name: Publish e2e test report

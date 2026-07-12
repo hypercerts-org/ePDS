@@ -1,12 +1,12 @@
 ---
 name: writing-changesets
-description: Create changeset files for user-facing or operator-facing changes to ePDS. Use when adding features, changing configuration, altering OAuth flows, or any change a downstream consumer needs to adapt to.
+description: Create changeset files for changes to ePDS that affect end users, client app developers, or operators. Use when adding features, changing configuration, altering OAuth flows, or any change a downstream consumer needs to adapt to.
 ---
 
 # Writing Changesets
 
-Create a changeset file to document user-facing or operator-facing
-changes for release.
+Create a changeset file to document changes for release that affect
+end users, client app developers, or operators.
 
 ## When to Use
 
@@ -223,6 +223,49 @@ The goal: a reader in one of the listed audiences should be able
 to adapt their environment or code **without reading the PR or
 the source**. Changesets are not release-note marketing copy —
 they are migration instructions.
+
+### Keep it as short as the change deserves
+
+"Concrete" is not "exhaustive". Include exactly what the reader
+needs to adapt, and stop. Most changesets are **two to four
+sentences per audience**; a small change is often a single
+sentence. Length must track the size of what the reader has to do,
+not the effort that went into the change. A one-line behaviour
+tweak gets a one-line changeset even if the PR was large.
+
+Brevity and bullets are not in tension: cutting is about _how many_
+points survive, bullets are about _how you lay them out_ so the
+survivors stay scannable. First cut to the points the reader must
+act on; then, if 3+ remain, lay them out as bullets rather than
+packing them into one paragraph — a short multi-point section is
+still a wall of text when run together. Keep one- or two-point
+sections as inline prose. If you find yourself writing a fourth or
+fifth bullet, that is a signal to cut, not to keep listing.
+
+Before you finish, delete anything the reader does not act on:
+
+- **A verbatim example** (a full log line, a whole JSON body) when
+  naming the fields already tells them what to grep or send. Show
+  a shape only when the exact serialization is the thing they must
+  match.
+- **Rationale and "why" prose** — "since this can signal X", "so
+  that Y". State the observable behaviour; the reasoning belongs
+  in the commit or PR, not the release note.
+- **Exhaustive enumerations** — every endpoint, every reason
+  string, every excluded case — when a representative name plus
+  "and related …" conveys the same adaptation. List the full set
+  only when the reader must match against each member.
+- **Internal filtering the reader never sees** — "3xx are filtered
+  before this runs, 5xx are logged elsewhere". If it doesn't change
+  what they do, it doesn't belong.
+- **Caveats about edge cases** the reader cannot act on. One
+  clause at most; usually cut.
+
+Rule of thumb: if removing a sentence would not change what the
+reader _does_, remove it. A tight four-line changeset that names
+the fields and the observable effect beats a fifteen-line one that
+also explains the mechanism, quotes a sample, and enumerates every
+case.
 
 ### What "concrete detail" means
 

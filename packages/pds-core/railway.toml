@@ -5,32 +5,35 @@ builder = "DOCKERFILE"
 # Path is relative to the repository root, not this package directory.
 # Railway does not support --target for multi-stage builds, so we use a
 # dedicated Dockerfile that produces only the pds-core image.
-dockerfilePath = "Dockerfile.pds"
+dockerfilePath = "/Dockerfile.pds"
+# Anchor watch patterns to the repository root with a leading slash. Railway
+# loads this config from packages/pds-core/railway.toml, and unanchored patterns
+# can be interpreted relative to that package directory.
 watchPatterns = [
-  "packages/pds-core/**",
-  "packages/shared/**",
+  "/packages/pds-core/**",
+  "/packages/shared/**",
   # auth-service's package.json is referenced during the workspace-aware
   # pnpm install step, so a bump there changes the produced image.
-  "packages/auth-service/package.json",
-  "Dockerfile.pds",
-  "docker-entrypoint.sh",
+  "/packages/auth-service/package.json",
+  "/Dockerfile.pds",
+  "/docker-entrypoint.sh",
   # Repo-root files COPYed by Dockerfile.pds. A change to any of these
   # can legitimately alter the produced image (new dep, new pnpm version,
   # changed tsconfig project references, etc.), so we must redeploy.
-  "package.json",
-  "pnpm-workspace.yaml",
-  "pnpm-lock.yaml",
-  "tsconfig.json",
+  "/package.json",
+  "/pnpm-workspace.yaml",
+  "/pnpm-lock.yaml",
+  "/tsconfig.json",
   # e2e test / feature changes produce a byte-identical image, but we still
   # need Railway to redeploy so the GitHub Actions e2e job (which gates on
   # deployment_status webhooks) actually runs against PRs that only touch
   # tests. Exclude markdown under these dirs so doc-only edits don't
   # pointlessly trigger a redeploy + ~8 minute e2e run.
-  "e2e/**",
-  "features/**",
-  ".github/workflows/e2e-tests.yml",
-  "!e2e/**/*.md",
-  "!features/**/*.md",
+  "/e2e/**",
+  "/features/**",
+  "/.github/workflows/e2e-tests.yml",
+  "!/e2e/**/*.md",
+  "!/features/**/*.md",
 ]
 
 [deploy]

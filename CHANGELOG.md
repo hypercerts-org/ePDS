@@ -1,5 +1,34 @@
 # ePDS
 
+## 0.6.4
+
+### Who should read this release
+
+- **Client app developers:**
+  - [The `/preview/validate` page now checks `epds_handle_login_url` on your client metadata.](#v0.6.4-the-page-now-checks-on-your-client-metadata)
+- **Operators:**
+  - [Failed one-time code attempts now appear in the server logs, split by reason and tagged with the account's email.](#v0.6.4-failed-one-time-code-attempts-now-appear-in-the-server-logs)
+
+### Patch Changes
+
+- <a id="v0.6.4-failed-one-time-code-attempts-now-appear-in-the-server-logs"></a> [#189](https://github.com/hypercerts-org/ePDS/pull/189) [`008b143`](https://github.com/hypercerts-org/ePDS/commit/008b143d160e3b0e9b0a2fae887283de464be8a0) Thanks [@aspiers](https://github.com/aspiers)! - Failed one-time code attempts now appear in the server logs, split by reason and tagged with the account's email.
+
+  **Affects:** Operators
+
+  **Operators:** failed OTP verifications are now logged under the `auth:better-auth` logger.
+  - Each line carries an `email`, `statusCode`, and `path` field, and names the reason: `code expired`, `invalid or unrecognized code`, or `too many attempts, code invalidated`.
+  - Routine failures (expired / invalid) log at `info`; too-many-attempts logs at `warn`.
+  - All are visible at the default `info` level — no `LOG_LEVEL` change needed.
+
+- <a id="v0.6.4-the-page-now-checks-on-your-client-metadata"></a> [#176](https://github.com/hypercerts-org/ePDS/pull/176) [`a00cb25`](https://github.com/hypercerts-org/ePDS/commit/a00cb2529f64fc97429e99b4e6f7bb35d0a47682) Thanks [@aspiers](https://github.com/aspiers)! - The `/preview/validate` page now checks `epds_handle_login_url` on your client metadata.
+
+  **Affects:** Client app developers
+
+  **Client app developers:** a new `handle-login-url` row joins the existing field checks.
+  - Missing or empty value warns you that the "Or sign in with ATProto/Bluesky" button won't render.
+  - An `http(s)://` value is ok, matching the `isSafeHttpUrl` gate that renders the button at runtime (`http://` accepted so localhost dev clients still pass).
+  - Any other value (`javascript:`, `file:`, unparseable) errors, because the runtime gate would silently drop the button on real flows.
+
 ## 0.6.3
 
 ### Who should read this release
