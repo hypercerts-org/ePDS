@@ -5,13 +5,15 @@
  * - Email OTP plugin (for future migration from custom OTP implementation)
  * - Social providers (Google, GitHub — only when env vars are set)
  * - Session lifetime from env vars
+ * - An `after` hook that surfaces OTP verification failures in our logs,
+ *   with the user's email attached (see logOtpVerificationFailure below)
  *
  * The instance is mounted at /api/auth/* alongside the existing custom routes.
- * No existing behavior is changed — this is a foundation-only step.
  */
 import type { EpdsDb } from '@certified-app/shared'
 import { createLogger } from '@certified-app/shared'
 import { betterAuth } from 'better-auth'
+import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { generateRandomString } from 'better-auth/crypto'
 import { getMigrations } from 'better-auth/db'
 import { emailOTP } from 'better-auth/plugins'
@@ -22,7 +24,117 @@ import { ensurePdsUrl } from './lib/pds-url.js'
 
 export type BetterAuthInstance = ReturnType<typeof createBetterAuth>
 
+/** The logger type used across this module — avoids a direct pino dependency. */
+type BetterAuthLogger = ReturnType<typeof createLogger>
+
 const logger = createLogger('auth:better-auth')
+
+/**
+ * Map a better-auth OTP reason string to a self-contained log message.
+ *
+ * better-auth's own messages ("OTP expired", "Invalid OTP", "Too many
+ * attempts") are terse and, out of context, ambiguous — "Too many attempts"
+ * alone doesn't say attempts at what. We map each to a message that stands on
+ * its own in a log line, sharing an "OTP verification failed:" prefix so the
+ * whole class is greppable while each reason stays distinct at a glance.
+ *
+ * Mapping here (rather than logging better-auth's string verbatim) also
+ * decouples our logs from better-auth's exact wording: if a future version
+ * renames a reason, our log messages don't silently change.
+ *
+ * Note on "Invalid OTP": better-auth throws it both for a wrong code and for
+ * no pending code at all, so the message says "invalid or unrecognized" rather
+ * than implying only a typo. The two cases remain indistinguishable in the log.
+ * "Too many attempts" additionally deletes the stored code (better-auth 1.4.18
+ * dist/plugins/email-otp/routes.mjs), which the message reflects.
+ */
+const OTP_FAILURE_MESSAGES: Record<string, string> = {
+  'OTP expired': 'OTP verification failed: code expired',
+  'Invalid OTP': 'OTP verification failed: invalid or unrecognized code',
+  'Too many attempts':
+    'OTP verification failed: too many attempts, code invalidated',
+}
+
+const OTP_FAILURE_FALLBACK = 'OTP verification failed'
+
+/**
+ * Surface a better-auth OTP verification failure in our own logs, with the
+ * user's email attached.
+ *
+ * The main OAuth login flow posts straight from the browser to
+ * /api/auth/sign-in/email-otp, handled by better-auth's node handler. On
+ * verification failure better-auth throws a 4xx `APIError` whose message is the
+ * exact reason — "OTP expired", "Invalid OTP" or "Too many attempts". These are
+ * the only signal distinguishing a genuinely-late email (expired) from a user
+ * retyping a stale code (invalid), so we log them to make the split countable
+ * over time. Expired / invalid codes are routine user error and log at `info`;
+ * a 403 (too many attempts) can signal brute-forcing and logs at `warn`. Both
+ * levels are visible at prod's default `info` level.
+ *
+ * Unlike better-auth's instance-wide `onAPIError` hook, this runs from an
+ * `after` middleware that receives the per-request endpoint context, so the
+ * request body — and hence `email` — is available. Fields are ordered for a
+ * developer debugging a specific failure: email (who) first, then statusCode
+ * (a quick 400/403 split), then path. The reason lives in the message, so it is
+ * not duplicated as a field. The `err` object is deliberately omitted: for 4xx
+ * client errors the mapped message already captures the cause, and the full
+ * APIError (with stack) is noise in Railway's logfmt rendering.
+ *
+ * Only 4xx `APIError`s are logged. 3xx redirects (status "FOUND") are filtered
+ * by better-auth before the after hook runs, and 5xx errors are already logged
+ * by better-auth's own error handler; both are skipped to avoid double-logging.
+ * Non-`APIError` values (e.g. a successful response) are ignored.
+ */
+export function logOtpVerificationFailure(
+  error: unknown,
+  email: unknown,
+  path: string,
+  log: BetterAuthLogger,
+): void {
+  if (!(error instanceof APIError)) return
+
+  const statusCode = error.statusCode
+  if (statusCode < 400 || statusCode >= 500) return
+
+  const reason = error.body?.message ?? error.message
+  // Unmapped reasons keep the shared "OTP verification failed:" prefix (so the
+  // whole class stays greppable) and append the raw reason for context.
+  const message =
+    OTP_FAILURE_MESSAGES[reason] ?? `${OTP_FAILURE_FALLBACK}: ${reason}`
+
+  // Expired / invalid codes are routine user error, so they log at `info`.
+  // A 403 (too many attempts) is the one outcome that can signal brute-forcing
+  // rather than a fumble, so it warrants `warn`.
+  const level = statusCode === 403 ? 'warn' : 'info'
+
+  log[level](
+    {
+      email: typeof email === 'string' ? email : undefined,
+      statusCode,
+      path,
+    },
+    message,
+  )
+}
+
+/**
+ * OTP *verification* endpoints whose 4xx failures we log with the user's email.
+ *
+ * This is an explicit allowlist rather than a `/email-otp/*` prefix match,
+ * because that prefix also covers the OTP *send* endpoints
+ * (`/email-otp/send-verification-otp`, `/email-otp/request-password-reset`),
+ * whose failures are not verification failures and would be mislabelled.
+ */
+const OTP_VERIFY_PATHS = new Set([
+  '/sign-in/email-otp',
+  '/email-otp/check-verification-otp',
+  '/email-otp/verify-email',
+  '/email-otp/reset-password',
+])
+
+export function isOtpVerifyPath(path: string): boolean {
+  return OTP_VERIFY_PATHS.has(path)
+}
 
 const AUTH_FLOW_COOKIE = 'epds_auth_flow'
 
@@ -157,6 +269,31 @@ export function createBetterAuth(
     database: betterAuthDb as any,
     baseURL: `https://${authHostname}`,
     basePath: '/api/auth',
+
+    // Surface OTP verification failures ("OTP expired" vs "Invalid OTP" vs
+    // "Too many attempts") in our pino logs, with the user's email attached.
+    //
+    // This uses an `after` middleware rather than the instance-wide
+    // `onAPIError` hook because only the per-request endpoint context exposes
+    // the request body (and hence the email). The after hook runs, then
+    // better-auth re-throws the APIError, so the HTTP response is unchanged.
+    // See logOtpVerificationFailure above.
+    hooks: {
+      // createAuthMiddleware's handler type requires a Promise return. Our
+      // logging is synchronous, so the callback stays non-async and returns a
+      // resolved promise rather than suppressing the require-await lint.
+      after: createAuthMiddleware((ctx) => {
+        if (isOtpVerifyPath(ctx.path)) {
+          logOtpVerificationFailure(
+            ctx.context.returned,
+            ctx.body?.email,
+            ctx.path,
+            logger,
+          )
+        }
+        return Promise.resolve()
+      }),
+    },
 
     session: {
       expiresIn: sessionExpiresIn,

@@ -44,22 +44,14 @@ export function createTestHooksRouter(dbLocation: string): Router {
         return
       }
 
-      // The auth_flow table currently stores a flow's email only as a
-      // (rarely populated) free-form column rather than something we can
-      // key on, so we deliberately backdate ALL non-expired auth_flow
-      // rows. This is safe because:
-      //   * the hook only runs when EPDS_TEST_HOOKS=1 (never in
-      //     production — see the constructor guard above);
-      //   * the e2e suite drives a single browser context against an
-      //     otherwise quiescent preview env, so "all live flows" is
-      //     effectively the one flow under test;
-      //   * the only effect is to make /auth/complete report
-      //     "Authentication session expired" earlier than the 10-minute
-      //     wall-clock TTL, which is exactly what we want to reproduce.
-      // The {email} body field is still required so callers stay
-      // symmetric with /expire-otp and so server logs record which
-      // scenario triggered the backdate.
+      // Prefer targeting by request_uri so parallel e2e workers do not
+      // expire each other's in-flight auth_flow rows. The {email} body
+      // field is still required so callers stay symmetric with
+      // /expire-otp and so server logs record which scenario triggered
+      // the backdate. If request_uri is omitted, keep the legacy
+      // test-only behaviour of backdating all live rows.
       const email = ((req.body?.email as string) || '').trim().toLowerCase()
+      const requestUri = ((req.body?.request_uri as string) || '').trim()
       if (!email) {
         res.status(400).json({ error: 'Missing email' })
         return
@@ -68,11 +60,24 @@ export function createTestHooksRouter(dbLocation: string): Router {
       const db = new Database(dbLocation)
       try {
         const past = Date.now() - 60 * 60 * 1000
-        const result = db
-          .prepare('UPDATE auth_flow SET expires_at = ? WHERE expires_at > ?')
-          .run(past, Date.now())
+        const now = Date.now()
+        const result = requestUri
+          ? db
+              .prepare(
+                'UPDATE auth_flow SET expires_at = ? WHERE request_uri = ? AND expires_at > ?',
+              )
+              .run(past, requestUri, now)
+          : db
+              .prepare(
+                'UPDATE auth_flow SET expires_at = ? WHERE expires_at > ?',
+              )
+              .run(past, now)
         logger.warn(
-          { email, updated: result.changes },
+          {
+            email,
+            requestUri: requestUri ? requestUri.slice(0, 60) : null,
+            updated: result.changes,
+          },
           'Backdated auth_flow.expires_at',
         )
         res.json({ updated: result.changes })

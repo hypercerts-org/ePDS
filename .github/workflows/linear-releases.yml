@@ -13,7 +13,7 @@ jobs:
     if: >-
       github.event.deployment_status.state == 'success' &&
       github.event.deployment.creator.login == 'railway-app[bot]' &&
-      github.event.deployment.environment == 'ePDS / pr-base'
+      github.event.deployment.environment == 'ePDS / dev'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read

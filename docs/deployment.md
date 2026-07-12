@@ -159,8 +159,9 @@ Railway handles TLS automatically.
 ### Deploying
 
 Railway deploys automatically on push to the linked branch. Each service's
-`railway.toml` defines `watchPatterns` so only relevant changes trigger a
-rebuild.
+`railway.toml` defines root-anchored `watchPatterns` (leading `/`) so only
+relevant changes trigger a rebuild, even though the config files live under
+`packages/*/`.
 
 To manually redeploy:
 

@@ -348,6 +348,33 @@ describe('test-hooks router — expire-auth-flow', () => {
     expect(newExpiresAt!).toBeLessThan(Date.now())
   })
 
+  it('backdates only the matching auth_flow when request_uri is supplied', async () => {
+    const future = Date.now() + 600_000
+    seedAuthFlow(dbPath(), 'flow-a', future)
+    seedAuthFlow(dbPath(), 'flow-b', future + 1_000)
+
+    const app = express()
+    app.use(express.json())
+    app.use(createTestHooksRouter(dbPath()))
+
+    const res = await postExpireAuthFlow(
+      app,
+      {
+        email: 'alice@example.com',
+        request_uri: 'urn:ietf:params:oauth:request_uri:flow-b',
+      },
+      { 'x-internal-secret': 'test-secret-1234' },
+    )
+
+    expect(res.status).toBe(200)
+    expect(res.json.updated).toBe(1)
+
+    expect(readAuthFlowExpiresAt(dbPath(), 'flow-a')!).toBeGreaterThan(
+      Date.now(),
+    )
+    expect(readAuthFlowExpiresAt(dbPath(), 'flow-b')!).toBeLessThan(Date.now())
+  })
+
   it('returns updated=0 when there are no live auth_flow rows', async () => {
     // Schema exists (seeded by another flow that is already expired) but
     // no rows match the WHERE clause expires_at > now.
@@ -372,12 +399,11 @@ describe('test-hooks router — expire-auth-flow', () => {
     expect(oldExpiresAt!).toBeGreaterThan(Date.now() - 120_000)
   })
 
-  it('backdates ALL live auth_flow rows when multiple exist (deterministic)', async () => {
-    // The hook deliberately backdates every live flow, not just "the one
-    // for this email", because the auth_flow.email column is rarely
-    // populated in practice. With multiple concurrent flows in test-only
-    // databases (e.g. retried scenarios) this guarantees the flow under
-    // test is always covered.
+  it('backdates ALL live auth_flow rows when request_uri is omitted (legacy fallback)', async () => {
+    // The fallback deliberately backdates every live flow, not just "the
+    // one for this email", because the auth_flow.email column is rarely
+    // populated in practice. E2E callers should pass request_uri so
+    // parallel workers do not interfere with each other.
     const future = Date.now() + 600_000
     seedAuthFlow(dbPath(), 'flow-a', future)
     seedAuthFlow(dbPath(), 'flow-b', future + 1_000)

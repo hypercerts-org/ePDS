@@ -43,7 +43,12 @@ export async function pickHandle(world: EpdsWorld): Promise<void> {
   const page = world.page
   if (!page) throw new Error('page is not initialised')
 
-  await page.waitForURL('**/auth/choose-handle', { timeout: 30_000 })
+  await page.waitForURL('**/auth/choose-handle', {
+    timeout: 60_000,
+    waitUntil: 'domcontentloaded',
+  })
+  await expect(page.locator('#handle-input')).toBeVisible({ timeout: 15_000 })
+
   const localPart = generateHandleLocalPart()
   await page.fill('#handle-input', localPart)
   await expect(page.locator('#handle-status.available')).toBeVisible({

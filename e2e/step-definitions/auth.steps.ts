@@ -466,16 +466,19 @@ When(
       )
     }
 
-    // Backdate the auth_flow row so getAuthFlow() filters it out as
-    // expired. The epds_auth_flow cookie is left alone: keeping it lets
-    // the abort gate's /auth/ping call differentiate "auth_flow expired"
+    // Backdate this scenario's auth_flow row so getAuthFlow() filters
+    // it out as expired. Passing request_uri keeps the test hook safe
+    // when multiple Cucumber workers share one preview database.
+    // The epds_auth_flow cookie is left alone: keeping it lets the
+    // abort gate's /auth/ping call differentiate "auth_flow expired"
     // (cookie present but row gone -> reason: flow_expired) from
     // "no_cookie", which is what discriminates this scenario from
     // unrelated dead-session paths.
+    const requestUri = captureRequestUriFromPage(this)
     const flowResult = await callExpiryHook(
       '/_internal/test/expire-auth-flow',
       this.testEmail,
-      {},
+      { request_uri: requestUri },
     )
     if (flowResult.updated < 1) {
       throw new Error(

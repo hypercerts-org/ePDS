@@ -68,6 +68,7 @@ describe('validateClientMetadataForPreview', () => {
       branding: { css: 'body { color: red; }' },
       tos_uri: 'https://good.example/terms',
       policy_uri: 'https://good.example/privacy',
+      epds_handle_login_url: 'https://good.example/api/oauth/login',
     })
     const result = await validateClientMetadataForPreview(url, [url])
     expect(result.fetched).toBe(true)
@@ -80,6 +81,7 @@ describe('validateClientMetadataForPreview', () => {
     expect(byId['branding-css'].severity).toBe('ok')
     expect(byId['tos-uri'].severity).toBe('ok')
     expect(byId['policy-uri'].severity).toBe('ok')
+    expect(byId['handle-login-url'].severity).toBe('ok')
     expect(byId['trusted-client'].severity).toBe('ok')
   })
 
@@ -123,6 +125,7 @@ describe('validateClientMetadataForPreview', () => {
     expect(byId['branding-css'].severity).toBe('warn')
     expect(byId['tos-uri'].severity).toBe('warn')
     expect(byId['policy-uri'].severity).toBe('warn')
+    expect(byId['handle-login-url'].severity).toBe('warn')
     // trust check also warn, not error
     expect(byId['trusted-client'].severity).toBe('warn')
     // No error-level checks on an otherwise-valid metadata:
@@ -141,6 +144,51 @@ describe('validateClientMetadataForPreview', () => {
     const byId = Object.fromEntries(result.checks.map((c) => [c.id, c]))
     expect(byId['tos-uri'].severity).toBe('error')
     expect(byId['policy-uri'].severity).toBe('error')
+  })
+
+  it('flags epds_handle_login_url ok for http:// (dev) and https:// values', async () => {
+    // Mirrors the real isSafeHttpUrl gate in auth-service's login-page:
+    // both schemes pass so that localhost dev clients keep working.
+    for (const handleUrl of [
+      'http://localhost:3000/api/oauth/login',
+      'https://client.example/api/oauth/login',
+    ]) {
+      const url = `https://${handleUrl.includes('localhost') ? 'dev' : 'prod'}.example/client-metadata.json`
+      mockFetchOnce({
+        client_id: url,
+        redirect_uris: [
+          `https://${handleUrl.includes('localhost') ? 'dev' : 'prod'}.example/cb`,
+        ],
+        epds_handle_login_url: handleUrl,
+      })
+      const result = await validateClientMetadataForPreview(url, null)
+      const check = result.checks.find((c) => c.id === 'handle-login-url')
+      expect(check?.severity).toBe('ok')
+    }
+  })
+
+  it('errors when epds_handle_login_url is not http(s)', async () => {
+    const url = 'https://bad-handle.example/client-metadata.json'
+    mockFetchOnce({
+      client_id: url,
+      redirect_uris: ['https://bad-handle.example/cb'],
+      epds_handle_login_url: 'javascript:alert(1)',
+    })
+    const result = await validateClientMetadataForPreview(url, null)
+    const check = result.checks.find((c) => c.id === 'handle-login-url')
+    expect(check?.severity).toBe('error')
+  })
+
+  it('errors when epds_handle_login_url is unparseable', async () => {
+    const url = 'https://bad-handle2.example/client-metadata.json'
+    mockFetchOnce({
+      client_id: url,
+      redirect_uris: ['https://bad-handle2.example/cb'],
+      epds_handle_login_url: 'not a url',
+    })
+    const result = await validateClientMetadataForPreview(url, null)
+    const check = result.checks.find((c) => c.id === 'handle-login-url')
+    expect(check?.severity).toBe('error')
   })
 
   it('errors when client_id field does not match the URL', async () => {

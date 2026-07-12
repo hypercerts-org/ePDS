@@ -43,9 +43,28 @@ const defaultTagExclusions = [
   ...hookTagExclusions,
 ]
 
+const parsedCucumberRetry = Number.parseInt(
+  process.env.CUCUMBER_RETRY ?? '0',
+  10,
+)
+const cucumberRetry =
+  Number.isFinite(parsedCucumberRetry) && parsedCucumberRetry >= 0
+    ? parsedCucumberRetry
+    : 0
+
+const parsedDefaultParallel = Number.parseInt(
+  process.env.E2E_PARALLEL ?? '3',
+  10,
+)
+const defaultParallel =
+  Number.isFinite(parsedDefaultParallel) && parsedDefaultParallel >= 0
+    ? parsedDefaultParallel
+    : 3
+
 const shared = {
   paths: ['features/**/*.feature'],
   import: ['e2e/step-definitions/**/*.ts', 'e2e/support/**/*.ts'],
+  retry: cucumberRetry,
   strict: true,
 }
 
@@ -56,6 +75,7 @@ export default () => ({
   default: {
     ...shared,
     format: ['pretty', 'html:reports/e2e.html', 'junit:reports/e2e.junit.xml'],
+    parallel: defaultParallel,
     tags: defaultTagExclusions.join(' and '),
   },
   'session-reuse': {

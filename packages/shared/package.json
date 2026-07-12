@@ -1,5 +1,6 @@
 {
   "name": "@certified-app/shared",
+  "description": "Shared database, crypto, HTML, and utility code for ePDS services.",
   "private": true,
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
