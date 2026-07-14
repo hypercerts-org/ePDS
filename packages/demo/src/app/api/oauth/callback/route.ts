@@ -23,7 +23,7 @@ import {
 import { signClientAssertion } from '@/lib/client-jwk'
 import { cookies } from 'next/headers'
 import {
-  getOAuthSessionFromCookie,
+  readOAuthSessionCookie,
   createUserSessionCookie,
   OAUTH_COOKIE,
 } from '@/lib/session'
@@ -48,12 +48,24 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(new URL('/?error=auth_failed', baseUrl))
     }
 
-    // Retrieve OAuth session from signed cookie
+    // Retrieve OAuth session from signed cookie. The cookie carries
+    // the state value, code verifier, token endpoint and issuer that
+    // we recorded when starting the OAuth flow. If it has gone away
+    // (cookie expired by browser, user cleared cookies, very long
+    // wait on the OTP form), there is nothing we can do to complete
+    // the token exchange — but we owe the user a useful
+    // `session_expired` error. A cookie that is still present but
+    // fails signature or JSON validation remains an `auth_failed`
+    // error because it may have been tampered with.
     const cookieStore = await cookies()
-    const stateData = getOAuthSessionFromCookie(cookieStore)
-    if (!stateData) {
-      return NextResponse.redirect(new URL('/?error=auth_failed', baseUrl))
+    const stateResult = readOAuthSessionCookie(cookieStore)
+    if (!stateResult.session) {
+      console.error(stateResult.logMessage)
+      return NextResponse.redirect(
+        new URL(`/?error=${stateResult.errorCode}`, baseUrl),
+      )
     }
+    const stateData = stateResult.session
 
     if (stateData.state !== state) {
       return NextResponse.redirect(new URL('/?error=auth_failed', baseUrl))

@@ -343,6 +343,59 @@ Feature: Passwordless authentication via email OTP
     And the user requests a new OTP via the resend button
     Then the browser lands back at the demo client with an auth error
 
+  # The page never offers actions that cannot complete the flow. When
+  # the upstream PAR has died (silent timeout, suspended tab,
+  # heartbeat throttling), the standalone Resend button is removed
+  # from view and replaced with a Start over button — so the user
+  # never wastes time typing a fresh OTP that could not have worked.
+  # This is the proactive complement to @resend-after-par-dead's
+  # reactive abort gate: rather than letting the click happen and
+  # bouncing it server-side, we surface only forward paths that can
+  # actually succeed.
+  @email @otp-and-par-expiry @resend-hidden-when-par-dead
+  Scenario: Resend button is hidden when the PAR has died — Start over is offered instead
+    When the demo client initiates an OAuth login
+    Then the browser is redirected to the auth service login page
+    And the login page displays an email input form
+    When the user enters a unique test email and submits
+    Then an OTP email arrives in the mail trap for the test email
+    And the login page shows an OTP verification form
+    When the PAR request_uri has expired before the bridge fires
+    And the OTP form re-checks PAR liveness
+    Then the Resend code button is no longer offered
+    And a Start over button is offered instead
+
+  # The demo OAuth client stores its OAuth state (state value, code
+  # verifier, token endpoint, issuer) in a signed cookie that has its
+  # own lifetime. If that cookie expires before the auth-service
+  # bridges the user back via /oauth/epds-callback (e.g. user
+  # dawdled on the OTP form long enough that the cookie aged out
+  # mid-flow), the demo's callback handler can't find the OAuth state
+  # and silently bounces to the demo home page with
+  # `?error=auth_failed`. The user has just typed a fresh OTP
+  # successfully, so this is genuinely time-wasting and misleading:
+  # the auth-service did everything right but the demo dropped the
+  # ball.
+  #
+  # The contract the demo MUST satisfy: as long as the OAuth flow is
+  # still recoverable from the auth-service side (auth_flow row
+  # alive, PAR alive or refreshable), the demo's session cookie must
+  # also be alive. This scenario reproduces the failure mode by
+  # programmatically clearing the demo's `oauth_state` cookie just
+  # before the OTP submission, which is equivalent to the cookie
+  # having lapsed by wall-clock.
+  @email @demo-cookie-expiry @bug-report
+  Scenario: Demo client's OAuth cookie has expired by the time of callback — useful error, not generic auth_failed
+    When the demo client starts a new OAuth flow with random handle mode
+    Then the browser is redirected to the auth service login page
+    And the login page displays an email input form
+    When the user enters a unique test email and submits
+    Then an OTP email arrives in the mail trap for the test email
+    And the login page shows an OTP verification form
+    When the demo client's OAuth state cookie has expired
+    And the user enters the OTP code
+    Then the demo client surfaces a session-expired error
+
   @email @otp-and-par-expiry @prompt-login
   Scenario: prompt=login + expired PAR — clean exit back to the OAuth client
     Given a returning user has a PDS account
