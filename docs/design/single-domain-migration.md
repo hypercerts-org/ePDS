@@ -13,15 +13,15 @@ that case is accepted and focuses on _how_.
 
 ## Summary of the change
 
-| Concern | Today (two origins) | After (one origin) |
-| --- | --- | --- |
-| Auth UI location | `https://auth.pds.example/oauth/authorize`, `/auth/*`, `/account/*` | `https://pds.example/auth/*` (path-prefixed) |
-| `authorization_endpoint` (AS metadata) | `https://auth.<host>/oauth/authorize` | `https://<host>/auth/oauth/authorize` |
-| `sec-fetch-site` on `/oauth/authorize` | `same-site`, rewritten to `same-origin` (item 5) | naturally `same-origin` — rewrite **deleted** |
-| Device-session cookies | `Domain=<parent>` so sibling subdomain can read them (items 14–15) | host-only on the single origin — **plumbing deleted** |
-| Auth session cookie | `magic_account_session` / better-auth `session` on `auth.<host>` | same names, path-scoped `/auth` on `<host>` |
-| CSP | per-route in each service (unchanged approach) | per-route, unchanged |
-| Deploy units | two services | still two processes, one origin (Caddy path-routes) — or merged later |
+| Concern                                | Today (two origins)                                                 | After (one origin)                                                    |
+| -------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Auth UI location                       | `https://auth.pds.example/oauth/authorize`, `/auth/*`, `/account/*` | `https://pds.example/auth/*` (path-prefixed)                          |
+| `authorization_endpoint` (AS metadata) | `https://auth.<host>/oauth/authorize`                               | `https://<host>/auth/oauth/authorize`                                 |
+| `sec-fetch-site` on `/oauth/authorize` | `same-site`, rewritten to `same-origin` (item 5)                    | naturally `same-origin` — rewrite **deleted**                         |
+| Device-session cookies                 | `Domain=<parent>` so sibling subdomain can read them (items 14–15)  | host-only on the single origin — **plumbing deleted**                 |
+| Auth session cookie                    | `magic_account_session` / better-auth `session` on `auth.<host>`    | same names, path-scoped `/auth` on `<host>`                           |
+| CSP                                    | per-route in each service (unchanged approach)                      | per-route, unchanged                                                  |
+| Deploy units                           | two services                                                        | still two processes, one origin (Caddy path-routes) — or merged later |
 
 The routing model is exactly pds-gatekeeper's: **Caddy routes by path**, sending
 `/auth/*` (and the auth-owned `/oauth/authorize`, `/account/*`) to the

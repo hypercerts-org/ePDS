@@ -80,7 +80,6 @@ endpoint to issue an AT Protocol authorization code. For new users, a handle-pic
   `pds.example`). A single-domain design — one origin, routing the auth paths
   by path prefix the way [pds-gatekeeper](https://tangled.org/baileytownsend.dev/pds-gatekeeper)
   does — was **considered and rejected**. The reasons:
-
   - **Mechanism (how the takeover happens)**: PDS Core overrides the
     Authorization Server metadata so `authorization_endpoint` points at the
     Auth Service. OAuth clients redirect the browser straight there, so the
@@ -117,7 +116,6 @@ endpoint to issue an AT Protocol authorization code. For new users, a handle-pic
 
   **On re-examination, none of the three benefits is a non-negotiable, and all
   the costs are artifacts of being cross-origin-but-same-site:**
-
   - _Cookie isolation_ is already done by explicit cookie **naming**
     (`epds_csrf`, `magic_account_session`, the `DEVICE_COOKIE_NAMES` set), not
     by origin — so it survives a collapse to one origin, optionally hardened
@@ -139,7 +137,6 @@ endpoint to issue an AT Protocol authorization code. For new users, a handle-pic
 
   Beyond dissolving those costs, collapsing to one origin has **positive**
   benefits the split forecloses:
-
   - **Fewer privileged cross-service endpoints.** The split forces the two
     services to talk over authenticated HTTP: the HMAC-signed
     `/oauth/epds-callback` and the `/_internal/*` / `/_magic/*` lookup
