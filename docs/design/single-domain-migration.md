@@ -38,7 +38,8 @@ This matters for both benefits and risks, so fix the terms up front:
 - **Merge the _processes_ (optional, later).** Fold auth-service into the
   pds-core Node process. Adds the "fewer privileged endpoints" benefit in full
   (calls become in-process) but is the only variant that can surface
-  dependency conflicts. Treat as a separate, later decision.
+  dependency conflicts. Treat as a separate, later decision — specced in full
+  in [single-process-merge.md](single-process-merge.md).
 
 ## Positive benefits (beyond deleting costs)
 
