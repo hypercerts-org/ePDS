@@ -137,6 +137,32 @@ endpoint to issue an AT Protocol authorization code. For new users, a handle-pic
     upstream already allows — so the one upstream validation that looks like a
     constraint actually _favors_ single-origin.
 
+  Beyond dissolving those costs, collapsing to one origin has **positive**
+  benefits the split forecloses:
+
+  - **Fewer privileged cross-service endpoints.** The split forces the two
+    services to talk over authenticated HTTP: the HMAC-signed
+    `/oauth/epds-callback` and the `/_internal/*` / `/_magic/*` lookup
+    endpoints (e.g. `account-by-email`, `check-email`), each an attack surface
+    that has to be signed, gated, and kept in sync. Co-located on one origin,
+    much of this can become in-process calls with no wire boundary to secure.
+    (Whether to also merge the _processes_ — versus keep two behind path
+    routing — is a separate decision; see the migration doc.)
+
+  - **Operational simplicity.** One origin means one TLS cert, one DNS record,
+    one CSP surface, and one set of cross-origin edge cases to reason about,
+    instead of a parent/subdomain pair whose relationship is itself
+    load-bearing config.
+
+  A **countervailing risk** applies only if the two _processes_ are merged
+  (not if they stay separate behind path routing): sharing one Node runtime
+  could surface npm peer-dependency conflicts between `auth-service`'s
+  `better-auth` and `pds-core`'s `@atproto/*` stack. In practice the repo is a
+  pnpm workspace with a non-flat `node_modules`, so each package already
+  resolves its own versions and the overlap today is minimal (`express`,
+  aligned). The risk is real but bounded, and avoided entirely by the
+  keep-two-processes option.
+
   The remaining real risk is not any of the three benefits but external
   addressability of `auth.<host>`: `authorization_endpoint` is published in AS
   metadata and cached by clients, and `EPDS_LINK_BASE_URL` appears in live

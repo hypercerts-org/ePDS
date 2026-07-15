@@ -28,6 +28,47 @@ The routing model is exactly pds-gatekeeper's: **Caddy routes by path**, sending
 auth-service process and everything else to the PDS. The auth-service stays a
 separate process; only its _origin_ changes.
 
+## Two levels of "merge" — keep them distinct
+
+This matters for both benefits and risks, so fix the terms up front:
+
+- **Merge the _origin_ (recommended baseline).** One hostname, Caddy path-routes
+  to two still-separate processes. Dissolves every cross-origin cost; keeps the
+  HMAC trust boundary; carries **no** npm-version risk.
+- **Merge the _processes_ (optional, later).** Fold auth-service into the
+  pds-core Node process. Adds the "fewer privileged endpoints" benefit in full
+  (calls become in-process) but is the only variant that can surface
+  dependency conflicts. Treat as a separate, later decision.
+
+## Positive benefits (beyond deleting costs)
+
+- **Fewer privileged cross-service endpoints.** The split _requires_ the two
+  services to communicate over authenticated HTTP: the HMAC-signed
+  `/oauth/epds-callback` plus the internal lookup endpoints (`/_internal/*`,
+  `/_magic/check-email`, `account-by-email`). Each is an attack surface that
+  must be signed, gated, and version-matched across the boundary. Merging the
+  origin lets some of these relax; merging the processes lets most become
+  in-process calls with no wire boundary at all.
+- **Operational simplicity.** One TLS cert, one DNS record, one CSP surface, one
+  origin's worth of cross-origin edge cases — instead of a parent/subdomain pair
+  whose `endsWith('.'+pdsHostname)` relationship is itself load-bearing config
+  threaded through several modules.
+
+## Risk: npm version clashes (process-merge only)
+
+Applies **only** to the process-merge variant, not the origin-merge baseline.
+
+- Today the repo is a **pnpm workspace** (`pnpm --recursive`) with pnpm's
+  default non-flat `node_modules`, so `auth-service` and `pds-core` already
+  resolve their dependencies independently.
+- Overlap is small: `pds-core` owns the heavy `@atproto/*` stack, `auth-service`
+  owns `better-auth`; the only shared runtime dep is `express ^4.18.2`, already
+  aligned.
+- A single Node process would force one resolution of any shared/peer dep. The
+  realistic conflict surface is a future `express` (or a transitive peer both
+  pull) diverging. Bounded, but a real reason to prefer keeping two processes
+  unless the in-process-call benefit is specifically wanted.
+
 ## What gets deleted
 
 The whole point. These exist solely because of cross-origin-same-site:
@@ -44,6 +85,10 @@ The whole point. These exist solely because of cross-origin-same-site:
    `session-reuse.ts:195-200`, the `parentCookieDomain` derivation in
    `pds-core/src/index.ts:930`, and `authOrigin` derivation in
    `chooser-enrichment.ts`. The two hostnames become one.
+4. **(Process-merge only) some privileged cross-service endpoints** — the
+   `/_internal/*` / `/_magic/*` HTTP lookups become in-process calls. The
+   HMAC-signed `/oauth/epds-callback` can also collapse to an in-process call
+   if the processes merge. See "Two levels of merge" above.
 
 ## What stays
 
