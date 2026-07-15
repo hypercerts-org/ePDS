@@ -113,11 +113,39 @@ endpoint to issue an AT Protocol authorization code. For new users, a handle-pic
   Costs of the subdomain choice (accepted, and only partly documented at the
   time): the `same-site` → `same-origin` `sec-fetch-site` rewrite and the
   cross-subdomain cookie-domain plumbing, both in
-  [pds-white-boxing.md](design/pds-white-boxing.md) (items 5, 14, 15). Whether
-  these accumulated costs still outweigh the isolation benefits — given that
-  PDS Core already wraps upstream and could host the auth UI in-process — has
-  not been formally re-evaluated (tracked in
-  [#200](https://github.com/hypercerts-org/ePDS/issues/200)).
+  [pds-white-boxing.md](design/pds-white-boxing.md) (items 5, 14, 15).
+
+  **On re-examination, none of the three benefits is a non-negotiable, and all
+  the costs are artifacts of being cross-origin-but-same-site:**
+
+  - _Cookie isolation_ is already done by explicit cookie **naming**
+    (`epds_csrf`, `magic_account_session`, the `DEVICE_COOKIE_NAMES` set), not
+    by origin — so it survives a collapse to one origin, optionally hardened
+    with a `__Host-`/path scope. The split does not just fail to be _required_
+    for isolation; it actively _creates_ a cookie problem — the
+    `Domain=<parent>` sharing in items 14–15 — that a single origin deletes
+    outright.
+  - _Security-header isolation_ is already per-route in both packages
+    (`auth-service/src/lib/security-headers.ts` sets an auth-specific CSP per
+    request; `pds-core` already rewrites the upstream CSP per response in
+    `chooser-enrichment.ts` / `client-css-injection.ts`). Per-route CSP does
+    not need per-origin hosting.
+  - _Independent deployability_ is a soft benefit already weakened by a shared
+    repo, build, and data volume.
+  - The `sec-fetch-site` rewrite (item 5) exists **only** because the redirect
+    chain is `same-site`; a single origin makes it `same-origin`, which
+    upstream already allows — so the one upstream validation that looks like a
+    constraint actually _favors_ single-origin.
+
+  The remaining real risk is not any of the three benefits but external
+  addressability of `auth.<host>`: `authorization_endpoint` is published in AS
+  metadata and cached by clients, and `EPDS_LINK_BASE_URL` appears in live
+  email links — so a migration is a published-URL change needing a transition,
+  not a flip. (There is _no_ AT Protocol identity coupling: DIDs reference the
+  PDS host, and OAuth `redirect_uri` is always the client's.) This
+  re-evaluation, and a concrete single-domain migration design, are tracked in
+  [#200](https://github.com/hypercerts-org/ePDS/issues/200); see
+  [design/single-domain-migration.md](design/single-domain-migration.md).
 
   Origin rationale: `better-auth-migration-plan.md`, section "Considered and
   rejected: single-domain architecture" (introduced in commit `e6d6a08`; the
