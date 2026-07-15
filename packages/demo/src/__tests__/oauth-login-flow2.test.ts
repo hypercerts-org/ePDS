@@ -139,6 +139,9 @@ describe('OAuth login route (Flow 2)', () => {
 
   it('handles DPoP nonce retry (400 → dpop-nonce header → retry succeeds)', async () => {
     let callCount = 0
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const textSpy = vi.fn(() => Promise.resolve('use_dpop_nonce'))
+    const cancelSpy = vi.fn(() => Promise.resolve())
     global.fetch = vi.fn().mockImplementation(() => {
       callCount++
       if (callCount === 1) {
@@ -149,7 +152,8 @@ describe('OAuth login route (Flow 2)', () => {
           ok: false,
           status: 400,
           headers,
-          text: () => Promise.resolve('use_dpop_nonce'),
+          text: textSpy,
+          body: { cancel: cancelSpy },
         })
       }
       // Second call: success
@@ -170,6 +174,32 @@ describe('OAuth login route (Flow 2)', () => {
     // Should redirect successfully after retry
     expect(resp.status).toBe(307)
     expect(resp._url).toContain('request_uri=')
+    expect(errorSpy).not.toHaveBeenCalled()
+    expect(textSpy).not.toHaveBeenCalled()
+    expect(cancelSpy).toHaveBeenCalledOnce()
+  })
+
+  it('logs a terminal PAR failure when no DPoP nonce is provided', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      headers: new Headers(),
+      text: () => Promise.resolve('invalid_request'),
+    })
+
+    const resp = (await GET(makeRequest())) as unknown as {
+      status: number
+      _url: string
+    }
+
+    expect(resp.status).toBe(307)
+    expect(resp._url).toBe('http://localhost:3002/?error=par_failed')
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[oauth/login] PAR failed:',
+      400,
+      'invalid_request',
+    )
   })
 
   it('session cookie round-trips the stored OAuth data', async () => {

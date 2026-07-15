@@ -842,3 +842,90 @@ Then(
     }
   },
 )
+
+// ---------------------------------------------------------------------------
+// Resend-button visibility (fix for the "fresh OTP wasted on dead PAR" UX)
+// ---------------------------------------------------------------------------
+//
+// The page never offers an action that cannot complete the flow. When the
+// PAR is dead, the standalone Resend button is removed from view and a
+// Start over button takes its place — clicking it bails to /auth/abort
+// rather than issuing an OTP that would only fail downstream. The steps
+// below trigger the page's reactive ping (via the visibilitychange
+// handler that fires on tab-foreground) so it can observe the dead PAR
+// and reconcile the UI without a 5-minute wall-clock wait.
+
+When('the OTP form re-checks PAR liveness', async function (this: EpdsWorld) {
+  const page = getPage(this)
+  // Drive the page's reactive ping via a string-source script.
+  // Using page.evaluate(() => ...) inlines esbuild's __name helper,
+  // which then fails in Playwright's evaluation context with
+  // "ReferenceError: __name is not defined". Passing a string
+  // bypasses the bundler.
+  await page.evaluate(`(function () {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: function () { return 'visible' },
+      })
+      document.dispatchEvent(new Event('visibilitychange'))
+    })()`)
+})
+
+Then(
+  'the Resend code button is no longer offered',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    await expect(page.locator('#btn-resend')).toBeHidden({ timeout: 5_000 })
+  },
+)
+
+Then(
+  'a Start over button is offered instead',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    await expect(page.locator('#btn-start-over')).toBeVisible({
+      timeout: 5_000,
+    })
+  },
+)
+
+// ---------------------------------------------------------------------------
+// Demo client cookie expiry simulation
+// ---------------------------------------------------------------------------
+//
+// The demo client stores OAuth state (state value, codeVerifier, token
+// endpoint, issuer) in a signed cookie called `oauth_state` with
+// `maxAge: 60 * 60` (1 hour; see
+// packages/demo/src/app/api/oauth/login/route.ts). If the cookie expires
+// or is cleared before the callback runs, the callback handler can't find
+// the OAuth state and redirects to /?error=session_expired.
+//
+// This step deletes the cookie programmatically so we can exercise the
+// post-cookie-expiry callback path without a wall-clock wait.
+
+When(
+  "the demo client's OAuth state cookie has expired",
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    const ctx = page.context()
+    const before = await ctx.cookies()
+    const hasOAuthStateCookie = before.some((c) => c.name === 'oauth_state')
+    if (!hasOAuthStateCookie) {
+      throw new Error(
+        `Expected to find an oauth_state cookie set by the demo client but only saw: ${before.map((c) => c.name).join(', ')}`,
+      )
+    }
+    await ctx.clearCookies({ name: 'oauth_state' })
+  },
+)
+
+Then(
+  'the demo client surfaces a session-expired error',
+  async function (this: EpdsWorld) {
+    const origin = new URL(testEnv.demoUrl).origin
+    const page = getPage(this)
+    await page.waitForURL(`${origin}/?error=session_expired*`, {
+      timeout: 30_000,
+    })
+  },
+)

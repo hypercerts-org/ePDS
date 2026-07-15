@@ -72,6 +72,41 @@ function verifyPayload(signed: string): string | null {
 
 const OAUTH_COOKIE = 'oauth_state'
 
+/**
+ * Lifetime of the `oauth_state` cookie, in seconds.
+ *
+ * The cookie carries everything the callback needs to finish the
+ * token exchange (state, code verifier, token endpoint, issuer). It
+ * must outlive a realistic sign-in: the user requests an email code,
+ * fetches it from their inbox, and only then submits — a wait that
+ * can run to several minutes. The old 600s (10 min) timer started
+ * when the OAuth flow began, before the OTP was issued, while the
+ * OTP's own 600s validity started only when it was sent. The cookie
+ * could therefore disappear while a late-issued code was still
+ * valid. One hour matches the auth service's `auth_flow` row TTL:
+ * as long as the auth service can still recover the flow, the demo
+ * can too.
+ */
+export const OAUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60
+
+/**
+ * Error code the OAuth callback landing page should show when the
+ * flow can't be completed. Split out as a pure function so the
+ * mapping is unit-testable without standing up a Next request.
+ *
+ * `session_expired` is reserved for the case where the sign-in
+ * itself succeeded but *our* `oauth_state` cookie has gone away
+ * (expired, cleared, or a wait longer than its lifetime) — there is
+ * nothing to exchange the code against, but the user did nothing
+ * wrong, so an honest "took too long" beats a generic "auth failed".
+ * Every other failure maps to `auth_failed`.
+ */
+export function resolveCallbackErrorCode(reason: {
+  oauthCookiePresent: boolean
+}): 'session_expired' | 'auth_failed' {
+  return reason.oauthCookiePresent ? 'auth_failed' : 'session_expired'
+}
+
 export function createOAuthSessionCookie(data: OAuthSession): {
   name: string
   value: string
@@ -91,6 +126,36 @@ export function getOAuthSessionFromCookie(cookieStore: {
     return JSON.parse(Buffer.from(json, 'base64url').toString())
   } catch {
     return null
+  }
+}
+
+/**
+ * Read and classify the callback's OAuth session cookie.
+ *
+ * Missing cookies represent an expired browser session, while cookies that
+ * are present but fail signature or JSON validation represent an auth failure.
+ * Keeping the classification here ensures the callback's log and user-facing
+ * error stay consistent.
+ */
+export function readOAuthSessionCookie(cookieStore: {
+  get(name: string): { value: string } | undefined
+}):
+  | { session: OAuthSession }
+  | {
+      session: null
+      errorCode: 'session_expired' | 'auth_failed'
+      logMessage: string
+    } {
+  const oauthCookiePresent = cookieStore.get(OAUTH_COOKIE) !== undefined
+  const session = getOAuthSessionFromCookie(cookieStore)
+  if (session) return { session }
+
+  return {
+    session: null,
+    errorCode: resolveCallbackErrorCode({ oauthCookiePresent }),
+    logMessage: oauthCookiePresent
+      ? '[oauth/callback] Invalid oauth_state cookie'
+      : '[oauth/callback] Missing oauth_state cookie',
   }
 }
 

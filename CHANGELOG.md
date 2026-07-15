@@ -1,5 +1,31 @@
 # ePDS
 
+## 0.6.5
+
+### Who should read this release
+
+- **End users:**
+  - [Signing in through the demo no longer silently fails if you take a while to enter your emailed code.](#v0.6.5-signing-in-through-the-demo-no-longer-silently-fails-if-you)
+  - [Sign-in now stays active while you retrieve your emailed code and offers a clear way to restart if it times out.](#v0.6.5-sign-in-now-stays-active-while-you-retrieve-your-emailed)
+- **Operators:**
+  - [Signing in through the demo no longer silently fails if you take a while to enter your emailed code.](#v0.6.5-signing-in-through-the-demo-no-longer-silently-fails-if-you)
+
+### Patch Changes
+
+- <a id="v0.6.5-signing-in-through-the-demo-no-longer-silently-fails-if-you"></a> [#187](https://github.com/hypercerts-org/ePDS/pull/187) [`dcc9590`](https://github.com/hypercerts-org/ePDS/commit/dcc95903ffd105b30d8d15ddf9e9fd8778973c68) Thanks [@aspiers](https://github.com/aspiers)! - Signing in through the demo no longer silently fails if you take a while to enter your emailed code.
+
+  **Affects:** End users, Operators
+
+  **End users:** If you requested a sign-in code, then took several minutes to fetch it from your email before entering it, the demo could fail at the last step with a generic "Authentication failed" message — even though your code was correct. That happened because the demo started its 10-minute sign-in timer before it sent the code, so it could forget the sign-in while a later-issued code was still valid. The demo now remembers your sign-in for up to an hour, and if it genuinely does time out you now see "Your sign-in took too long to finish. Please sign in again." instead of a message that made it look like you typed the code wrong.
+
+  **Operators:** The demo client's `oauth_state` cookie `maxAge` is raised from `600` (10 min) to `60 * 60` (1 hour), matching the auth service's `auth_flow` row TTL. Previously, the cookie's timer started when the OAuth flow began, while the OTP's 600-second validity started only when the code was issued, so the cookie could expire first. The OAuth callback now maps a missing/expired state cookie to `/?error=session_expired` rather than `/?error=auth_failed`; `session_expired` renders as "Your sign-in took too long to finish. Please sign in again."
+
+- <a id="v0.6.5-sign-in-now-stays-active-while-you-retrieve-your-emailed"></a> [#187](https://github.com/hypercerts-org/ePDS/pull/187) [`e1c9d06`](https://github.com/hypercerts-org/ePDS/commit/e1c9d0651d45e5c2605cb6e698cb4ea4c4b8cf05) Thanks [@aspiers](https://github.com/aspiers)! - Sign-in now stays active while you retrieve your emailed code and offers a clear way to restart if it times out.
+
+  **Affects:** End users
+
+  **End users:** Previously, taking more than about five minutes to enter a code could leave the surrounding sign-in expired even though the code was still valid. The code-entry page now keeps the sign-in active while it remains open. If browser suspension or a longer interruption still makes the sign-in unrecoverable, the page disables code entry and **Use different email**, hides **Resend code**, and shows **Start over**; clicking it returns to the app you came from so you can begin again.
+
 ## 0.6.4
 
 ### Who should read this release
