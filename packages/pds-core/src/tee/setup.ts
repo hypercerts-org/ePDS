@@ -72,6 +72,14 @@ export interface TeeIntegration {
   enabled: boolean
   signer: SignerClient | null
   /**
+   * Finalize wallet XRPC mount order after all normal ePDS routes have
+   * been installed, immediately before `pds.start()`. When wallets are
+   * enabled this wraps the fully configured stock app with the custom
+   * app.gainforest.wallet.* router first, so the upstream /xrpc
+   * catch-all cannot intercept custom NSIDs. Idempotent; otherwise noop.
+   */
+  finalizeApp: () => void
+  /**
    * Fire-and-forget adoption hook for freshly created accounts. A noop
    * unless both EPDS_TEE_REPO_SIGNING and EPDS_TEE_ADOPT_ON_SIGNUP are
    * on. Never throws — signup must not fail because adoption did.
@@ -82,6 +90,7 @@ export interface TeeIntegration {
 const DISABLED: TeeIntegration = {
   enabled: false,
   signer: null,
+  finalizeApp: () => {},
   adoptOnSignup: () => {},
 }
 
@@ -139,6 +148,7 @@ export async function setupTeeIntegration(opts: {
   const walletEnabled = env.EPDS_WALLET_ENABLED === '1'
 
   let adoptOnSignup: TeeIntegration['adoptOnSignup'] = () => {}
+  let finalizeApp: TeeIntegration['finalizeApp'] = () => {}
 
   if (repoSigning) {
     installTeeRepoSigning({ actorStore: pds.ctx.actorStore, signer, logger })
@@ -196,9 +206,23 @@ export async function setupTeeIntegration(opts: {
       opts.userDidVerifier ?? createUserDidVerifier(pds, logger)
     const walletOpts = { signer, verifyUserDid, logger }
     pds.app.use('/wallet', createWalletRouter(walletOpts))
-    pds.app.use('/xrpc', createWalletXrpcRouter(walletOpts))
+    const walletXrpc = createWalletXrpcRouter(walletOpts)
+    let finalized = false
+    finalizeApp = () => {
+      if (finalized) return
+      finalized = true
+      // @atproto/pds mounts its own /xrpc catch-all while constructing
+      // pds.app. Appending custom NSIDs would therefore never reach us.
+      // Wrap the COMPLETE app only now (after all ePDS routes exist):
+      // custom wallet XRPC first, untouched stock/ePDS app as fallback.
+      const upstream = pds.app
+      const gateway = express()
+      gateway.use('/xrpc', walletXrpc)
+      gateway.use(upstream)
+      pds.app = gateway
+    }
     logger.info(
-      'wallet routes mounted at /wallet and /xrpc/app.gainforest.wallet.* (separate from repo flow)',
+      'wallet REST routes mounted at /wallet; app.gainforest.wallet.* XRPC gateway prepared',
     )
   }
 
@@ -206,5 +230,5 @@ export async function setupTeeIntegration(opts: {
     { signerUrl, repoSigning, adoptOnSignup: adoptOnSignupFlag, walletEnabled },
     'TEE signer integration active',
   )
-  return { enabled: true, signer, adoptOnSignup }
+  return { enabled: true, signer, finalizeApp, adoptOnSignup }
 }

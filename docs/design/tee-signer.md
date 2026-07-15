@@ -148,7 +148,11 @@ party ever holds ≥ 2 shares, and the user independently controls ≥ 2**
 The wallet is reachable on two equivalent PDS surfaces backed by the
 same handlers — plain REST and an XRPC Lexicon namespace. All wallet
 NSIDs (and any future wallet Lexicon schemas or sidecar record types)
-live under **`app.gainforest.*`**:
+live under **`app.gainforest.*`**. At startup, ePDS places this custom
+XRPC router in a thin gateway before the stock `@atproto/pds` app; all
+unmatched methods fall through unchanged. This ordering is required
+because the upstream app owns a catch-all `/xrpc` handler and would
+otherwise intercept custom NSIDs:
 
 | XRPC method (NSID)                | Type      | REST alias             | Auth                                |
 | --------------------------------- | --------- | ---------------------- | ----------------------------------- |

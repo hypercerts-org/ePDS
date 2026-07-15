@@ -57,6 +57,7 @@ describe('setupTeeIntegration', () => {
     expect(tee.signer).toBeNull()
     expect(() => {
       tee.adoptOnSignup('did:plc:x')
+      tee.finalizeApp()
     }).not.toThrow()
   })
 
@@ -110,6 +111,9 @@ describe('setupTeeIntegration', () => {
       signerFactory: () => stub as unknown as SignerClient,
     })
     expect(tee.enabled).toBe(true)
+    expect(() => {
+      tee.finalizeApp()
+    }).not.toThrow()
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ mode: 'dev' }),
       expect.stringContaining('UNATTESTED'),
@@ -167,13 +171,21 @@ describe('setupTeeIntegration', () => {
 
     beforeEach(async () => {
       pds = makePds()
-      await setupTeeIntegration({
+      // Simulate @atproto/pds's pre-existing /xrpc catch-all. Without
+      // finalizeApp() placing the custom gateway in front, every wallet
+      // NSID would be intercepted here.
+      pds.app.use('/xrpc', (_req, res) => {
+        res.status(401).json({ error: 'stock-xrpc-catch-all' })
+      })
+      const tee = await setupTeeIntegration({
         pds,
         logger,
         env,
         signerFactory: () => makeSignerStub() as unknown as SignerClient,
         userDidVerifier: () => Promise.resolve(null),
       })
+      tee.finalizeApp()
+      tee.finalizeApp() // idempotent
       await new Promise<void>((resolve) => {
         server = pds.app.listen(0, () => {
           resolve()

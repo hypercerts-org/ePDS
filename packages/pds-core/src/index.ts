@@ -1163,6 +1163,10 @@ async function main() {
     res.json({ status: 'ok', service: 'epds', version: getEpdsVersion() })
   })
 
+  // Must be last: when wallets are enabled this places custom
+  // app.gainforest.wallet.* methods before @atproto/pds's stock /xrpc
+  // catch-all, with the fully configured PDS app as the fallback.
+  tee.finalizeApp()
   await pds.start()
   logger.info({ port: cfg.service.port, pdsUrl, authHostname }, 'ePDS running')
 
