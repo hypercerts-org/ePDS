@@ -11,6 +11,16 @@
  * whole point of the split is that this store alone reconstructs
  * nothing.
  *
+ * The one deliberate exception is `wallet_pregen`: a wallet
+ * provisioned for a DID before its first login (defer-split
+ * pregeneration) stores its WHOLE entropy, KEK-encrypted. Until the
+ * user claims it, that wallet is enclave-custodial and receive-only —
+ * no wallet row exists, so sign/export/recover are impossible.
+ * Claiming moves it into `wallet` (2-of-3 split) and deletes the
+ * pregen row in one transaction. Pregen rows are keyed by DID alone —
+ * the DID does not need to be an account on this PDS yet (it may
+ * live on another PDS and migrate in later).
+ *
  * Threat-model note (see docs/design/tee-signer.md): the host controls
  * this disk, so it can roll the file back. Rolling back the nonce table
  * re-opens a replay window for envelopes the user *already signed* —
@@ -25,6 +35,17 @@ import Database from 'better-sqlite3'
 export interface EnrollmentRow {
   did: string
   requestPubkeyHex: string
+  createdAt: number
+}
+
+export interface PregenRow {
+  did: string
+  /** AES-256-GCM ciphertext of the WHOLE wallet entropy, hex (iv‖tag‖ct). */
+  entropyCipherHex: string
+  evmPubkeyHex: string
+  evmAddress: string
+  solPubkeyHex: string
+  solAddress: string
   createdAt: number
 }
 
@@ -65,6 +86,15 @@ export class SignerStore {
         sol_pubkey_hex TEXT NOT NULL,
         sol_address TEXT NOT NULL,
         version INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS wallet_pregen (
+        did TEXT PRIMARY KEY,
+        entropy_cipher_hex TEXT NOT NULL,
+        evm_pubkey_hex TEXT NOT NULL,
+        evm_address TEXT NOT NULL,
+        sol_pubkey_hex TEXT NOT NULL,
+        sol_address TEXT NOT NULL,
         created_at INTEGER NOT NULL
       );
     `)
@@ -137,12 +167,8 @@ export class SignerStore {
     return row ?? null
   }
 
-  /**
-   * Insert a new wallet record. Returns false when a wallet already
-   * exists for the DID (creation is once-only; the entropy behind an
-   * existing wallet must never be silently replaced).
-   */
-  createWallet(row: Omit<WalletRow, 'version' | 'createdAt'>): boolean {
+  /** Shared insert used by createWallet and claimPregen. */
+  private insertWallet(row: Omit<WalletRow, 'version' | 'createdAt'>): boolean {
     try {
       this.db
         .prepare(
@@ -171,6 +197,86 @@ export class SignerStore {
       /* v8 ignore next 1 -- non-constraint sqlite failures */
       throw err
     }
+  }
+
+  /**
+   * Insert a new wallet record. Returns false when a wallet already
+   * exists for the DID (creation is once-only; the entropy behind an
+   * existing wallet must never be silently replaced).
+   */
+  createWallet(row: Omit<WalletRow, 'version' | 'createdAt'>): boolean {
+    return this.insertWallet(row)
+  }
+
+  getPregen(did: string): PregenRow | null {
+    const row = this.db
+      .prepare(
+        `SELECT did,
+                entropy_cipher_hex AS entropyCipherHex,
+                evm_pubkey_hex AS evmPubkeyHex,
+                evm_address AS evmAddress,
+                sol_pubkey_hex AS solPubkeyHex,
+                sol_address AS solAddress,
+                created_at AS createdAt
+         FROM wallet_pregen WHERE did = ?`,
+      )
+      .get(did) as PregenRow | undefined
+    return row ?? null
+  }
+
+  /**
+   * Insert a pregenerated (defer-split, unclaimed) wallet record.
+   * Returns false when one already exists for the DID — pregeneration
+   * is once-only for the same reason wallet creation is.
+   */
+  createPregen(row: Omit<PregenRow, 'createdAt'>): boolean {
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO wallet_pregen (did, entropy_cipher_hex, evm_pubkey_hex,
+                                      evm_address, sol_pubkey_hex, sol_address,
+                                      created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          row.did,
+          row.entropyCipherHex,
+          row.evmPubkeyHex,
+          row.evmAddress,
+          row.solPubkeyHex,
+          row.solAddress,
+          Date.now(),
+        )
+      return true
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        err.message.includes('UNIQUE constraint failed')
+      ) {
+        return false
+      }
+      /* v8 ignore next 1 -- non-constraint sqlite failures */
+      throw err
+    }
+  }
+
+  /**
+   * Claim a pregenerated wallet: atomically insert the real wallet
+   * record (2-of-3 split, server share only) and DELETE the
+   * whole-entropy pregen row — after this the enclave holds one share
+   * like any other wallet. Returns false when a wallet already exists
+   * (the pregen row is left untouched in that case).
+   */
+  claimPregen(
+    did: string,
+    row: Omit<WalletRow, 'version' | 'createdAt'>,
+  ): boolean {
+    const tx = this.db.transaction((): boolean => {
+      if (!this.insertWallet(row)) return false
+      this.db.prepare('DELETE FROM wallet_pregen WHERE did = ?').run(did)
+      return true
+    })
+    return tx()
   }
 
   /**

@@ -30,10 +30,13 @@
  *   enroll  — OAuth/access token (who is enrolling). This is the
  *     trust-on-first-use bootstrap; the signer additionally refuses to
  *     overwrite an existing enrollment.
- *   create  — OAuth/access token. Generates the wallet in the enclave;
- *     the response's device/recovery share JWEs are decryptable only
- *     by the enrolled request key.
- *   getWallet/info — OAuth/access token (public material only).
+ *   create  — OAuth/access token. Generates the wallet in the enclave
+ *     (or claims a pregenerated one — response status 'claimed', same
+ *     addresses that were advertised pre-claim); the response's
+ *     device/recovery share JWEs are decryptable only by the enrolled
+ *     request key.
+ *   getWallet/info — OAuth/access token (public material only; an
+ *     unclaimed pregenerated wallet appears as `pregen`).
  *   sign    — NO PDS-side authorization on purpose: the envelope inside
  *     the body is signed by the user's enrolled request key and
  *     verified inside the signer. A PDS token is neither necessary nor

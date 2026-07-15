@@ -26,7 +26,11 @@
  *                           strictly separate wallet flow) on both
  *                           surfaces: REST /wallet/* and the XRPC
  *                           Lexicon namespace
- *                           /xrpc/app.gainforest.wallet.*.
+ *                           /xrpc/app.gainforest.wallet.*, plus the
+ *                           internal-secret-gated
+ *                           POST /_internal/wallet/pregenerate for
+ *                           provisioning receive-only wallets ahead
+ *                           of a DID's first login.
  *
  * The two flows never share anything but the SignerClient transport:
  * repo signing goes through TeeKeypair -> /v1/sign/repo; the wallet
@@ -45,7 +49,11 @@ import {
   type AdoptionCtx,
 } from './actor-store-tee.js'
 import { createUserDidVerifier, type UserDidVerifier } from './user-auth.js'
-import { createWalletRouter, createWalletXrpcRouter } from './wallet-router.js'
+import {
+  createWalletRouter,
+  createWalletXrpcRouter,
+  sendSignerError,
+} from './wallet-router.js'
 
 interface LoggerLike {
   info: (obj: unknown, msg?: string) => void
@@ -206,6 +214,37 @@ export async function setupTeeIntegration(opts: {
       opts.userDidVerifier ?? createUserDidVerifier(pds, logger)
     const walletOpts = { signer, verifyUserDid, logger }
     pds.app.use('/wallet', createWalletRouter(walletOpts))
+
+    // Internal pregeneration endpoint (defer-split): provision a
+    // receive-only wallet for a DID ahead of its first login, so
+    // assets can be sent before onboarding. Any plausible DID is
+    // accepted — including one whose account still lives on another
+    // PDS and migrates here later; claiming (the user's first
+    // /wallet/create after enrolling) is what requires a local
+    // authenticated account. Same auth convention as /_internal/tee/adopt.
+    pds.app.post(
+      '/_internal/wallet/pregenerate',
+      express.json(),
+      async (req, res) => {
+        if (!verifyInternalSecret(req.headers['x-internal-secret'])) {
+          res.status(401).json({ error: 'Unauthorized' })
+          return
+        }
+        const did: unknown = req.body?.did
+        if (typeof did !== 'string' || !did.startsWith('did:')) {
+          res.status(400).json({ error: 'missing or invalid did' })
+          return
+        }
+        try {
+          const result = await signer.walletPregenerate(did)
+          logger.info({ did, status: result.status }, 'wallet pregenerated')
+          res.json(result)
+        } catch (err) {
+          logger.error({ err, did }, 'wallet pregeneration failed')
+          sendSignerError(res, err)
+        }
+      },
+    )
     const walletXrpc = createWalletXrpcRouter(walletOpts)
     let finalized = false
     finalizeApp = () => {

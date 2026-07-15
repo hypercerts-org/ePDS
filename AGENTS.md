@@ -404,6 +404,14 @@ Invariants that must never be violated:
   to the enclave arrive as JWEs encrypted to the enclave's published
   encryption key. The PDS relays ciphertext only. No single party may
   ever hold ≥ 2 shares.
+- **Pregenerated wallets are enclave-custodial until claimed — and
+  must stay receive-only.** `POST /_internal/wallet/pregenerate`
+  persists a wallet's WHOLE entropy (KEK-encrypted, defer-split) so
+  any DID — even one on another PDS — can receive assets before its
+  first login. The signer must never sign/export/recover for a DID
+  that has only a pregen record; claiming (first `/wallet/create`
+  after enrollment) must split 2-of-3 and delete the whole-entropy
+  blob atomically.
 - **A PDS-forwarded OAuth token is never authorization for wallet
   signing or export.** Only a user-signed envelope (sign/export) or
   possession of a reconstructing share (recover) is.

@@ -10,11 +10,19 @@
  *     ATProto write path; it can never reach a wallet key.
  *
  *   WALLET PATH (user trust, Privy-style 2-of-3 shares — wallet.ts):
+ *     POST /v1/wallet/pregenerate — defer-split provisioning for a DID
+ *       with no enrollment yet (PDS-trusted, like the repo path): the
+ *       whole entropy is persisted KEK-encrypted so assets can be sent
+ *       to the addresses before first login. Receive-only and
+ *       enclave-custodial until claimed; works for ANY plausible DID,
+ *       including ones still living on another PDS.
  *     POST /v1/wallet/enroll  — TOFU-registers the user's request key.
- *     POST /v1/wallet/create  — generates per-wallet entropy in-enclave,
+ *     POST /v1/wallet/create  — generates per-wallet entropy in-enclave
+ *       (or claims a pregenerated wallet's entropy — same addresses),
  *       splits it 2-of-3, keeps only the KEK-encrypted server share,
  *       and returns the device + recovery shares encrypted to the
  *       enrolled request key (the PDS relays ciphertext it cannot read).
+ *       Claiming deletes the whole-entropy pregen blob atomically.
  *     POST /v1/wallet/sign    — reconstructs the key transiently from
  *       server share + the envelope's device share, signs, wipes. ONLY
  *       for envelopes signed by the enrolled user request key.
@@ -61,9 +69,11 @@ import {
   buildExportPayload,
   combineWalletShares,
   decryptJweToEnclave,
+  decryptPregenEntropy,
   decryptServerShare,
   deriveChainKeys,
   deriveShareKek,
+  encryptPregenEntropy,
   encryptServerShare,
   encryptToRequestKey,
   generateWalletEntropy,
@@ -76,7 +86,7 @@ import {
   wipe,
   type WalletChainKeys,
 } from './wallet.js'
-import type { SignerStore, WalletRow } from './store.js'
+import type { PregenRow, SignerStore, WalletRow } from './store.js'
 
 const logger = createLogger('epds-signer')
 
@@ -100,6 +110,16 @@ function walletPublicInfo(row: WalletRow): Record<string, unknown> {
     evm: { address: row.evmAddress, publicKeyHex: row.evmPubkeyHex },
     sol: { address: row.solAddress, publicKeyHex: row.solPubkeyHex },
     version: row.version,
+    createdAt: row.createdAt,
+  }
+}
+
+/** Public info for an unclaimed pregenerated wallet (receive-only). */
+function pregenPublicInfo(row: PregenRow): Record<string, unknown> {
+  return {
+    did: row.did,
+    evm: { address: row.evmAddress, publicKeyHex: row.evmPubkeyHex },
+    sol: { address: row.solAddress, publicKeyHex: row.solPubkeyHex },
     createdAt: row.createdAt,
   }
 }
@@ -226,11 +246,81 @@ export function createSignerApp(opts: SignerServiceOptions): Application {
       return
     }
     const wallet = store.getWallet(did)
+    const pregen = wallet ? null : store.getPregen(did)
     res.json({
       enrolled: store.getEnrollment(did) !== null,
       wallet: wallet ? walletPublicInfo(wallet) : null,
+      pregen: pregen ? pregenPublicInfo(pregen) : null,
       walletEncryptionPublicJwk,
     })
+  })
+
+  /**
+   * Pregenerate (defer-split): provision a receive-only wallet for a
+   * DID that has no enrollment yet, so assets can be sent to the
+   * addresses before the user's first login. The DID only has to be
+   * plausible — it may belong to an account that still lives on
+   * another PDS and migrates here later; claiming (not pregeneration)
+   * is what requires a local, authenticated account.
+   *
+   * This is the ONE place whole (unsplit) entropy is persisted —
+   * KEK-encrypted, distinct AAD domain. Until claimed, custody of the
+   * wallet rests entirely with the enclave. Two rules bound that
+   * window:
+   *   - unclaimed wallets can never sign/export/recover — those paths
+   *     all require the wallet row that only claiming creates;
+   *   - the first /v1/wallet/create after enrollment splits the
+   *     entropy 2-of-3 and DELETES the pregen blob atomically.
+   * Idempotent: repeat calls return the existing record's addresses.
+   */
+  app.post('/v1/wallet/pregenerate', requireSecret, (req, res) => {
+    const { did } = req.body ?? {}
+    if (!isPlausibleDid(did)) {
+      res.status(400).json({ error: 'invalid did' })
+      return
+    }
+    if (store.getWallet(did)) {
+      res.status(409).json({ error: 'wallet already exists for this DID' })
+      return
+    }
+    const existing = store.getPregen(did)
+    if (existing) {
+      res.json({ status: 'exists', wallet: pregenPublicInfo(existing) })
+      return
+    }
+    const entropy = generateWalletEntropy()
+    let keys: WalletChainKeys | undefined
+    try {
+      keys = deriveChainKeys(entropy)
+      const created = store.createPregen({
+        did,
+        entropyCipherHex: encryptPregenEntropy(shareKek, did, entropy),
+        evmPubkeyHex: bytesToHex(keys.evmPublicKey),
+        evmAddress: keys.evmAddress,
+        solPubkeyHex: bytesToHex(keys.solPublicKey),
+        solAddress: keys.solAddress,
+      })
+      const row = store.getPregen(did)
+      /* v8 ignore next 4 -- lost-race guard, not reachable single-threaded */
+      if (!row) {
+        res.status(500).json({ error: 'wallet pregeneration failed' })
+        return
+      }
+      logger.info(
+        { did, created },
+        'wallet pregenerated (unclaimed, receive-only)',
+      )
+      res.json({
+        status: created ? 'pregenerated' : 'exists',
+        wallet: pregenPublicInfo(row),
+      })
+      /* v8 ignore next 4 -- CSPRNG/sqlite failures are not reproducible */
+    } catch (err) {
+      logger.error({ err, did }, 'wallet pregeneration failed')
+      res.status(500).json({ error: 'wallet pregeneration failed' })
+    } finally {
+      wipe(entropy, keys?.evmPrivateKey, keys?.solPrivateKey)
+    }
   })
 
   /**
@@ -241,6 +331,13 @@ export function createSignerApp(opts: SignerServiceOptions): Application {
    * sent. The client MUST re-protect the recovery share under a
    * user-controlled recovery factor — it is not re-issuable without a
    * recovery (fresh coefficients) round.
+   *
+   * If a pregenerated record exists for the DID, this call CLAIMS it:
+   * the pregenerated entropy — not fresh CSPRNG output — becomes the
+   * wallet (so assets already sent to the advertised addresses are
+   * now under the user's 2-of-3 split), and the whole-entropy blob is
+   * deleted in the same transaction. Response status 'claimed'
+   * instead of 'created'.
    */
   app.post('/v1/wallet/create', requireSecret, async (req, res) => {
     const { did } = req.body ?? {}
@@ -260,20 +357,37 @@ export function createSignerApp(opts: SignerServiceOptions): Application {
       return
     }
 
-    const entropy = generateWalletEntropy()
+    const pregen = store.getPregen(did)
+    let entropy: Uint8Array | undefined
     let keys: WalletChainKeys | undefined
     let shares: [Uint8Array, Uint8Array, Uint8Array] | undefined
     try {
+      entropy = pregen
+        ? decryptPregenEntropy(shareKek, did, pregen.entropyCipherHex)
+        : generateWalletEntropy()
       keys = deriveChainKeys(entropy)
+      // A pregen blob that decrypts (KEK + AAD verified) but does not
+      // reproduce the advertised addresses is corrupt — refuse rather
+      // than bind the user to unknown material.
+      /* v8 ignore next 5 -- requires a corrupted-but-authentic blob */
+      if (pregen && bytesToHex(keys.evmPublicKey) !== pregen.evmPubkeyHex) {
+        res
+          .status(500)
+          .json({ error: 'pregenerated wallet integrity check failed' })
+        return
+      }
       shares = await splitWalletEntropy(entropy)
-      const created = store.createWallet({
+      const walletRow = {
         did,
         serverShareCipherHex: encryptServerShare(shareKek, did, shares[0]),
         evmPubkeyHex: bytesToHex(keys.evmPublicKey),
         evmAddress: keys.evmAddress,
         solPubkeyHex: bytesToHex(keys.solPublicKey),
         solAddress: keys.solAddress,
-      })
+      }
+      const created = pregen
+        ? store.claimPregen(did, walletRow)
+        : store.createWallet(walletRow)
       if (!created) {
         res.status(409).json({ error: 'wallet already exists for this DID' })
         return
@@ -282,9 +396,12 @@ export function createSignerApp(opts: SignerServiceOptions): Application {
         encryptToRequestKey(enrollment.requestPubkeyHex, shares[1]),
         encryptToRequestKey(enrollment.requestPubkeyHex, shares[2]),
       ])
-      logger.info({ did }, 'wallet created (2-of-3 shares issued)')
+      logger.info(
+        { did, claimedPregen: pregen !== null },
+        'wallet created (2-of-3 shares issued)',
+      )
       res.json({
-        status: 'created',
+        status: pregen ? 'claimed' : 'created',
         wallet: walletPublicInfo(store.getWallet(did) as WalletRow),
         deviceShareJwe,
         recoveryShareJwe,

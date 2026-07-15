@@ -25,6 +25,17 @@ function makeSignerStub(mode: 'dstack' | 'dev' = 'dev') {
     deriveKey: vi.fn(() =>
       Promise.resolve({ didKey: 'did:key:zQ3shAdopted', publicKeyHex: '02ab' }),
     ),
+    walletPregenerate: vi.fn(() =>
+      Promise.resolve({
+        status: 'pregenerated',
+        wallet: {
+          did: 'did:plc:external',
+          evm: { address: '0x' + 'ab'.repeat(20), publicKeyHex: '02cd' },
+          sol: { address: 'SoLAddr', publicKeyHex: 'ef' },
+          createdAt: 1,
+        },
+      }),
+    ),
   }
 }
 
@@ -168,9 +179,11 @@ describe('setupTeeIntegration', () => {
     let pds: PdsLike
     let server: Server
     let base: string
+    let stub: ReturnType<typeof makeSignerStub>
 
     beforeEach(async () => {
       pds = makePds()
+      stub = makeSignerStub()
       // Simulate @atproto/pds's pre-existing /xrpc catch-all. Without
       // finalizeApp() placing the custom gateway in front, every wallet
       // NSID would be intercepted here.
@@ -181,7 +194,7 @@ describe('setupTeeIntegration', () => {
         pds,
         logger,
         env,
-        signerFactory: () => makeSignerStub() as unknown as SignerClient,
+        signerFactory: () => stub as unknown as SignerClient,
         userDidVerifier: () => Promise.resolve(null),
       })
       tee.finalizeApp()
@@ -249,6 +262,54 @@ describe('setupTeeIntegration', () => {
           body: JSON.stringify({ did: 'garbage' }),
         })
         expect(res.status).toBe(400)
+      } finally {
+        if (original === undefined) delete process.env.EPDS_INTERNAL_SECRET
+        else process.env.EPDS_INTERNAL_SECRET = original
+      }
+    })
+
+    it('gates /_internal/wallet/pregenerate on the internal secret', async () => {
+      const res = await fetch(`${base}/_internal/wallet/pregenerate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ did: 'did:plc:external' }),
+      })
+      expect(res.status).toBe(401)
+      expect(stub.walletPregenerate).not.toHaveBeenCalled()
+    })
+
+    it('validates the did and forwards pregeneration to the signer', async () => {
+      const original = process.env.EPDS_INTERNAL_SECRET
+      process.env.EPDS_INTERNAL_SECRET = 'internal-secret'
+      try {
+        const bad = await fetch(`${base}/_internal/wallet/pregenerate`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-internal-secret': 'internal-secret',
+          },
+          body: JSON.stringify({ did: 'garbage' }),
+        })
+        expect(bad.status).toBe(400)
+
+        // Any plausible DID is forwarded — including one whose account
+        // lives on another PDS (pregeneration has no local-account check).
+        const res = await fetch(`${base}/_internal/wallet/pregenerate`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-internal-secret': 'internal-secret',
+          },
+          body: JSON.stringify({ did: 'did:plc:external' }),
+        })
+        expect(res.status).toBe(200)
+        const body = (await res.json()) as {
+          status: string
+          wallet: { evm: { address: string } }
+        }
+        expect(body.status).toBe('pregenerated')
+        expect(body.wallet.evm.address).toMatch(/^0x/)
+        expect(stub.walletPregenerate).toHaveBeenCalledWith('did:plc:external')
       } finally {
         if (original === undefined) delete process.env.EPDS_INTERNAL_SECRET
         else process.env.EPDS_INTERNAL_SECRET = original

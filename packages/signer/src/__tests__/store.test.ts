@@ -96,6 +96,66 @@ describe('SignerStore wallet records', () => {
   })
 })
 
+describe('SignerStore pregenerated wallets (defer-split)', () => {
+  const pregen = {
+    did: 'did:plc:a',
+    entropyCipherHex: 'eecc',
+    evmPubkeyHex: '02cc',
+    evmAddress: '0xAbC',
+    solPubkeyHex: 'dd',
+    solAddress: 'SoL',
+  }
+  const walletRow = {
+    did: 'did:plc:a',
+    serverShareCipherHex: 'aabb',
+    evmPubkeyHex: '02cc',
+    evmAddress: '0xAbC',
+    solPubkeyHex: 'dd',
+    solAddress: 'SoL',
+  }
+
+  it('creates and reads a pregen record', () => {
+    expect(store.getPregen('did:plc:a')).toBeNull()
+    expect(store.createPregen(pregen)).toBe(true)
+    const got = store.getPregen('did:plc:a')
+    expect(got).toMatchObject(pregen)
+    expect(got?.createdAt).toBeGreaterThan(0)
+  })
+
+  it('refuses to pregenerate twice', () => {
+    expect(store.createPregen(pregen)).toBe(true)
+    expect(store.createPregen({ ...pregen, entropyCipherHex: 'ffff' })).toBe(
+      false,
+    )
+    expect(store.getPregen('did:plc:a')?.entropyCipherHex).toBe('eecc')
+  })
+
+  it('claimPregen inserts the wallet and deletes the pregen row atomically', () => {
+    store.createPregen(pregen)
+    expect(store.claimPregen('did:plc:a', walletRow)).toBe(true)
+    expect(store.getWallet('did:plc:a')).toMatchObject({
+      ...walletRow,
+      version: 1,
+    })
+    // The whole-entropy blob is gone — the custody window is closed.
+    expect(store.getPregen('did:plc:a')).toBeNull()
+  })
+
+  it('claimPregen refuses when a wallet already exists, keeping the pregen row', () => {
+    store.createPregen(pregen)
+    store.createWallet(walletRow)
+    expect(store.claimPregen('did:plc:a', walletRow)).toBe(false)
+    expect(store.getPregen('did:plc:a')).not.toBeNull()
+  })
+
+  it('keeps pregen records independent of wallet records per DID', () => {
+    store.createPregen(pregen)
+    expect(store.createWallet({ ...walletRow, did: 'did:plc:b' })).toBe(true)
+    expect(store.getPregen('did:plc:b')).toBeNull()
+    expect(store.getPregen('did:plc:a')).not.toBeNull()
+  })
+})
+
 describe('SignerStore.consumeNonce', () => {
   it('accepts strictly increasing nonces', () => {
     expect(store.consumeNonce('did:plc:a', 1)).toBe(true)

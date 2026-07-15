@@ -109,6 +109,24 @@ describe('SignerClient', () => {
     expect(JSON.parse(init.body as string)).toEqual({ did: 'did:plc:x' })
   })
 
+  it('walletPregenerate posts the did to the pregenerate route', async () => {
+    const mock = mockFetchOnce(200, {
+      status: 'pregenerated',
+      wallet: {
+        did: 'did:plc:external',
+        evm: { address: '0x2', publicKeyHex: '02cd' },
+        sol: { address: 'So2', publicKeyHex: 'ef' },
+        createdAt: 456,
+      },
+    })
+    const result = await client.walletPregenerate('did:plc:external')
+    expect(result.status).toBe('pregenerated')
+    expect(result.wallet.evm.address).toBe('0x2')
+    const [url, init] = mock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('http://signer.internal:3010/v1/wallet/pregenerate')
+    expect(JSON.parse(init.body as string)).toEqual({ did: 'did:plc:external' })
+  })
+
   it('walletInfo URL-encodes the did', async () => {
     const mock = mockFetchOnce(200, {
       enrolled: true,

@@ -56,8 +56,23 @@ export interface WalletPublicInfo {
   createdAt: number
 }
 
+/** Public material of an unclaimed pregenerated wallet (receive-only). */
+export interface WalletPregenInfo {
+  did: string
+  evm: WalletChainInfo
+  sol: WalletChainInfo
+  createdAt: number
+}
+
+export interface WalletPregenerateResult {
+  /** 'exists' when the DID already had an unclaimed pregen record. */
+  status: 'pregenerated' | 'exists'
+  wallet: WalletPregenInfo
+}
+
 export interface WalletCreateResult {
-  status: 'created'
+  /** 'claimed' when a pregenerated wallet's entropy became this wallet. */
+  status: 'created' | 'claimed'
   wallet: WalletPublicInfo
   /** Device share, JWE-encrypted to the user's enrolled request key. */
   deviceShareJwe: string
@@ -69,6 +84,8 @@ export interface WalletCreateResult {
 export interface WalletInfoResult {
   enrolled: boolean
   wallet: WalletPublicInfo | null
+  /** Unclaimed pregenerated wallet, if any (null once claimed). */
+  pregen: WalletPregenInfo | null
   walletEncryptionPublicJwk: WalletEncryptionJwk
 }
 
@@ -206,9 +223,21 @@ export class SignerClient {
    * Create the user's wallet: entropy is generated in-enclave and
    * split 2-of-3. The returned share JWEs are opaque to us (encrypted
    * to the user's enrolled request key) — pass them through verbatim.
+   * Claims a pregenerated wallet when one exists (status 'claimed').
    */
   async walletCreate(did: string): Promise<WalletCreateResult> {
     return this.request('POST', '/v1/wallet/create', { did })
+  }
+
+  /**
+   * Pregenerate a receive-only wallet for a DID before enrollment
+   * (defer-split). Any plausible DID is accepted — including one
+   * whose account still lives on another PDS. Until the user claims
+   * it via walletCreate, the enclave alone holds the (encrypted)
+   * entropy — see docs/design/tee-signer.md. Idempotent.
+   */
+  async walletPregenerate(did: string): Promise<WalletPregenerateResult> {
+    return this.request('POST', '/v1/wallet/pregenerate', { did })
   }
 
   /** Public wallet material + enrollment + enclave encryption JWK. */

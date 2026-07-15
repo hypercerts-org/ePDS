@@ -13,9 +13,11 @@ import {
   buildExportPayload,
   combineWalletShares,
   decryptJweToEnclave,
+  decryptPregenEntropy,
   decryptServerShare,
   deriveChainKeys,
   deriveShareKek,
+  encryptPregenEntropy,
   encryptServerShare,
   encryptToRequestKey,
   generateWalletEntropy,
@@ -149,6 +151,33 @@ describe('server share encryption (measurement-bound KEK)', () => {
     expect(
       Buffer.from(deriveShareKek(Buffer.alloc(32, 4))).equals(Buffer.from(kek)),
     ).toBe(false)
+  })
+})
+
+describe('pregenerated entropy encryption (defer-split)', () => {
+  const kek = deriveShareKek(rootSeed)
+
+  it('round-trips and binds the DID as AAD', () => {
+    const entropy = generateWalletEntropy()
+    const cipherHex = encryptPregenEntropy(kek, did, entropy)
+    expect(
+      Buffer.from(decryptPregenEntropy(kek, did, cipherHex)).equals(
+        Buffer.from(entropy),
+      ),
+    ).toBe(true)
+    expect(() =>
+      decryptPregenEntropy(kek, 'did:plc:someoneelse', cipherHex),
+    ).toThrow()
+  })
+
+  it('is domain-separated from server-share ciphertext', () => {
+    const entropy = generateWalletEntropy()
+    // A pregen blob must never decrypt as a server share, nor a
+    // server-share blob as pregen entropy — the AAD domains differ.
+    const pregenCipher = encryptPregenEntropy(kek, did, entropy)
+    expect(() => decryptServerShare(kek, did, pregenCipher)).toThrow()
+    const shareCipher = encryptServerShare(kek, did, entropy)
+    expect(() => decryptPregenEntropy(kek, did, shareCipher)).toThrow()
   })
 })
 

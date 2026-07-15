@@ -98,6 +98,10 @@ accounts (`EPDS_TEE_ADOPT_ON_SIGNUP=1`) or per-account via
 migrating existing accounts. The old local key file is left in place so
 rollback is "delete marker + rotate PLC back".
 
+(The wallet flow has an analogous internal endpoint —
+`POST /_internal/wallet/pregenerate` — described under “Pregenerated
+wallets” below.)
+
 ### Wallet keys: per-wallet entropy + 2-of-3 Shamir shares
 
 On `POST /wallet/create` the enclave generates 128 bits of CSPRNG
@@ -142,6 +146,45 @@ party ever holds ≥ 2 shares, and the user independently controls ≥ 2**
   (user-signed envelope, response encrypted to the user's request key)
   hands over the mnemonic/private keys. Credible exit either way; the
   operator can freeze, never trap.
+
+### Pregenerated wallets (defer-split)
+
+A wallet can be provisioned for a DID **before its first login**:
+`POST /_internal/wallet/pregenerate {"did": ...}` on pds-core
+(internal-secret gated, requires `EPDS_WALLET_ENABLED=1`), so airdrops
+or migrated balances can be sent to an account ahead of onboarding.
+Pregeneration is keyed by DID alone — **any plausible `did:plc` /
+`did:web` is accepted, including one whose account still lives on
+another PDS** and migrates here later. Claiming (not pregeneration) is
+what requires a local authenticated account.
+
+Instead of splitting, the enclave persists the wallet's **whole
+entropy**, encrypted under the same measurement-bound KEK as server
+shares but in a distinct AAD domain (a pregen blob can never be
+presented as a server share, or vice versa). The addresses are
+returned immediately and appear as `pregen` in `/wallet/info` until
+claimed. The call is idempotent.
+
+Custody honesty: until claimed, such a wallet is **enclave-custodial**
+— the 2-of-3 invariant does not hold yet, exactly as a Privy
+pregenerated wallet is Privy-custodial until first login. Two rules
+bound that window:
+
+- **Unclaimed wallets are receive-only.** sign/export/recover all
+  require the wallet record that only claiming creates; the signer
+  cannot produce a signature for an unclaimed wallet.
+- **Claiming destroys the whole-entropy blob.** The user's first
+  `POST /wallet/create` after enrollment decrypts the entropy,
+  verifies it reproduces the advertised addresses, splits it 2-of-3,
+  and deletes the blob in the same transaction. The response carries
+  `status: 'claimed'` (instead of `'created'`) with the same
+  addresses; from then on the wallet is indistinguishable from one
+  created normally.
+
+The enrollment-bootstrap caveat (below) applies with more force here:
+whoever enrolls first for a DID claims any assets already sent to its
+pregenerated addresses. Until enrollment is passkey-bound, do not
+pre-fund wallets beyond what the TOFU trust note tolerates.
 
 ### Wallet Lexicon surface (`app.gainforest.wallet.*`)
 

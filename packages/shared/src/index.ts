@@ -91,6 +91,8 @@ export type {
   WalletEncryptionJwk,
   WalletChainInfo,
   WalletPublicInfo,
+  WalletPregenInfo,
+  WalletPregenerateResult,
   WalletCreateResult,
   WalletInfoResult,
   WalletRecoverResult,

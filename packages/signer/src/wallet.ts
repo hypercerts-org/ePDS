@@ -148,11 +148,12 @@ export async function combineWalletShares(
   return combine([toPlainUint8Array(a), toPlainUint8Array(b)])
 }
 
-// ── Server-share encryption at rest (measurement-bound KEK) ─────────
+// ── KEK encryption at rest (measurement-bound KEK) ──────────────────
 
 /**
- * KEK for server shares, derived from the root seed. The root seed is
- * what the measurement-bound KMS releases to an attested enclave, so
+ * KEK for at-rest wallet secrets (server shares and pregenerated
+ * whole entropy), derived from the root seed. The root seed is what
+ * the measurement-bound KMS releases to an attested enclave, so
  * ciphertext under this KEK is opaque to the operator and storage
  * admins, yet re-accessible by any fresh enclave passing attestation.
  */
@@ -161,22 +162,22 @@ export function deriveShareKek(rootSeed: Uint8Array): Uint8Array {
   return hkdf(sha256, rootSeed, WALLET_HKDF_SALT, info, 32)
 }
 
-/** AES-256-GCM, DID bound in as AAD. Output hex: iv ‖ tag ‖ ciphertext. */
-export function encryptServerShare(
+/** AES-256-GCM under the KEK. Output hex: iv ‖ tag ‖ ciphertext. */
+function kekEncrypt(
   kek: Uint8Array,
-  did: string,
-  share: Uint8Array,
+  aad: string,
+  plaintext: Uint8Array,
 ): string {
   const iv = crypto.randomBytes(12)
   const cipher = crypto.createCipheriv('aes-256-gcm', kek, iv)
-  cipher.setAAD(Buffer.from(did, 'utf8'))
-  const ct = Buffer.concat([cipher.update(share), cipher.final()])
+  cipher.setAAD(Buffer.from(aad, 'utf8'))
+  const ct = Buffer.concat([cipher.update(plaintext), cipher.final()])
   return Buffer.concat([iv, cipher.getAuthTag(), ct]).toString('hex')
 }
 
-export function decryptServerShare(
+function kekDecrypt(
   kek: Uint8Array,
-  did: string,
+  aad: string,
   cipherHex: string,
 ): Uint8Array {
   const raw = Buffer.from(cipherHex, 'hex')
@@ -188,11 +189,58 @@ export function decryptServerShare(
     kek,
     raw.subarray(0, 12),
   )
-  decipher.setAAD(Buffer.from(did, 'utf8'))
+  decipher.setAAD(Buffer.from(aad, 'utf8'))
   decipher.setAuthTag(raw.subarray(12, 28))
   return Uint8Array.from(
     Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]),
   )
+}
+
+/** Server share at rest, DID bound in as AAD. */
+export function encryptServerShare(
+  kek: Uint8Array,
+  did: string,
+  share: Uint8Array,
+): string {
+  return kekEncrypt(kek, did, share)
+}
+
+export function decryptServerShare(
+  kek: Uint8Array,
+  did: string,
+  cipherHex: string,
+): Uint8Array {
+  return kekDecrypt(kek, did, cipherHex)
+}
+
+/**
+ * AAD domain for pregenerated (defer-split) whole wallet entropy at
+ * rest. Distinct from the server-share AAD (the bare DID) so a pregen
+ * blob can never be presented as a server share or vice versa — the
+ * GCM tag check fails across domains.
+ */
+const PREGEN_AAD_PREFIX = 'epds-pregen\0v1\0'
+
+/**
+ * Pregenerated wallet entropy at rest — the ONE case where whole
+ * (unsplit) entropy is persisted: a wallet provisioned for a DID
+ * before its first login, receive-only until claimed. Claiming
+ * splits it 2-of-3 and deletes this blob (see service.ts).
+ */
+export function encryptPregenEntropy(
+  kek: Uint8Array,
+  did: string,
+  entropy: Uint8Array,
+): string {
+  return kekEncrypt(kek, PREGEN_AAD_PREFIX + did, entropy)
+}
+
+export function decryptPregenEntropy(
+  kek: Uint8Array,
+  did: string,
+  cipherHex: string,
+): Uint8Array {
+  return kekDecrypt(kek, PREGEN_AAD_PREFIX + did, cipherHex)
 }
 
 // ── Enclave wallet-encryption key (shares sent TO the enclave) ──────

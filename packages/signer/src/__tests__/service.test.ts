@@ -188,6 +188,7 @@ describe('internal-secret gate', () => {
   it.each([
     ['/v1/keys/derive'],
     ['/v1/sign/repo'],
+    ['/v1/wallet/pregenerate'],
     ['/v1/wallet/enroll'],
     ['/v1/wallet/create'],
     ['/v1/wallet/sign'],
@@ -624,5 +625,132 @@ describe('wallet lifecycle (2-of-3 shares)', () => {
         })
       ).status,
     ).toBe(403)
+  })
+})
+
+describe('wallet pregeneration (defer-split)', () => {
+  // A DID with no local account coupling — pregeneration is keyed by
+  // DID alone, so this could equally be a DID living on another PDS.
+  const pregenDid = 'did:plc:pregentest'
+  const pregenPriv = p256.utils.randomSecretKey()
+  const pregenPubHex = Buffer.from(
+    p256.getPublicKey(pregenPriv, true),
+  ).toString('hex')
+  let advertisedEvmAddress: string
+  let advertisedSolAddress: string
+  let pregenEvmPubkeyHex: string
+  let pregenDeviceShare: Uint8Array
+
+  it('rejects a bad did', async () => {
+    const res = await post('/v1/wallet/pregenerate', { did: 'garbage' })
+    expect(res.status).toBe(400)
+  })
+
+  it('pregenerates a receive-only wallet with no enrollment', async () => {
+    const res = await post('/v1/wallet/pregenerate', { did: pregenDid })
+    expect(res.status).toBe(200)
+    expect(res.json.status).toBe('pregenerated')
+    const wallet = res.json.wallet as WalletInfoJson
+    expect(wallet.evm.address).toMatch(/^0x[0-9a-fA-F]{40}$/)
+    expect(wallet.sol.address).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/)
+    advertisedEvmAddress = wallet.evm.address
+    advertisedSolAddress = wallet.sol.address
+    pregenEvmPubkeyHex = wallet.evm.publicKeyHex
+  })
+
+  it('is idempotent — repeat calls return the same addresses', async () => {
+    const res = await post('/v1/wallet/pregenerate', { did: pregenDid })
+    expect(res.status).toBe(200)
+    expect(res.json.status).toBe('exists')
+    const wallet = res.json.wallet as WalletInfoJson
+    expect(wallet.evm.address).toBe(advertisedEvmAddress)
+    expect(wallet.sol.address).toBe(advertisedSolAddress)
+  })
+
+  it('exposes the unclaimed wallet as pregen in wallet info', async () => {
+    const res = await get(`/v1/wallet/info/${pregenDid}`)
+    expect(res.status).toBe(200)
+    expect(res.json.enrolled).toBe(false)
+    expect(res.json.wallet).toBeNull()
+    const pregen = res.json.pregen as WalletInfoJson
+    expect(pregen.evm.address).toBe(advertisedEvmAddress)
+  })
+
+  it('cannot sign before claim — unclaimed wallets are receive-only', async () => {
+    // Even a correctly enrolled user cannot sign until the wallet is
+    // claimed: no wallet row exists yet.
+    const enroll = await post('/v1/wallet/enroll', {
+      did: pregenDid,
+      requestPublicKeyHex: pregenPubHex,
+    })
+    expect(enroll.status).toBe(200)
+    const env = signEnvelope(
+      {
+        did: pregenDid,
+        purpose: 'wallet/evm',
+        digestHex: 'ab'.repeat(32),
+        deviceShareJwe: 'AAAA..BBBB.CCCC.DDDD',
+        nonce: 1,
+        iat: nowSec(),
+      },
+      pregenPriv,
+    )
+    const res = await post('/v1/wallet/sign', env)
+    expect(res.status).toBe(403)
+    expect(res.json.error).toMatch(/no wallet exists/)
+  })
+
+  it('claims the pregenerated wallet on create — same addresses, shares issued', async () => {
+    const res = await post('/v1/wallet/create', { did: pregenDid })
+    expect(res.status).toBe(200)
+    expect(res.json.status).toBe('claimed')
+    const wallet = res.json.wallet as WalletInfoJson
+    // The claimed wallet IS the pregenerated one — assets sent to the
+    // advertised addresses now sit under the user's 2-of-3 split.
+    expect(wallet.evm.address).toBe(advertisedEvmAddress)
+    expect(wallet.sol.address).toBe(advertisedSolAddress)
+    expect(wallet.version).toBe(1)
+    pregenDeviceShare = await decryptAsUser(
+      res.json.deviceShareJwe as string,
+      pregenPriv,
+    )
+    expect(pregenDeviceShare.length).toBeGreaterThan(16)
+  })
+
+  it('deletes the pregen record after claim', async () => {
+    const res = await get(`/v1/wallet/info/${pregenDid}`)
+    expect(res.json.pregen).toBeNull()
+    expect((res.json.wallet as WalletInfoJson).evm.address).toBe(
+      advertisedEvmAddress,
+    )
+  })
+
+  it('signs after claim with the issued device share', async () => {
+    const digestHex = 'aa'.repeat(32)
+    const env = signEnvelope(
+      {
+        did: pregenDid,
+        purpose: 'wallet/evm',
+        digestHex,
+        deviceShareJwe: await encryptToEnclave(pregenDeviceShare),
+        nonce: 2,
+        iat: nowSec(),
+      },
+      pregenPriv,
+    )
+    const res = await post('/v1/wallet/sign', env)
+    expect(res.status).toBe(200)
+    const ok = secp256k1.verify(
+      Uint8Array.from(Buffer.from(res.json.signatureHex as string, 'hex')),
+      Uint8Array.from(Buffer.from(digestHex, 'hex')),
+      Uint8Array.from(Buffer.from(pregenEvmPubkeyHex, 'hex')),
+      { prehash: false },
+    )
+    expect(ok).toBe(true)
+  })
+
+  it('refuses to pregenerate once a wallet exists', async () => {
+    const res = await post('/v1/wallet/pregenerate', { did: pregenDid })
+    expect(res.status).toBe(409)
   })
 })
