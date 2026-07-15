@@ -1,24 +1,25 @@
 /**
- * Public key material for a (did, purpose) pair — everything a caller
- * may learn about a key without asking it to sign anything.
+ * Public key material helpers.
+ *
+ * `getRepoKeyInfo` covers the only root-derivable key — the repo
+ * signing key. Wallet public material is per-wallet state (created at
+ * wallet creation, cached in the store); the address-encoding helpers
+ * for it live here so wallet.ts and tests share one implementation.
  */
 import { formatDidKey } from '@atproto/crypto'
 import { secp256k1 } from '@noble/curves/secp256k1'
 import { keccak_256 } from '@noble/hashes/sha3'
-import { base58Encode } from './base58.js'
-import { curveForPurpose, derivePublicKey } from './derive.js'
-import { REPO_SIGNING_PURPOSE, type KeyPurpose } from './purposes.js'
+import { deriveRepoPublicKey } from './derive.js'
+import { REPO_SIGNING_PURPOSE } from './purposes.js'
 
-export interface KeyInfo {
+export interface RepoKeyInfo {
   keyId: string
-  purpose: KeyPurpose
-  curve: 'secp256k1' | 'ed25519'
-  /** Compressed (secp256k1) or raw (ed25519) public key, hex. */
+  purpose: typeof REPO_SIGNING_PURPOSE
+  curve: 'secp256k1'
+  /** Compressed public key, hex. */
   publicKeyHex: string
-  /** did:key of the public key — only for the repo signing purpose. */
-  didKey?: string
-  /** Chain address — only for wallet purposes. */
-  address?: string
+  /** did:key of the public key. */
+  didKey: string
 }
 
 export function bytesToHex(bytes: Uint8Array): string {
@@ -47,25 +48,13 @@ export function evmAddressFromCompressedPubkey(compressed: Uint8Array): string {
   return toChecksumAddress(addressBytes)
 }
 
-export function getKeyInfo(
-  rootSeed: Uint8Array,
-  did: string,
-  purpose: KeyPurpose,
-): KeyInfo {
-  const publicKey = derivePublicKey(rootSeed, did, purpose)
-  const curve = curveForPurpose(purpose)
-  const info: KeyInfo = {
-    keyId: `${did}#${purpose}`,
-    purpose,
-    curve,
+export function getRepoKeyInfo(rootSeed: Uint8Array, did: string): RepoKeyInfo {
+  const publicKey = deriveRepoPublicKey(rootSeed, did)
+  return {
+    keyId: `${did}#${REPO_SIGNING_PURPOSE}`,
+    purpose: REPO_SIGNING_PURPOSE,
+    curve: 'secp256k1',
     publicKeyHex: bytesToHex(publicKey),
+    didKey: formatDidKey('ES256K', publicKey),
   }
-  if (purpose === REPO_SIGNING_PURPOSE) {
-    info.didKey = formatDidKey('ES256K', publicKey)
-  } else if (purpose === 'wallet/evm') {
-    info.address = evmAddressFromCompressedPubkey(publicKey)
-  } else {
-    info.address = base58Encode(publicKey)
-  }
-  return info
 }

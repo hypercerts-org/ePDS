@@ -27,7 +27,11 @@ const logger = { info: vi.fn(), warn: vi.fn() }
 const signerStub = {
   walletEnroll: vi.fn(),
   walletEnrollment: vi.fn(),
+  walletCreate: vi.fn(),
+  walletInfo: vi.fn(),
   walletSign: vi.fn(),
+  walletExport: vi.fn(),
+  walletRecover: vi.fn(),
   deriveKey: vi.fn(),
 }
 
@@ -140,6 +144,45 @@ describe('POST /wallet/enroll', () => {
   })
 })
 
+describe('POST /wallet/create', () => {
+  it('requires authentication', async () => {
+    authedDid = null
+    const res = await post('/wallet/create', {})
+    expect(res.status).toBe(401)
+    expect(signerStub.walletCreate).not.toHaveBeenCalled()
+  })
+
+  it('forwards creation and relays the share JWEs untouched', async () => {
+    const created = {
+      status: 'created',
+      wallet: {
+        did: 'did:plc:walletuser',
+        evm: { address: '0xEvm', publicKeyHex: '02aa' },
+        sol: { address: 'SoLAddr', publicKeyHex: 'bb' },
+        version: 1,
+        createdAt: 123,
+      },
+      deviceShareJwe: 'a..b.c.d',
+      recoveryShareJwe: 'e..f.g.h',
+    }
+    signerStub.walletCreate.mockResolvedValue(created)
+    const res = await post('/wallet/create', {})
+    expect(res.status).toBe(200)
+    expect(res.json).toEqual(created)
+    expect(signerStub.walletCreate).toHaveBeenCalledExactlyOnceWith(
+      'did:plc:walletuser',
+    )
+  })
+
+  it('passes through a 409 when the wallet already exists', async () => {
+    signerStub.walletCreate.mockRejectedValue(
+      new SignerClientError(409, 'wallet already exists for this DID'),
+    )
+    const res = await post('/wallet/create', {})
+    expect(res.status).toBe(409)
+  })
+})
+
 describe('GET /wallet/info', () => {
   it('requires authentication', async () => {
     authedDid = null
@@ -147,29 +190,32 @@ describe('GET /wallet/info', () => {
     expect(res.status).toBe(401)
   })
 
-  it('returns both wallet addresses and enrollment state', async () => {
-    signerStub.deriveKey.mockImplementation((_did: string, purpose: string) =>
-      Promise.resolve(
-        purpose === 'wallet/evm'
-          ? { address: '0xEvm', publicKeyHex: '02aa' }
-          : { address: 'SoLAddr', publicKeyHex: 'bb' },
-      ),
-    )
-    signerStub.walletEnrollment.mockResolvedValue({ enrolled: true })
+  it('returns wallet public info and enrollment state', async () => {
+    signerStub.walletInfo.mockResolvedValue({
+      enrolled: true,
+      wallet: {
+        did: 'did:plc:walletuser',
+        evm: { address: '0xEvm', publicKeyHex: '02aa' },
+        sol: { address: 'SoLAddr', publicKeyHex: 'bb' },
+        version: 1,
+        createdAt: 123,
+      },
+      walletEncryptionPublicJwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+    })
 
     const res = await fetch(`${base}/wallet/info`)
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({
-      did: 'did:plc:walletuser',
-      enrolled: true,
-      evm: { address: '0xEvm', publicKeyHex: '02aa' },
-      sol: { address: 'SoLAddr', publicKeyHex: 'bb' },
-    })
+    const body = (await res.json()) as Record<string, unknown>
+    expect(body.did).toBe('did:plc:walletuser')
+    expect(body.enrolled).toBe(true)
+    expect((body.wallet as Record<string, unknown>).version).toBe(1)
+    expect(
+      (body.walletEncryptionPublicJwk as Record<string, unknown>).crv,
+    ).toBe('P-256')
   })
 
   it('maps signer outages to 502', async () => {
-    signerStub.deriveKey.mockRejectedValue(new Error('ECONNREFUSED'))
-    signerStub.walletEnrollment.mockRejectedValue(new Error('ECONNREFUSED'))
+    signerStub.walletInfo.mockRejectedValue(new Error('ECONNREFUSED'))
     const res = await fetch(`${base}/wallet/info`)
     expect(res.status).toBe(502)
   })
@@ -206,6 +252,94 @@ describe('POST /wallet/sign', () => {
     const res = await post('/wallet/sign', { payload: 'cGF5', sig: 'c2ln' })
     expect(res.status).toBe(403)
     expect(res.json.error).toBe('invalid signature')
+  })
+})
+
+describe('POST /wallet/export', () => {
+  it('rejects malformed envelopes without calling the signer', async () => {
+    expect((await post('/wallet/export', {})).status).toBe(400)
+    expect(signerStub.walletExport).not.toHaveBeenCalled()
+  })
+
+  it('forwards the envelope without requiring a PDS token', async () => {
+    authedDid = null // like /sign, the envelope IS the authorization
+    signerStub.walletExport.mockResolvedValue({ exportJwe: 'x..y.z.w' })
+    const res = await post('/wallet/export', {
+      payload: 'cGF5bG9hZA',
+      sig: 'c2ln',
+    })
+    expect(res.status).toBe(200)
+    expect(res.json).toEqual({ exportJwe: 'x..y.z.w' })
+  })
+
+  it('passes through signer 403s', async () => {
+    signerStub.walletExport.mockRejectedValue(
+      new SignerClientError(403, "envelope op is not 'export'"),
+    )
+    const res = await post('/wallet/export', { payload: 'cGF5', sig: 'c2ln' })
+    expect(res.status).toBe(403)
+  })
+})
+
+describe('POST /wallet/recover', () => {
+  it('requires authentication', async () => {
+    authedDid = null
+    const res = await post('/wallet/recover', {
+      recoveryShareJwe: 'a..b.c.d',
+    })
+    expect(res.status).toBe(401)
+    expect(signerStub.walletRecover).not.toHaveBeenCalled()
+  })
+
+  it('validates the body', async () => {
+    expect((await post('/wallet/recover', {})).status).toBe(400)
+    expect(
+      (
+        await post('/wallet/recover', {
+          recoveryShareJwe: 'a'.repeat(20_000),
+        })
+      ).status,
+    ).toBe(400)
+    expect(
+      (
+        await post('/wallet/recover', {
+          recoveryShareJwe: 'a..b.c.d',
+          requestPublicKeyHex: 'junk',
+        })
+      ).status,
+    ).toBe(400)
+    expect(signerStub.walletRecover).not.toHaveBeenCalled()
+  })
+
+  it('forwards recovery for the authenticated DID', async () => {
+    const recovered = {
+      status: 'recovered',
+      version: 2,
+      deviceShareJwe: 'a..b.c.d',
+      recoveryShareJwe: 'e..f.g.h',
+    }
+    signerStub.walletRecover.mockResolvedValue(recovered)
+    const res = await post('/wallet/recover', {
+      recoveryShareJwe: 'r..s.t.u',
+      requestPublicKeyHex: VALID_P256,
+    })
+    expect(res.status).toBe(200)
+    expect(res.json).toEqual(recovered)
+    expect(signerStub.walletRecover).toHaveBeenCalledExactlyOnceWith({
+      did: 'did:plc:walletuser',
+      recoveryShareJwe: 'r..s.t.u',
+      requestPublicKeyHex: VALID_P256,
+    })
+  })
+
+  it('passes through a 403 for a wrong share', async () => {
+    signerStub.walletRecover.mockRejectedValue(
+      new SignerClientError(403, 'recovery share does not match wallet'),
+    )
+    const res = await post('/wallet/recover', {
+      recoveryShareJwe: 'r..s.t.u',
+    })
+    expect(res.status).toBe(403)
   })
 })
 

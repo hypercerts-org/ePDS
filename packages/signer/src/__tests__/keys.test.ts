@@ -3,7 +3,7 @@ import { secp256k1 } from '@noble/curves/secp256k1'
 import { base58Encode } from '../base58.js'
 import {
   evmAddressFromCompressedPubkey,
-  getKeyInfo,
+  getRepoKeyInfo,
   toChecksumAddress,
 } from '../keys.js'
 
@@ -41,27 +41,19 @@ describe('evmAddressFromCompressedPubkey', () => {
   })
 })
 
-describe('getKeyInfo', () => {
+describe('getRepoKeyInfo', () => {
   const seed = Buffer.alloc(32, 9)
   const did = 'did:plc:keyinfo'
 
-  it('returns a did:key for the repo purpose, no address', () => {
-    const info = getKeyInfo(seed, did, 'atproto/signing')
+  it('returns a did:key for the repo signing key', () => {
+    const info = getRepoKeyInfo(seed, did)
     expect(info.curve).toBe('secp256k1')
     expect(info.didKey).toMatch(/^did:key:z/)
-    expect(info.address).toBeUndefined()
     expect(info.keyId).toBe(`${did}#atproto/signing`)
+    expect(info.publicKeyHex).toMatch(/^0[23][0-9a-f]{64}$/)
   })
 
-  it('returns an EIP-55 address for wallet/evm, no didKey', () => {
-    const info = getKeyInfo(seed, did, 'wallet/evm')
-    expect(info.address).toMatch(/^0x[0-9a-fA-F]{40}$/)
-    expect(info.didKey).toBeUndefined()
-  })
-
-  it('returns a base58 address for wallet/sol', () => {
-    const info = getKeyInfo(seed, did, 'wallet/sol')
-    expect(info.curve).toBe('ed25519')
-    expect(info.address).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/)
+  it('is deterministic', () => {
+    expect(getRepoKeyInfo(seed, did)).toEqual(getRepoKeyInfo(seed, did))
   })
 })

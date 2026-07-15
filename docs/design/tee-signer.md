@@ -11,8 +11,11 @@ ATProto login, two things at once:
 2. a self-custodial crypto wallet (EVM + Solana),
 
 where every private key is created and used inside a **TEE** (a
-confidential VM the operator cannot look into). No seed phrase, and the
-operator cannot extract the keys.
+confidential VM the operator cannot look into). No seed phrase surfaced,
+and the operator cannot extract the keys — nor trap them: wallets use a
+Privy-style 2-of-3 Shamir share scheme in which the user independently
+holds a share majority (device + recovery), so they can always recover
+or leave without the operator.
 
 ## The two flows stay separate — always
 
@@ -24,27 +27,36 @@ two flows share only the transport to the signer:
 | --------------------------- | ------------------------------------------- | ------------------------------------------------------------------------- |
 | Key purpose                 | `atproto/signing`                           | `wallet/evm`, `wallet/sol`                                                |
 | Curve                       | secp256k1                                   | secp256k1 (EVM), ed25519 (Solana)                                         |
+| Key material                | derived from the enclave root seed          | independent per-wallet entropy, split 2-of-3 (Shamir)                     |
+| If the key is lost          | re-derive, or mint + rotate `#atproto`      | reconstruct from any 2 of 3 shares                                        |
 | Signer route                | `POST /v1/sign/repo`                        | `POST /v1/wallet/*`                                                       |
 | PDS surface                 | actor-store seam (invisible)                | `/wallet/*` routes                                                        |
 | Who can trigger a signature | the PDS (server-to-server, internal secret) | only the **user**, via an envelope signed with their enrolled request key |
 | Enable flag                 | `EPDS_TEE_REPO_SIGNING=1`                   | `EPDS_WALLET_ENABLED=1`                                                   |
 
-Keys are derived per `(did, purpose)` with the purpose baked into the
-HKDF info string, so the repo key and the wallet keys are
-cryptographically unrelated even where they share a curve. The signer's
-repo route can only ever reach `atproto/signing` keys; the wallet route
-only `wallet/*` keys. Neither flag requires the other.
+The two key types deliberately have **different durability models**,
+because they have different recovery properties. The repo signing key is
+_disposable_: if it is ever lost, a fresh key is minted and the DID's
+`#atproto` method rotated to it — so root-seed derivation (HKDF per
+`(did, purpose)`) is exactly right, and a failover enclave re-derives
+identical keys. A wallet key is _not_ disposable — the address IS the
+account — so it is never derivable from the root: each wallet is an
+independent 128-bit secret under a 2-of-3 share split (below). The
+signer's repo route can only ever reach `atproto/signing` keys; the
+wallet routes only wallet material. Neither flag requires the other.
 
 ## Architecture
 
 ```
 ATProto client ──login──▶ pds-core ──"sign digest for did X"──▶ signer (in the TEE)
                           │            x-internal-secret          - holds the root seed
-                          │                                       - derives per-(did,purpose) keys
-                          │ never holds an enclave key            - wallet signs ONLY user-signed
-                          ▼                                         envelopes
-                    repo reads/writes                             - proves itself (attestation)
-Wallet client ──user-signed envelope──▶ pds-core /wallet/sign ──▶ signer /v1/wallet/sign
+                          │                                       - derives per-DID repo keys
+                          │ never holds an enclave key            - holds 1 of 3 wallet shares
+                          ▼                                         (encrypted); reconstructs
+                    repo reads/writes                               transiently for user-signed
+                                                                    envelopes only
+Wallet client ──user-signed envelope + device share (JWE)──▶      - proves itself (attestation)
+                pds-core /wallet/* ──▶ signer /v1/wallet/*
 ```
 
 - **pds-core** does all normal ATProto work. With `EPDS_TEE_REPO_SIGNING=1`
@@ -86,6 +98,51 @@ accounts (`EPDS_TEE_ADOPT_ON_SIGNUP=1`) or per-account via
 migrating existing accounts. The old local key file is left in place so
 rollback is "delete marker + rotate PLC back".
 
+### Wallet keys: per-wallet entropy + 2-of-3 Shamir shares
+
+On `POST /wallet/create` the enclave generates 128 bits of CSPRNG
+entropy, derives a standard HD wallet from it (BIP-39 → BIP-32
+`m/44'/60'/0'/0/0` for EVM, SLIP-10 `m/44'/501'/0'/0'` for Solana), and
+splits the entropy 2-of-3 with Shamir's Secret Sharing ([Privy's
+audited `shamir-secret-sharing`
+library](https://github.com/privy-io/shamir-secret-sharing)):
+
+- **Server share** — the only thing the signer persists, encrypted
+  AES-256-GCM under a KEK derived from the root seed (the
+  measurement-bound key: only an attested enclave that received the
+  seed can use it — opaque to the operator and storage admins).
+- **Device share** — returned to the user encrypted (JWE ECDH-ES) to
+  their enrolled P-256 request key. Never persisted server-side.
+- **Recovery share** — same delivery; the client must re-protect it
+  under a user-controlled **recovery factor** (password or user-cloud
+  backup). The operator can never read it.
+
+Every wallet operation reconstructs the entropy **transiently inside
+the enclave** from the server share plus a user share, verifies the
+reconstructed key against the wallet's registered public keys, signs,
+and wipes. The user share travels JWE-encrypted **to the enclave's own
+encryption key** (published in `/v1/attestation` and `/wallet/info`),
+so the relaying PDS never sees share plaintext.
+
+The custody invariant (the reason this is self-custodial): **no single
+party ever holds ≥ 2 shares, and the user independently controls ≥ 2**
+(device + recovery). Consequences:
+
+- _Machine burns down:_ a fresh attested enclave re-reads the encrypted
+  server share (KEK re-derived from the KMS-released root seed) and
+  combines it with the user's device share. No user action needed.
+- _User loses device:_ `POST /wallet/recover` with the recovery share.
+  The enclave verifies the share actually reconstructs this wallet
+  (that possession — not the caller — is the authorization), re-splits
+  with **fresh coefficients** (old/stolen shares become useless),
+  optionally rotates the enrolled request key, and returns fresh
+  device + recovery shares.
+- _Operator disappears or turns hostile:_ the user holds device +
+  recovery — a reconstructing majority — and `POST /wallet/export`
+  (user-signed envelope, response encrypted to the user's request key)
+  hands over the mnemonic/private keys. Credible exit either way; the
+  operator can freeze, never trap.
+
 ### The user check (wallet flow)
 
 The single most important property: **the signer produces a wallet
@@ -99,12 +156,19 @@ PDS host could drain wallets even though keys never leave the TEE.
   trust-on-first-use; the signer refuses to overwrite an existing
   enrollment (rotation would require a request signed by the current key
   and is future work).
-- Every `POST /wallet/sign` carries an envelope
+- Every `POST /wallet/sign` (and `/wallet/export`, with `op: 'export'`)
+  carries an envelope
   `{payload: b64url(JSON), sig: b64url(P-256 over SHA-256(payload))}`
-  with `did`, `purpose`, the EVM digest / Solana message, a strictly
-  increasing `nonce`, and an `iat` freshness timestamp. The signer
-  verifies the signature against the enrolled key, the freshness window,
-  and the monotonic nonce before signing. pds-core is a pure relay here.
+  with `did`, `purpose`, the EVM digest / Solana message, the
+  `deviceShareJwe` (the user's device share, encrypted to the enclave),
+  a strictly increasing `nonce`, and an `iat` freshness timestamp. The
+  signer verifies the signature against the enrolled key, the freshness
+  window, and the monotonic nonce — and can only even reconstruct the
+  wallet key when the envelope carries a genuine share. pds-core is a
+  pure relay here.
+- Enrollment rotation happens only through `POST /wallet/recover`,
+  where possession of the recovery share authorizes binding a new
+  request key (device replacement).
 
 ### Honest limitation: OTP login and the enrollment bootstrap
 
@@ -121,9 +185,13 @@ self-custodial; enrollment itself trusts the operator once.
 ### Threat model (what an evil host can and cannot do)
 
 Cannot: read the root seed or any derived key (memory encrypted, keys
-never on the PDS host at all); swap the signer for a key-stealing build
+never on the PDS host at all); read the wallet server share at rest
+(encrypted under the measurement-bound KEK); reconstruct any wallet
+unilaterally (the operator holds at most one share — the invariant the
+2-of-3 split exists for); swap the signer for a key-stealing build
 without changing the attestation measurement; forge a wallet signature
-for an enrolled wallet (no user envelope, no signature).
+for an enrolled wallet (no user envelope carrying a real share, no
+signature).
 
 Can — design against it:
 
@@ -158,10 +226,14 @@ over a private network and require the quote at startup.)
 
 ### Failover
 
-Derivation is pure `(rootSeed, did, purpose)` — no per-key state. A
+Repo-key derivation is pure `(rootSeed, did)` — no per-key state. A
 replacement signer that passes attestation and receives the same root
-seed from the dstack KMS derives identical keys. Only wallet
-enrollments + nonces (a small sqlite file) need replication.
+seed from the dstack KMS derives identical repo keys, and can decrypt
+the wallet server shares (the KEK derives from the same root seed).
+The sqlite store — wallet records (encrypted server shares + public
+material), enrollments, nonces — must be replicated; it contains no
+plaintext secrets and at most **one** share per wallet, so replication
+targets never gain spending power.
 
 ## Where things run
 
@@ -179,12 +251,13 @@ wallet; Signer section) and `packages/signer/.env.example`.
 
 ## Code map
 
-| Piece                        | Path                                                                                                            |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| Signer service (TEE side)    | `packages/signer/src/` — `derive.ts`, `envelope.ts`, `service.ts`, `attestation.ts`, `store.ts`, `root-seed.ts` |
-| Purpose separation           | `packages/signer/src/purposes.ts`                                                                               |
-| PDS→signer client            | `packages/shared/src/signer-client.ts`                                                                          |
-| Repo seam (`Keypair` impl)   | `packages/pds-core/src/tee/tee-keypair.ts`                                                                      |
-| Actor-store patch + adoption | `packages/pds-core/src/tee/actor-store-tee.ts`                                                                  |
-| Wallet routes                | `packages/pds-core/src/tee/wallet-router.ts`                                                                    |
-| Wiring / env flags           | `packages/pds-core/src/tee/setup.ts`                                                                            |
+| Piece                        | Path                                                                                                                         |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Signer service (TEE side)    | `packages/signer/src/` — `derive.ts`, `wallet.ts`, `envelope.ts`, `service.ts`, `attestation.ts`, `store.ts`, `root-seed.ts` |
+| Wallet share model (2-of-3)  | `packages/signer/src/wallet.ts`                                                                                              |
+| Purpose separation           | `packages/signer/src/purposes.ts`                                                                                            |
+| PDS→signer client            | `packages/shared/src/signer-client.ts`                                                                                       |
+| Repo seam (`Keypair` impl)   | `packages/pds-core/src/tee/tee-keypair.ts`                                                                                   |
+| Actor-store patch + adoption | `packages/pds-core/src/tee/actor-store-tee.ts`                                                                               |
+| Wallet routes                | `packages/pds-core/src/tee/wallet-router.ts`                                                                                 |
+| Wiring / env flags           | `packages/pds-core/src/tee/setup.ts`                                                                                         |

@@ -1,9 +1,15 @@
 /**
- * Signer persistence — wallet enrollments and anti-replay nonces.
+ * Signer persistence — wallet records, enrollments, anti-replay nonces.
  *
- * Deliberately tiny: derivation is pure, so the only state the signer
- * keeps is (a) which user request-key is enrolled for each DID and
- * (b) the last accepted wallet nonce per DID (monotonic counter).
+ * Repo-key derivation is pure, so no repo-key state exists. Per DID
+ * the signer keeps: (a) which user request-key is enrolled, (b) the
+ * last accepted wallet nonce (monotonic counter), and (c) the wallet
+ * record — the SERVER SHARE of the 2-of-3 split, encrypted under the
+ * measurement-bound KEK (opaque to whoever holds this file), plus
+ * cached public material (addresses/pubkeys) so lookups never touch
+ * secrets. Device and recovery shares are NEVER stored here — the
+ * whole point of the split is that this store alone reconstructs
+ * nothing.
  *
  * Threat-model note (see docs/design/tee-signer.md): the host controls
  * this disk, so it can roll the file back. Rolling back the nonce table
@@ -22,6 +28,19 @@ export interface EnrollmentRow {
   createdAt: number
 }
 
+export interface WalletRow {
+  did: string
+  /** AES-256-GCM ciphertext of the SSS server share, hex (iv‖tag‖ct). */
+  serverShareCipherHex: string
+  evmPubkeyHex: string
+  evmAddress: string
+  solPubkeyHex: string
+  solAddress: string
+  /** Incremented on every re-shard (recovery). */
+  version: number
+  createdAt: number
+}
+
 export class SignerStore {
   private readonly db: Database.Database
 
@@ -37,6 +56,16 @@ export class SignerStore {
       CREATE TABLE IF NOT EXISTS wallet_nonce (
         did TEXT PRIMARY KEY,
         last_nonce INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS wallet (
+        did TEXT PRIMARY KEY,
+        server_share_cipher_hex TEXT NOT NULL,
+        evm_pubkey_hex TEXT NOT NULL,
+        evm_address TEXT NOT NULL,
+        sol_pubkey_hex TEXT NOT NULL,
+        sol_address TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL
       );
     `)
   }
@@ -74,6 +103,95 @@ export class SignerStore {
       )
       .run(did, requestPubkeyHex, Date.now())
     return 'created'
+  }
+
+  /**
+   * Rotate the enrolled request key. Only reachable from the recovery
+   * path, where possession of the recovery share (verified in-enclave
+   * against the wallet's stored public keys) authorizes the rotation.
+   */
+  rotateEnrollment(did: string, requestPubkeyHex: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO wallet_enrollment (did, request_pubkey_hex, created_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(did) DO UPDATE SET request_pubkey_hex = excluded.request_pubkey_hex`,
+      )
+      .run(did, requestPubkeyHex, Date.now())
+  }
+
+  getWallet(did: string): WalletRow | null {
+    const row = this.db
+      .prepare(
+        `SELECT did,
+                server_share_cipher_hex AS serverShareCipherHex,
+                evm_pubkey_hex AS evmPubkeyHex,
+                evm_address AS evmAddress,
+                sol_pubkey_hex AS solPubkeyHex,
+                sol_address AS solAddress,
+                version,
+                created_at AS createdAt
+         FROM wallet WHERE did = ?`,
+      )
+      .get(did) as WalletRow | undefined
+    return row ?? null
+  }
+
+  /**
+   * Insert a new wallet record. Returns false when a wallet already
+   * exists for the DID (creation is once-only; the entropy behind an
+   * existing wallet must never be silently replaced).
+   */
+  createWallet(row: Omit<WalletRow, 'version' | 'createdAt'>): boolean {
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO wallet (did, server_share_cipher_hex, evm_pubkey_hex,
+                               evm_address, sol_pubkey_hex, sol_address,
+                               version, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+        )
+        .run(
+          row.did,
+          row.serverShareCipherHex,
+          row.evmPubkeyHex,
+          row.evmAddress,
+          row.solPubkeyHex,
+          row.solAddress,
+          Date.now(),
+        )
+      return true
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        err.message.includes('UNIQUE constraint failed')
+      ) {
+        return false
+      }
+      /* v8 ignore next 1 -- non-constraint sqlite failures */
+      throw err
+    }
+  }
+
+  /**
+   * Replace the encrypted server share after a re-shard (recovery with
+   * fresh SSS coefficients). Returns the new version number.
+   */
+  replaceServerShare(did: string, serverShareCipherHex: string): number {
+    const tx = this.db.transaction((): number => {
+      const row = this.db
+        .prepare('SELECT version FROM wallet WHERE did = ?')
+        .get(did) as { version: number } | undefined
+      if (!row) throw new Error(`no wallet for ${did}`)
+      const version = row.version + 1
+      this.db
+        .prepare(
+          'UPDATE wallet SET server_share_cipher_hex = ?, version = ? WHERE did = ?',
+        )
+        .run(serverShareCipherHex, version, did)
+      return version
+    })
+    return tx()
   }
 
   /**

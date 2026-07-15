@@ -46,19 +46,19 @@ describe('SignerClient', () => {
 
   it('deriveKey posts did and purpose', async () => {
     const mock = mockFetchOnce(200, {
-      keyId: 'did:plc:x#wallet/evm',
-      purpose: 'wallet/evm',
+      keyId: 'did:plc:x#atproto/signing',
+      purpose: 'atproto/signing',
       curve: 'secp256k1',
       publicKeyHex: '02ab',
-      address: '0x1',
+      didKey: 'did:key:zQ3s',
     })
-    const info = await client.deriveKey('did:plc:x', 'wallet/evm')
-    expect(info.address).toBe('0x1')
+    const info = await client.deriveKey('did:plc:x', 'atproto/signing')
+    expect(info.didKey).toBe('did:key:zQ3s')
     const [url, init] = mock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('http://signer.internal:3010/v1/keys/derive')
     expect(JSON.parse(init.body as string)).toEqual({
       did: 'did:plc:x',
-      purpose: 'wallet/evm',
+      purpose: 'atproto/signing',
     })
   })
 
@@ -86,6 +86,71 @@ describe('SignerClient', () => {
     expect(url).toBe(
       'http://signer.internal:3010/v1/wallet/enrollment/did%3Aplc%3Aabc',
     )
+  })
+
+  it('walletCreate posts the did and returns share JWEs verbatim', async () => {
+    const mock = mockFetchOnce(200, {
+      status: 'created',
+      wallet: {
+        did: 'did:plc:x',
+        evm: { address: '0x1', publicKeyHex: '02ab' },
+        sol: { address: 'So1', publicKeyHex: 'cd' },
+        version: 1,
+        createdAt: 123,
+      },
+      deviceShareJwe: 'a..b.c.d',
+      recoveryShareJwe: 'e..f.g.h',
+    })
+    const result = await client.walletCreate('did:plc:x')
+    expect(result.deviceShareJwe).toBe('a..b.c.d')
+    expect(result.wallet.evm.address).toBe('0x1')
+    const [url, init] = mock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('http://signer.internal:3010/v1/wallet/create')
+    expect(JSON.parse(init.body as string)).toEqual({ did: 'did:plc:x' })
+  })
+
+  it('walletInfo URL-encodes the did', async () => {
+    const mock = mockFetchOnce(200, {
+      enrolled: true,
+      wallet: null,
+      walletEncryptionPublicJwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+    })
+    const info = await client.walletInfo('did:plc:abc')
+    expect(info.wallet).toBeNull()
+    const [url] = mock.mock.calls[0] as [string]
+    expect(url).toBe(
+      'http://signer.internal:3010/v1/wallet/info/did%3Aplc%3Aabc',
+    )
+  })
+
+  it('walletExport forwards the envelope to the export route', async () => {
+    const mock = mockFetchOnce(200, { exportJwe: 'x..y.z.w' })
+    const result = await client.walletExport({ payload: 'cGF5', sig: 'c2ln' })
+    expect(result.exportJwe).toBe('x..y.z.w')
+    const [url] = mock.mock.calls[0] as [string]
+    expect(url).toBe('http://signer.internal:3010/v1/wallet/export')
+  })
+
+  it('walletRecover posts share and optional new request key', async () => {
+    const mock = mockFetchOnce(200, {
+      status: 'recovered',
+      version: 2,
+      deviceShareJwe: 'a..b.c.d',
+      recoveryShareJwe: 'e..f.g.h',
+    })
+    const result = await client.walletRecover({
+      did: 'did:plc:x',
+      recoveryShareJwe: 'r..s.t.u',
+      requestPublicKeyHex: '02ab',
+    })
+    expect(result.version).toBe(2)
+    const [url, init] = mock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('http://signer.internal:3010/v1/wallet/recover')
+    expect(JSON.parse(init.body as string)).toEqual({
+      did: 'did:plc:x',
+      recoveryShareJwe: 'r..s.t.u',
+      requestPublicKeyHex: '02ab',
+    })
   })
 
   it('throws SignerClientError with the server error message', async () => {

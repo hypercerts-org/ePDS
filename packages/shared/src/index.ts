@@ -88,4 +88,10 @@ export type {
   SignerClientOptions,
   WalletSignEnvelope,
   WalletSignResult,
+  WalletEncryptionJwk,
+  WalletChainInfo,
+  WalletPublicInfo,
+  WalletCreateResult,
+  WalletInfoResult,
+  WalletRecoverResult,
 } from './signer-client.js'

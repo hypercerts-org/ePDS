@@ -25,12 +25,58 @@ export interface SignerKeyInfo {
   address?: string
 }
 
+/** Public JWK of the enclave's wallet-encryption key (P-256). */
+export interface WalletEncryptionJwk {
+  kty: string
+  crv: string
+  x: string
+  y: string
+}
+
 export interface SignerAttestation {
   mode: 'dstack' | 'dev'
   reportData: string
   quote: string | null
   identityPublicKeyHex: string
+  walletEncryptionPublicJwk?: WalletEncryptionJwk
   note?: string
+}
+
+export interface WalletChainInfo {
+  address: string
+  publicKeyHex: string
+}
+
+export interface WalletPublicInfo {
+  did: string
+  evm: WalletChainInfo
+  sol: WalletChainInfo
+  /** Incremented on every re-shard (recovery). */
+  version: number
+  createdAt: number
+}
+
+export interface WalletCreateResult {
+  status: 'created'
+  wallet: WalletPublicInfo
+  /** Device share, JWE-encrypted to the user's enrolled request key. */
+  deviceShareJwe: string
+  /** Recovery share, same encryption — the client must re-protect it
+   * under a user-controlled recovery factor. */
+  recoveryShareJwe: string
+}
+
+export interface WalletInfoResult {
+  enrolled: boolean
+  wallet: WalletPublicInfo | null
+  walletEncryptionPublicJwk: WalletEncryptionJwk
+}
+
+export interface WalletRecoverResult {
+  status: 'recovered'
+  version: number
+  deviceShareJwe: string
+  recoveryShareJwe: string
 }
 
 export interface WalletSignEnvelope {
@@ -113,9 +159,14 @@ export class SignerClient {
     return this.request('GET', '/v1/attestation')
   }
 
+  /**
+   * Repo signing key info only — wallet keys are per-wallet secrets
+   * under the 2-of-3 share scheme and cannot be derived (the signer
+   * rejects wallet purposes here; use `walletCreate` / `walletInfo`).
+   */
   async deriveKey(
     did: string,
-    purpose: SignerKeyPurpose,
+    purpose: 'atproto/signing',
   ): Promise<SignerKeyInfo> {
     return this.request('POST', '/v1/keys/derive', { did, purpose })
   }
@@ -151,8 +202,46 @@ export class SignerClient {
     )
   }
 
+  /**
+   * Create the user's wallet: entropy is generated in-enclave and
+   * split 2-of-3. The returned share JWEs are opaque to us (encrypted
+   * to the user's enrolled request key) — pass them through verbatim.
+   */
+  async walletCreate(did: string): Promise<WalletCreateResult> {
+    return this.request('POST', '/v1/wallet/create', { did })
+  }
+
+  /** Public wallet material + enrollment + enclave encryption JWK. */
+  async walletInfo(did: string): Promise<WalletInfoResult> {
+    return this.request('GET', `/v1/wallet/info/${encodeURIComponent(did)}`)
+  }
+
   /** Forward a user-signed envelope. The signer verifies the user; we don't. */
   async walletSign(envelope: WalletSignEnvelope): Promise<WalletSignResult> {
     return this.request('POST', '/v1/wallet/sign', envelope)
+  }
+
+  /**
+   * Forward a user-signed export envelope. Returns the key material
+   * encrypted to the user's request key — opaque to us and the PDS.
+   */
+  async walletExport(
+    envelope: WalletSignEnvelope,
+  ): Promise<{ exportJwe: string }> {
+    return this.request('POST', '/v1/wallet/export', envelope)
+  }
+
+  /**
+   * Forward a recovery request. Authorization is possession of the
+   * recovery share (verified inside the enclave), not the caller.
+   */
+  async walletRecover(params: {
+    did: string
+    /** Recovery share, JWE-encrypted to the enclave's encryption key. */
+    recoveryShareJwe: string
+    /** Optional new request key to enroll (device replacement). */
+    requestPublicKeyHex?: string
+  }): Promise<WalletRecoverResult> {
+    return this.request('POST', '/v1/wallet/recover', params)
   }
 }

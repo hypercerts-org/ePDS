@@ -1,12 +1,19 @@
 /**
- * Wallet signing envelopes — the user check that makes the wallet
+ * Wallet envelopes — the user check that makes the wallet
  * self-custodial.
  *
- * A wallet signature is only ever produced for a request the *user*
+ * A wallet operation is only ever performed for a request the *user*
  * signed with their enrolled request key (P-256, e.g. a WebCrypto
  * non-extractable key or a passkey-wrapped key held by the client app).
  * The PDS merely transports the envelope; it cannot mint one, and a
  * PDS-forwarded OAuth token is deliberately NOT accepted here.
+ *
+ * Under the 2-of-3 share model the envelope also carries the user's
+ * DEVICE SHARE, JWE-encrypted to the enclave's wallet-encryption key —
+ * so the signature covers the share, and the PDS relaying the request
+ * never sees share plaintext (it would otherwise transiently hold a
+ * second share next to the operator's server share, violating the
+ * "no single party holds ≥ 2 shares" invariant).
  *
  * Envelope wire format:
  *   {
@@ -17,14 +24,18 @@
  * Payload JSON:
  *   {
  *     did:      the user's DID (must match the enrolled DID)
- *     purpose:  'wallet/evm' | 'wallet/sol'
+ *     op:       'sign' (default) | 'export'
+ *     purpose:  'wallet/evm' | 'wallet/sol'   (op = 'sign' only)
  *     digestHex:      (wallet/evm) 32-byte tx/EIP-712 digest, hex
  *     messageBase64:  (wallet/sol) full serialized message bytes
+ *     deviceShareJwe: compact JWE of the device share, addressed to
+ *                     the enclave's wallet-encryption key
  *     nonce:    strictly increasing integer per DID (anti-replay)
  *     iat:      unix seconds; must be within the freshness window
  *   }
  */
 import { p256 } from '@noble/curves/nist.js'
+import { isCompactJwe } from './wallet.js'
 import {
   isPlausibleDid,
   isWalletPurpose,
@@ -35,17 +46,21 @@ export const DEFAULT_FRESHNESS_SEC = 120
 const MAX_PAYLOAD_BYTES = 64 * 1024
 const MAX_SOL_MESSAGE_BYTES = 4 * 1024
 
-export interface WalletSignPayload {
+export type WalletOp = 'sign' | 'export'
+
+export interface WalletEnvelopePayload {
   did: string
-  purpose: WalletPurpose
+  op: WalletOp
+  purpose?: WalletPurpose
   digestHex?: string
   messageBase64?: string
+  deviceShareJwe: string
   nonce: number
   iat: number
 }
 
 export type EnvelopeResult =
-  | { ok: true; payload: WalletSignPayload }
+  | { ok: true; payload: WalletEnvelopePayload }
   | { ok: false; error: string }
 
 function decodeBase64Url(value: string, maxBytes: number): Buffer | null {
@@ -56,7 +71,7 @@ function decodeBase64Url(value: string, maxBytes: number): Buffer | null {
   return buf
 }
 
-function parsePayload(bytes: Buffer): WalletSignPayload | null {
+function parsePayload(bytes: Buffer): WalletEnvelopePayload | null {
   let parsed: unknown
   try {
     parsed = JSON.parse(bytes.toString('utf8'))
@@ -66,30 +81,37 @@ function parsePayload(bytes: Buffer): WalletSignPayload | null {
   if (typeof parsed !== 'object' || parsed === null) return null
   const p = parsed as Record<string, unknown>
   if (!isPlausibleDid(p.did)) return null
-  if (!isWalletPurpose(p.purpose)) return null
+  const op: unknown = p.op ?? 'sign'
+  if (op !== 'sign' && op !== 'export') return null
   if (!Number.isSafeInteger(p.nonce) || (p.nonce as number) <= 0) return null
   if (!Number.isSafeInteger(p.iat)) return null
+  if (!isCompactJwe(p.deviceShareJwe)) return null
 
-  if (p.purpose === 'wallet/evm') {
-    if (
-      typeof p.digestHex !== 'string' ||
-      !/^[0-9a-fA-F]{64}$/.test(p.digestHex)
-    ) {
-      return null
+  if (op === 'sign') {
+    if (!isWalletPurpose(p.purpose)) return null
+    if (p.purpose === 'wallet/evm') {
+      if (
+        typeof p.digestHex !== 'string' ||
+        !/^[0-9a-fA-F]{64}$/.test(p.digestHex)
+      ) {
+        return null
+      }
+    } else {
+      const msg =
+        typeof p.messageBase64 === 'string'
+          ? decodeBase64Url(p.messageBase64, MAX_SOL_MESSAGE_BYTES)
+          : null
+      if (!msg) return null
     }
-  } else {
-    const msg =
-      typeof p.messageBase64 === 'string'
-        ? decodeBase64Url(p.messageBase64, MAX_SOL_MESSAGE_BYTES)
-        : null
-    if (!msg) return null
   }
 
   return {
     did: p.did,
-    purpose: p.purpose,
+    op,
+    purpose: p.purpose as WalletPurpose | undefined,
     digestHex: p.digestHex as string | undefined,
     messageBase64: p.messageBase64 as string | undefined,
+    deviceShareJwe: p.deviceShareJwe,
     nonce: p.nonce as number,
     iat: p.iat as number,
   }
@@ -104,6 +126,7 @@ export function verifyEnvelope(opts: {
   payloadB64: string
   sigB64: string
   requestPubkeyHex: string
+  expectedOp: WalletOp
   nowSec?: number
   freshnessSec?: number
 }): EnvelopeResult {
@@ -111,6 +134,7 @@ export function verifyEnvelope(opts: {
     payloadB64,
     sigB64,
     requestPubkeyHex,
+    expectedOp,
     nowSec = Math.floor(Date.now() / 1000),
     freshnessSec = DEFAULT_FRESHNESS_SEC,
   } = opts
@@ -142,6 +166,10 @@ export function verifyEnvelope(opts: {
 
   const payload = parsePayload(payloadBytes)
   if (!payload) return { ok: false, error: 'malformed payload' }
+
+  if (payload.op !== expectedOp) {
+    return { ok: false, error: `envelope op is not '${expectedOp}'` }
+  }
 
   if (Math.abs(nowSec - payload.iat) > freshnessSec) {
     return { ok: false, error: 'stale envelope' }

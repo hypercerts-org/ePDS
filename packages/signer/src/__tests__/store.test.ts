@@ -40,6 +40,62 @@ describe('SignerStore.enroll', () => {
   })
 })
 
+describe('SignerStore.rotateEnrollment', () => {
+  it('replaces the enrolled key', () => {
+    store.enroll('did:plc:a', '02aa')
+    store.rotateEnrollment('did:plc:a', '03bb')
+    expect(store.getEnrollment('did:plc:a')?.requestPubkeyHex).toBe('03bb')
+  })
+
+  it('creates the row when none exists', () => {
+    store.rotateEnrollment('did:plc:a', '03bb')
+    expect(store.getEnrollment('did:plc:a')?.requestPubkeyHex).toBe('03bb')
+  })
+})
+
+describe('SignerStore wallet records', () => {
+  const row = {
+    did: 'did:plc:a',
+    serverShareCipherHex: 'aabb',
+    evmPubkeyHex: '02cc',
+    evmAddress: '0xAbC',
+    solPubkeyHex: 'dd',
+    solAddress: 'SoL',
+  }
+
+  it('creates and reads a wallet', () => {
+    expect(store.getWallet('did:plc:a')).toBeNull()
+    expect(store.createWallet(row)).toBe(true)
+    const got = store.getWallet('did:plc:a')
+    expect(got).toMatchObject({ ...row, version: 1 })
+    expect(got?.createdAt).toBeGreaterThan(0)
+  })
+
+  it('refuses to create twice', () => {
+    expect(store.createWallet(row)).toBe(true)
+    expect(store.createWallet(row)).toBe(false)
+    expect(store.createWallet({ ...row, serverShareCipherHex: 'ffff' })).toBe(
+      false,
+    )
+    expect(store.getWallet('did:plc:a')?.serverShareCipherHex).toBe('aabb')
+  })
+
+  it('replaceServerShare bumps the version', () => {
+    store.createWallet(row)
+    expect(store.replaceServerShare('did:plc:a', 'ccdd')).toBe(2)
+    expect(store.replaceServerShare('did:plc:a', 'eeff')).toBe(3)
+    const got = store.getWallet('did:plc:a')
+    expect(got?.serverShareCipherHex).toBe('eeff')
+    expect(got?.version).toBe(3)
+  })
+
+  it('replaceServerShare throws for a missing wallet', () => {
+    expect(() => store.replaceServerShare('did:plc:none', 'ff')).toThrow(
+      /no wallet/,
+    )
+  })
+})
+
 describe('SignerStore.consumeNonce', () => {
   it('accepts strictly increasing nonces', () => {
     expect(store.consumeNonce('did:plc:a', 1)).toBe(true)

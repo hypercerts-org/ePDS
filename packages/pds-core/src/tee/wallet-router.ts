@@ -3,20 +3,32 @@
  *
  * Mounted at /wallet on pds-core when EPDS_WALLET_ENABLED=1. These
  * routes never touch the actor store, the repo, or the repo signing
- * key; they exist purely so a logged-in user can (a) enroll their
- * wallet request key, (b) look up their wallet addresses, and (c) relay
- * user-signed signing envelopes to the TEE signer.
+ * key; they relay between the user's client and the TEE signer, which
+ * holds each wallet as a Privy-style 2-of-3 Shamir split (server /
+ * device / recovery shares). Every share that passes through here is
+ * a JWE this host cannot decrypt — shares travel user↔enclave, and
+ * the PDS is a ciphertext courier. That is what keeps the operator
+ * below the "holds ≥ 2 shares" line.
  *
  * Authorization model per route:
- *   POST /wallet/enroll — OAuth/access token (who is enrolling). This
+ *   POST /wallet/enroll  — OAuth/access token (who is enrolling). This
  *     is the trust-on-first-use bootstrap; the signer additionally
  *     refuses to overwrite an existing enrollment.
- *   GET  /wallet/info   — OAuth/access token (public key material only).
- *   POST /wallet/sign   — NO PDS-side authorization on purpose: the
+ *   POST /wallet/create  — OAuth/access token. Generates the wallet in
+ *     the enclave; the response's device/recovery share JWEs are
+ *     decryptable only by the enrolled request key.
+ *   GET  /wallet/info    — OAuth/access token (public material only).
+ *   POST /wallet/sign    — NO PDS-side authorization on purpose: the
  *     envelope inside the body is signed by the user's enrolled request
  *     key and verified inside the signer. A PDS token is neither
  *     necessary nor sufficient here — that property is what keeps the
  *     wallet self-custodial even against a compromised PDS host.
+ *   POST /wallet/export  — same as /sign (user-signed export envelope);
+ *     the response is encrypted to the user's request key. Credible
+ *     exit: the operator alone can never satisfy or read it.
+ *   POST /wallet/recover — OAuth/access token for transport, but the
+ *     real authorization is possession of the recovery share, which
+ *     the enclave verifies against the wallet's registered keys.
  */
 import express, { Router, type Request, type Response } from 'express'
 import { SignerClientError, type SignerClient } from '@certified-app/shared'
@@ -95,6 +107,22 @@ export function createWalletRouter(opts: {
     }
   })
 
+  router.post('/create', async (req: Request, res: Response) => {
+    const did = await verifyUserDid(req, res)
+    if (!did) {
+      res.status(401).json({ error: 'authentication required' })
+      return
+    }
+    try {
+      const result = await signer.walletCreate(did)
+      logger.info({ did }, 'wallet created')
+      res.json(result)
+    } catch (err) {
+      logger.warn({ err, did }, 'wallet creation failed')
+      sendSignerError(res, err)
+    }
+  })
+
   router.get('/info', async (req: Request, res: Response) => {
     const did = await verifyUserDid(req, res)
     if (!did) {
@@ -102,17 +130,8 @@ export function createWalletRouter(opts: {
       return
     }
     try {
-      const [evm, sol, enrollment] = await Promise.all([
-        signer.deriveKey(did, 'wallet/evm'),
-        signer.deriveKey(did, 'wallet/sol'),
-        signer.walletEnrollment(did),
-      ])
-      res.json({
-        did,
-        enrolled: enrollment.enrolled,
-        evm: { address: evm.address, publicKeyHex: evm.publicKeyHex },
-        sol: { address: sol.address, publicKeyHex: sol.publicKeyHex },
-      })
+      const info = await signer.walletInfo(did)
+      res.json({ did, ...info })
     } catch (err) {
       logger.warn({ err, did }, 'wallet info failed')
       sendSignerError(res, err)
@@ -132,6 +151,60 @@ export function createWalletRouter(opts: {
       const result = await signer.walletSign({ payload, sig })
       res.json(result)
     } catch (err) {
+      sendSignerError(res, err)
+    }
+  })
+
+  router.post('/export', async (req: Request, res: Response) => {
+    const payload: unknown = req.body?.payload
+    const sig: unknown = req.body?.sig
+    if (!isEnvelopeField(payload, 90_000) || !isEnvelopeField(sig, 128)) {
+      res.status(400).json({ error: 'missing or malformed payload/sig' })
+      return
+    }
+    try {
+      // Same trust shape as /sign; the response is a JWE only the
+      // user's request key opens — we relay ciphertext both ways.
+      const result = await signer.walletExport({ payload, sig })
+      res.json(result)
+    } catch (err) {
+      sendSignerError(res, err)
+    }
+  })
+
+  router.post('/recover', async (req: Request, res: Response) => {
+    const did = await verifyUserDid(req, res)
+    if (!did) {
+      res.status(401).json({ error: 'authentication required' })
+      return
+    }
+    const recoveryShareJwe: unknown = req.body?.recoveryShareJwe
+    const requestPublicKeyHex: unknown = req.body?.requestPublicKeyHex
+    if (
+      typeof recoveryShareJwe !== 'string' ||
+      recoveryShareJwe.length === 0 ||
+      recoveryShareJwe.length > 16_384
+    ) {
+      res.status(400).json({ error: 'missing or malformed recoveryShareJwe' })
+      return
+    }
+    if (
+      requestPublicKeyHex !== undefined &&
+      !isCompressedP256Hex(requestPublicKeyHex)
+    ) {
+      res.status(400).json({ error: 'malformed requestPublicKeyHex' })
+      return
+    }
+    try {
+      const result = await signer.walletRecover({
+        did,
+        recoveryShareJwe,
+        requestPublicKeyHex,
+      })
+      logger.info({ did }, 'wallet recovered')
+      res.json(result)
+    } catch (err) {
+      logger.warn({ err, did }, 'wallet recovery failed')
       sendSignerError(res, err)
     }
   })
