@@ -30,7 +30,7 @@ two flows share only the transport to the signer:
 | Key material                | derived from the enclave root seed          | independent per-wallet entropy, split 2-of-3 (Shamir)                     |
 | If the key is lost          | re-derive, or mint + rotate `#atproto`      | reconstruct from any 2 of 3 shares                                        |
 | Signer route                | `POST /v1/sign/repo`                        | `POST /v1/wallet/*`                                                       |
-| PDS surface                 | actor-store seam (invisible)                | `/wallet/*` routes                                                        |
+| PDS surface                 | actor-store seam (invisible)                | `/wallet/*` + `/xrpc/app.gainforest.wallet.*`                             |
 | Who can trigger a signature | the PDS (server-to-server, internal secret) | only the **user**, via an envelope signed with their enrolled request key |
 | Enable flag                 | `EPDS_TEE_REPO_SIGNING=1`                   | `EPDS_WALLET_ENABLED=1`                                                   |
 
@@ -142,6 +142,22 @@ party ever holds ≥ 2 shares, and the user independently controls ≥ 2**
   (user-signed envelope, response encrypted to the user's request key)
   hands over the mnemonic/private keys. Credible exit either way; the
   operator can freeze, never trap.
+
+### Wallet Lexicon surface (`app.gainforest.wallet.*`)
+
+The wallet is reachable on two equivalent PDS surfaces backed by the
+same handlers — plain REST and an XRPC Lexicon namespace. All wallet
+NSIDs (and any future wallet Lexicon schemas or sidecar record types)
+live under **`app.gainforest.*`**:
+
+| XRPC method (NSID)                | Type      | REST alias             | Auth                                |
+| --------------------------------- | --------- | ---------------------- | ----------------------------------- |
+| `app.gainforest.wallet.enroll`    | procedure | POST `/wallet/enroll`  | OAuth token (TOFU bootstrap)        |
+| `app.gainforest.wallet.create`    | procedure | POST `/wallet/create`  | OAuth token                         |
+| `app.gainforest.wallet.getWallet` | query     | GET `/wallet/info`     | OAuth token (public material)       |
+| `app.gainforest.wallet.sign`      | procedure | POST `/wallet/sign`    | user-signed envelope + device share |
+| `app.gainforest.wallet.export`    | procedure | POST `/wallet/export`  | user-signed envelope + device share |
+| `app.gainforest.wallet.recover`   | procedure | POST `/wallet/recover` | possession of the recovery share    |
 
 ### The user check (wallet flow)
 

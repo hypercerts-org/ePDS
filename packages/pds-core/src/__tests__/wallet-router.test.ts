@@ -16,7 +16,9 @@ import type { Server } from 'node:http'
 import express from 'express'
 import { SignerClientError, type SignerClient } from '@certified-app/shared'
 import {
+  WALLET_NSID_PREFIX,
   createWalletRouter,
+  createWalletXrpcRouter,
   isCompressedP256Hex,
   isEnvelopeField,
   sendSignerError,
@@ -41,14 +43,18 @@ let base: string
 
 beforeAll(async () => {
   const app = express()
-  app.use(
-    '/wallet',
-    createWalletRouter({
-      signer: signerStub as unknown as SignerClient,
-      verifyUserDid: () => Promise.resolve(authedDid),
-      logger,
-    }),
-  )
+  const routerOpts = {
+    signer: signerStub as unknown as SignerClient,
+    verifyUserDid: () => Promise.resolve(authedDid),
+    logger,
+  }
+  app.use('/wallet', createWalletRouter(routerOpts))
+  app.use('/xrpc', createWalletXrpcRouter(routerOpts))
+  // A stand-in for the stock PDS XRPC handler mounted after ours —
+  // proves unmatched /xrpc/* traffic passes through untouched.
+  app.post('/xrpc/com.atproto.repo.createRecord', (req, res) => {
+    res.json({ passedThrough: true, bodyParsed: req.body !== undefined })
+  })
   await new Promise<void>((resolve) => {
     server = app.listen(0, () => {
       resolve()
@@ -340,6 +346,77 @@ describe('POST /wallet/recover', () => {
       recoveryShareJwe: 'r..s.t.u',
     })
     expect(res.status).toBe(403)
+  })
+})
+
+describe('XRPC aliases (app.gainforest.wallet.*)', () => {
+  it('serves getWallet as a query (GET)', async () => {
+    signerStub.walletInfo.mockResolvedValue({
+      enrolled: false,
+      wallet: null,
+      walletEncryptionPublicJwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+    })
+    const res = await fetch(`${base}/xrpc/${WALLET_NSID_PREFIX}.getWallet`)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as Record<string, unknown>
+    expect(body.did).toBe('did:plc:walletuser')
+    expect(body.wallet).toBeNull()
+  })
+
+  it('serves sign as a procedure with identical behaviour to /wallet/sign', async () => {
+    authedDid = null // envelope-authorized, like the REST route
+    signerStub.walletSign.mockResolvedValue({ signatureHex: 'aa', recovery: 0 })
+    const res = await post(`/xrpc/${WALLET_NSID_PREFIX}.sign`, {
+      payload: 'cGF5bG9hZA',
+      sig: 'c2ln',
+    })
+    expect(res.status).toBe(200)
+    expect(res.json).toEqual({ signatureHex: 'aa', recovery: 0 })
+  })
+
+  it('serves enroll, create, export, and recover procedures', async () => {
+    signerStub.walletEnroll.mockResolvedValue({ status: 'created' })
+    expect(
+      (
+        await post(`/xrpc/${WALLET_NSID_PREFIX}.enroll`, {
+          requestPublicKeyHex: VALID_P256,
+        })
+      ).status,
+    ).toBe(200)
+
+    signerStub.walletCreate.mockResolvedValue({ status: 'created' })
+    expect((await post(`/xrpc/${WALLET_NSID_PREFIX}.create`, {})).status).toBe(
+      200,
+    )
+
+    signerStub.walletExport.mockResolvedValue({ exportJwe: 'x..y.z.w' })
+    expect(
+      (
+        await post(`/xrpc/${WALLET_NSID_PREFIX}.export`, {
+          payload: 'cGF5',
+          sig: 'c2ln',
+        })
+      ).status,
+    ).toBe(200)
+
+    signerStub.walletRecover.mockResolvedValue({ status: 'recovered' })
+    expect(
+      (
+        await post(`/xrpc/${WALLET_NSID_PREFIX}.recover`, {
+          recoveryShareJwe: 'r..s.t.u',
+        })
+      ).status,
+    ).toBe(200)
+  })
+
+  it('does not intercept or body-parse unrelated /xrpc traffic', async () => {
+    const res = await post('/xrpc/com.atproto.repo.createRecord', {
+      repo: 'did:plc:walletuser',
+    })
+    expect(res.status).toBe(200)
+    // Our per-route json parser must not have run for this request —
+    // the stand-in PDS handler sees the raw, unparsed request.
+    expect(res.json).toEqual({ passedThrough: true, bodyParsed: false })
   })
 })
 

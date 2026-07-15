@@ -22,12 +22,16 @@
  *                           account right after signup (fire-and-forget;
  *                           accounts remain fully functional on the
  *                           local key until adoption lands).
- *   EPDS_WALLET_ENABLED=1 — mount the /wallet routes (the additive,
- *                           strictly separate wallet flow).
+ *   EPDS_WALLET_ENABLED=1 — mount the wallet routes (the additive,
+ *                           strictly separate wallet flow) on both
+ *                           surfaces: REST /wallet/* and the XRPC
+ *                           Lexicon namespace
+ *                           /xrpc/app.gainforest.wallet.*.
  *
  * The two flows never share anything but the SignerClient transport:
  * repo signing goes through TeeKeypair -> /v1/sign/repo; the wallet
- * goes through /wallet/* -> /v1/wallet/* with user-signed envelopes.
+ * goes through /wallet/* (or app.gainforest.wallet.*) -> /v1/wallet/*
+ * with user-signed envelopes.
  */
 import express, { type Application } from 'express'
 import {
@@ -41,7 +45,7 @@ import {
   type AdoptionCtx,
 } from './actor-store-tee.js'
 import { createUserDidVerifier, type UserDidVerifier } from './user-auth.js'
-import { createWalletRouter } from './wallet-router.js'
+import { createWalletRouter, createWalletXrpcRouter } from './wallet-router.js'
 
 interface LoggerLike {
   info: (obj: unknown, msg?: string) => void
@@ -190,11 +194,12 @@ export async function setupTeeIntegration(opts: {
   if (walletEnabled) {
     const verifyUserDid =
       opts.userDidVerifier ?? createUserDidVerifier(pds, logger)
-    pds.app.use(
-      '/wallet',
-      createWalletRouter({ signer, verifyUserDid, logger }),
+    const walletOpts = { signer, verifyUserDid, logger }
+    pds.app.use('/wallet', createWalletRouter(walletOpts))
+    pds.app.use('/xrpc', createWalletXrpcRouter(walletOpts))
+    logger.info(
+      'wallet routes mounted at /wallet and /xrpc/app.gainforest.wallet.* (separate from repo flow)',
     )
-    logger.info('wallet routes mounted at /wallet (separate from repo flow)')
   }
 
   logger.info(

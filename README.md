@@ -58,6 +58,35 @@ request format, authorization redirect, token exchange, and client metadata.
   set a password later
 - CSRF protection, HttpOnly + SameSite cookies, HSTS, X-Frame-Options
 
+## TEE Signing & Embedded Wallets (optional)
+
+ePDS can optionally move all private-key material into a **TEE** (a
+confidential VM the operator cannot look into), giving every user two
+things from their single email login:
+
+- **Enclave-held repo signing** — the key that signs each user's AT
+  Protocol repository lives inside the enclave instead of on disk.
+  Reads and writes stay fully standard; clients, relays, and AppViews
+  notice nothing.
+- **A self-custodial embedded wallet** (Ethereum-compatible + Solana) —
+  no seed phrase surfaced, and only requests signed on the user's own
+  device can spend from it. Wallet keys use a Privy-style **2-of-3
+  Shamir share model** (device / server-in-TEE / recovery): the
+  operator alone can never spend or trap funds, users survive device
+  loss, and can always export their keys and leave.
+
+The wallet surface is exposed as REST routes (`/wallet/*`) and as an
+XRPC Lexicon namespace (`/xrpc/app.gainforest.wallet.*`): `enroll`,
+`create`, `getWallet`, `sign`, `export`, `recover`.
+
+Everything is off by default and additive — with no TEE configured,
+ePDS behaves exactly as described above. See
+[docs/design/tee-signer.md](docs/design/tee-signer.md) for the
+architecture, threat model, and deployment requirements (the signer
+must run on confidential-compute hardware, e.g.
+[dstack](https://github.com/Dstack-TEE/dstack) on Intel TDX / AMD
+SEV-SNP or a cloud confidential VM).
+
 ## AI Agent Skill
 
 An [agent skill](https://github.com/vercel-labs/skills) is available for AI
@@ -78,6 +107,7 @@ token exchange, client metadata, and both login flows.
 - [docs/deployment.md](docs/deployment.md) — production deployment with Docker
 - [docs/development.md](docs/development.md) — local development setup
 - [docs/configuration.md](docs/configuration.md) — all environment variables
+- [docs/design/tee-signer.md](docs/design/tee-signer.md) — TEE signer & embedded wallets (2-of-3 shares)
 
 ## License
 

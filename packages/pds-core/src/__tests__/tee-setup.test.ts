@@ -204,6 +204,17 @@ describe('setupTeeIntegration', () => {
       expect(res.status).toBe(401)
     })
 
+    it('mounts the app.gainforest.wallet.* XRPC aliases', async () => {
+      const query = await fetch(`${base}/xrpc/app.gainforest.wallet.getWallet`)
+      expect(query.status).toBe(401)
+      const proc = await fetch(`${base}/xrpc/app.gainforest.wallet.sign`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      expect(proc.status).toBe(400)
+    })
+
     it('gates /_internal/tee/adopt on the internal secret', async () => {
       const res = await fetch(`${base}/_internal/tee/adopt`, {
         method: 'POST',
