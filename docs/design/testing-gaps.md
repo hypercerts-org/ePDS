@@ -21,6 +21,8 @@ pds-core callback, full OAuth flow).
 | `auth-service/index.ts`       | 0%       | Express app assembly + `main()`                                        |
 | `demo/lib/auth.ts`            | ~51%     | Network-dependent resolution functions                                 |
 | `pds-core/index.ts`           | 0%       | Entire file — see below                                                |
+| `pds-core/tee/`               | ~93%     | TEE keypair, actor-store patch, wallet router, setup wiring            |
+| `signer/src/`                 | ~81%     | `index.ts` entry + dstack attestation branch need a live TEE           |
 
 ## Areas That Are Genuinely Hard to Unit Test
 

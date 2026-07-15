@@ -11,6 +11,7 @@ Pnpm monorepo with three packages:
 | `@certified-app/shared`       | `packages/shared/`       | SQLite DB, crypto utils, logger, types           |
 | `@certified-app/auth-service` | `packages/auth-service/` | Login UI, OTP, social login, account settings    |
 | `@certified-app/pds-core`     | `packages/pds-core/`     | Wraps `@atproto/pds` with epds-callback endpoint |
+| `@certified-app/signer`       | `packages/signer/`       | TEE signer — enclave key derivation + signing    |
 
 ## Build / Dev Commands
 
@@ -21,6 +22,7 @@ pnpm typecheck             # type-check without emitting
 pnpm dev                   # run all packages in dev/watch mode
 pnpm dev:auth              # auth-service only (tsx watch)
 pnpm dev:pds               # pds-core only (tsx watch)
+pnpm dev:signer            # TEE signer only (tsx watch, dev mode)
 pnpm dev:demo              # demo frontend only (Next.js, port 3002)
 pnpm format                # format all files with Prettier
 pnpm format:check          # check formatting (CI)
@@ -216,6 +218,11 @@ Service-to-image mapping (use this to decide what to rebuild):
 
 Container names: `epds-core` (PDS, port 3000), `epds-auth` (auth service, port 3001),
 and `epds-demo` (demo frontend, port 3002).
+
+The TEE signer (`packages/signer`) is **deliberately not part of the Docker
+stack or Railway deployment** — in production it runs on confidential-compute
+hardware (dstack in a CVM); see `docs/design/tee-signer.md`. In dev, run it
+with `pnpm dev:signer`.
 
 ## Railway
 

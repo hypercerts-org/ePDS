@@ -11,21 +11,15 @@
     "resolveJsonModule": true,
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "composite": true
   },
-  "include": [],
+  "include": ["src"],
   "references": [
     {
-      "path": "./packages/shared"
-    },
-    {
-      "path": "./packages/auth-service"
-    },
-    {
-      "path": "./packages/pds-core"
-    },
-    {
-      "path": "./packages/signer"
+      "path": "../shared"
     }
   ]
 }

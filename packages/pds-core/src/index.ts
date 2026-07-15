@@ -64,6 +64,7 @@ import { createChooserEnrichmentMiddleware } from './chooser-enrichment.js'
 import { createUpstreamFaviconMiddleware } from './upstream-favicon.js'
 import { createAuthUiGuard, parsePromptTokens } from './auth-ui-guard.js'
 import { loadDeviceAccountEmails } from './lib/device-accounts.js'
+import { setupTeeIntegration } from './tee/setup.js'
 import { handleCallbackError } from './lib/epds-callback-error.js'
 import { installTestHooks } from './lib/test-hooks.js'
 
@@ -160,6 +161,19 @@ async function main() {
   } else {
     logger.info('OAuth provider active, setting up ePDS callback integration')
   }
+
+  // =========================================================================
+  // TEE signer integration (optional — see docs/design/tee-signer.md)
+  // =========================================================================
+  //
+  // Two strictly separate flows, both off unless EPDS_SIGNER_URL is set:
+  //   - Repo signing (EPDS_TEE_REPO_SIGNING): TEE-adopted accounts sign
+  //     their repo commits inside the enclave. Normal ATProto reads and
+  //     writes are otherwise unchanged.
+  //   - Wallet (EPDS_WALLET_ENABLED): additive /wallet routes that let a
+  //     user enroll a request key and relay user-signed signing envelopes
+  //     to the enclave. Never touches the repo or its signing key.
+  const tee = await setupTeeIntegration({ pds, logger })
 
   // =========================================================================
   // EPDS CALLBACK - The core integration endpoint
@@ -442,6 +456,14 @@ async function main() {
 
       // Step 4: Bind account to device session (for future SSO).
       await provider.accountManager.upsertDeviceAccount(deviceId, account.sub)
+
+      // Step 4b: TEE adoption for brand-new accounts (fire-and-forget —
+      // a noop unless EPDS_TEE_REPO_SIGNING + EPDS_TEE_ADOPT_ON_SIGNUP are
+      // both on). The account is fully functional on its local key until
+      // the enclave key rotation lands; failures only log.
+      if (!existingAccount && did) {
+        tee.adoptOnSignup(did)
+      }
 
       // Step 5: Determine whether to skip consent on sign-up.
       // Consent is skipped only when ALL of these hold:
