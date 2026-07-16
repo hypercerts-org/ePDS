@@ -77,7 +77,7 @@ things from their single email login:
 
 The wallet surface is exposed as REST routes (`/wallet/*`) and as an
 XRPC Lexicon namespace (`/xrpc/app.gainforest.wallet.*`): `enroll`,
-`create`, `getWallet`, `sign`, `export`, `recover`.
+`create`, `getWallet`, `getPublicWallet`, `sign`, `export`, `recover`.
 
 Everything is off by default and additive — with no TEE configured,
 ePDS behaves exactly as described above. See

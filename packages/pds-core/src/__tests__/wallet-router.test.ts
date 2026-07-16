@@ -21,6 +21,7 @@ import {
   createWalletXrpcRouter,
   isCompressedP256Hex,
   isEnvelopeField,
+  isPlausibleWalletDid,
   sendSignerError,
 } from '../tee/wallet-router.js'
 
@@ -108,6 +109,13 @@ describe('validators', () => {
     expect(isEnvelopeField('a'.repeat(101), 100)).toBe(false)
     expect(isEnvelopeField('has space', 100)).toBe(false)
     expect(isEnvelopeField(null, 100)).toBe(false)
+  })
+
+  it('isPlausibleWalletDid', () => {
+    expect(isPlausibleWalletDid('did:plc:abc123')).toBe(true)
+    expect(isPlausibleWalletDid('did:web:example.com')).toBe(true)
+    expect(isPlausibleWalletDid('did:key:z6Mk')).toBe(false)
+    expect(isPlausibleWalletDid('not-a-did')).toBe(false)
   })
 })
 
@@ -224,6 +232,81 @@ describe('GET /wallet/info', () => {
     signerStub.walletInfo.mockRejectedValue(new Error('ECONNREFUSED'))
     const res = await fetch(`${base}/wallet/info`)
     expect(res.status).toBe(502)
+  })
+})
+
+describe('GET /wallet/public-info', () => {
+  it('returns claimed wallet receive information without authentication', async () => {
+    authedDid = null
+    signerStub.walletInfo.mockResolvedValue({
+      enrolled: true,
+      wallet: {
+        did: 'did:plc:recipient',
+        evm: { address: '0xRecipient', publicKeyHex: '02aa' },
+        sol: { address: 'SolRecipient', publicKeyHex: 'bb' },
+        version: 1,
+        createdAt: 123,
+      },
+      pregen: null,
+      walletEncryptionPublicJwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+    })
+
+    const res = await fetch(
+      `${base}/wallet/public-info?did=${encodeURIComponent('did:plc:recipient')}`,
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      did: 'did:plc:recipient',
+      status: 'claimed',
+      wallet: expect.objectContaining({
+        evm: { address: '0xRecipient', publicKeyHex: '02aa' },
+      }),
+    })
+    expect(signerStub.walletInfo).toHaveBeenCalledExactlyOnceWith(
+      'did:plc:recipient',
+    )
+  })
+
+  it('returns pregenerated receive information and hides signer metadata', async () => {
+    signerStub.walletInfo.mockResolvedValue({
+      enrolled: false,
+      wallet: null,
+      pregen: {
+        did: 'did:plc:recipient',
+        evm: { address: '0xPregen', publicKeyHex: '02aa' },
+        sol: { address: 'SolPregen', publicKeyHex: 'bb' },
+        createdAt: 123,
+      },
+      walletEncryptionPublicJwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+    })
+
+    const res = await fetch(
+      `${base}/wallet/public-info?did=${encodeURIComponent('did:plc:recipient')}`,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as Record<string, unknown>
+    expect(body.status).toBe('pregenerated')
+    expect(body).not.toHaveProperty('enrolled')
+    expect(body).not.toHaveProperty('walletEncryptionPublicJwk')
+  })
+
+  it('validates the DID and returns 404 when no wallet exists', async () => {
+    expect((await fetch(`${base}/wallet/public-info?did=junk`)).status).toBe(
+      400,
+    )
+    signerStub.walletInfo.mockResolvedValue({
+      enrolled: false,
+      wallet: null,
+      pregen: null,
+      walletEncryptionPublicJwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+    })
+    expect(
+      (
+        await fetch(
+          `${base}/wallet/public-info?did=${encodeURIComponent('did:plc:missing')}`,
+        )
+      ).status,
+    ).toBe(404)
   })
 })
 
@@ -361,6 +444,28 @@ describe('XRPC aliases (app.gainforest.wallet.*)', () => {
     const body = (await res.json()) as Record<string, unknown>
     expect(body.did).toBe('did:plc:walletuser')
     expect(body.wallet).toBeNull()
+  })
+
+  it('serves getPublicWallet as an unauthenticated query', async () => {
+    authedDid = null
+    signerStub.walletInfo.mockResolvedValue({
+      enrolled: false,
+      wallet: null,
+      pregen: {
+        did: 'did:plc:recipient',
+        evm: { address: '0xPregen', publicKeyHex: '02aa' },
+        sol: { address: 'SolPregen', publicKeyHex: 'bb' },
+        createdAt: 123,
+      },
+      walletEncryptionPublicJwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+    })
+    const res = await fetch(
+      `${base}/xrpc/${WALLET_NSID_PREFIX}.getPublicWallet?did=${encodeURIComponent('did:plc:recipient')}`,
+    )
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as Record<string, unknown>).status).toBe(
+      'pregenerated',
+    )
   })
 
   it('serves sign as a procedure with identical behaviour to /wallet/sign', async () => {

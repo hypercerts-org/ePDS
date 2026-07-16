@@ -14,6 +14,7 @@
  *   | app.gainforest.wallet.enroll        | procedure | POST /wallet/enroll  |
  *   | app.gainforest.wallet.create        | procedure | POST /wallet/create  |
  *   | app.gainforest.wallet.getWallet     | query     | GET  /wallet/info    |
+ *   | app.gainforest.wallet.getPublicWallet | query   | GET  /wallet/public-info |
  *   | app.gainforest.wallet.sign          | procedure | POST /wallet/sign    |
  *   | app.gainforest.wallet.export        | procedure | POST /wallet/export  |
  *   | app.gainforest.wallet.recover       | procedure | POST /wallet/recover |
@@ -37,6 +38,10 @@
  *     request key.
  *   getWallet/info — OAuth/access token (public material only; an
  *     unclaimed pregenerated wallet appears as `pregen`).
+ *   getPublicWallet/public-info — public lookup by DID, returning only
+ *     receive addresses and public keys for a claimed or pregenerated
+ *     wallet. This lets clients resolve an ATProto handle and transfer
+ *     without exposing enrollment state or enclave metadata.
  *   sign    — NO PDS-side authorization on purpose: the envelope inside
  *     the body is signed by the user's enrolled request key and
  *     verified inside the signer. A PDS token is neither necessary nor
@@ -64,6 +69,14 @@ export const WALLET_NSID_PREFIX = 'app.gainforest.wallet'
 /** Compressed P-256 public key: 33 bytes, 0x02/0x03 prefix. */
 export function isCompressedP256Hex(value: unknown): value is string {
   return typeof value === 'string' && /^0[23][0-9a-fA-F]{64}$/.test(value)
+}
+
+/** DID shape accepted by the signer for wallet lookup/pregeneration. */
+export function isPlausibleWalletDid(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    /^did:(plc|web):[a-zA-Z0-9._:%-]{1,512}$/.test(value)
+  )
 }
 
 /** Envelope fields are opaque base64url blobs with sane size caps. */
@@ -108,6 +121,7 @@ interface WalletHandlers {
   enroll: Handler
   create: Handler
   info: Handler
+  publicInfo: Handler
   sign: Handler
   export: Handler
   recover: Handler
@@ -168,6 +182,30 @@ function buildWalletHandlers(opts: WalletRouterOptions): WalletHandlers {
       res.json({ did, ...result })
     } catch (err) {
       logger.warn({ err, did }, 'wallet info failed')
+      sendSignerError(res, err)
+    }
+  }
+
+  const publicInfo: Handler = async (req, res) => {
+    const did: unknown = req.query.did
+    if (!isPlausibleWalletDid(did)) {
+      res.status(400).json({ error: 'missing or invalid did' })
+      return
+    }
+    try {
+      const result = await signer.walletInfo(did)
+      const wallet = result.wallet ?? result.pregen
+      if (!wallet) {
+        res.status(404).json({ error: 'wallet not found' })
+        return
+      }
+      res.json({
+        did,
+        status: result.wallet ? 'claimed' : 'pregenerated',
+        wallet,
+      })
+    } catch (err) {
+      logger.warn({ err, did }, 'public wallet info failed')
       sendSignerError(res, err)
     }
   }
@@ -243,7 +281,15 @@ function buildWalletHandlers(opts: WalletRouterOptions): WalletHandlers {
     }
   }
 
-  return { enroll, create, info, sign, export: exportWallet, recover }
+  return {
+    enroll,
+    create,
+    info,
+    publicInfo,
+    sign,
+    export: exportWallet,
+    recover,
+  }
 }
 
 /** REST surface — mount at `/wallet`. */
@@ -255,6 +301,7 @@ export function createWalletRouter(opts: WalletRouterOptions): Router {
   router.post('/enroll', h.enroll)
   router.post('/create', h.create)
   router.get('/info', h.info)
+  router.get('/public-info', h.publicInfo)
   router.post('/sign', h.sign)
   router.post('/export', h.export)
   router.post('/recover', h.recover)
@@ -277,6 +324,7 @@ export function createWalletXrpcRouter(opts: WalletRouterOptions): Router {
   router.post(`/${WALLET_NSID_PREFIX}.enroll`, json, h.enroll)
   router.post(`/${WALLET_NSID_PREFIX}.create`, json, h.create)
   router.get(`/${WALLET_NSID_PREFIX}.getWallet`, h.info)
+  router.get(`/${WALLET_NSID_PREFIX}.getPublicWallet`, h.publicInfo)
   router.post(`/${WALLET_NSID_PREFIX}.sign`, json, h.sign)
   router.post(`/${WALLET_NSID_PREFIX}.export`, json, h.export)
   router.post(`/${WALLET_NSID_PREFIX}.recover`, json, h.recover)
