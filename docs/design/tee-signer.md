@@ -197,17 +197,20 @@ unmatched methods fall through unchanged. This ordering is required
 because the upstream app owns a catch-all `/xrpc` handler and would
 otherwise intercept custom NSIDs:
 
-| XRPC method (NSID)                      | Type      | REST alias                | Auth                                |
-| --------------------------------------- | --------- | ------------------------- | ----------------------------------- |
-| `app.gainforest.wallet.enroll`          | procedure | POST `/wallet/enroll`     | OAuth token (TOFU bootstrap)        |
-| `app.gainforest.wallet.create`          | procedure | POST `/wallet/create`     | OAuth token                         |
-| `app.gainforest.wallet.getWallet`       | query     | GET `/wallet/info`        | OAuth token (own wallet material)   |
-| `app.gainforest.wallet.getPublicWallet` | query     | GET `/wallet/public-info` | Public; receive info by DID         |
-| `app.gainforest.wallet.sign`            | procedure | POST `/wallet/sign`       | user-signed envelope + device share |
-| `app.gainforest.wallet.export`          | procedure | POST `/wallet/export`     | user-signed envelope + device share |
-| `app.gainforest.wallet.recover`         | procedure | POST `/wallet/recover`    | possession of the recovery share    |
+| XRPC method (NSID)                       | Type      | REST alias                       | Auth                                |
+| ---------------------------------------- | --------- | -------------------------------- | ----------------------------------- |
+| `app.gainforest.wallet.enroll`           | procedure | POST `/wallet/enroll`            | OAuth token (TOFU bootstrap)        |
+| `app.gainforest.wallet.create`           | procedure | POST `/wallet/create`            | OAuth token                         |
+| `app.gainforest.wallet.getWallet`        | query     | GET `/wallet/info`               | OAuth token (own wallet material)   |
+| `app.gainforest.wallet.getPublicWallet`  | query     | GET `/wallet/public-info`        | Public; receive info by DID         |
+| `app.gainforest.wallet.prepareRecipient` | procedure | POST `/wallet/prepare-recipient` | OAuth token; provision target DID   |
+| `app.gainforest.wallet.sign`             | procedure | POST `/wallet/sign`              | user-signed envelope + device share |
+| `app.gainforest.wallet.export`           | procedure | POST `/wallet/export`            | user-signed envelope + device share |
+| `app.gainforest.wallet.recover`          | procedure | POST `/wallet/recover`           | possession of the recovery share    |
 
 `getPublicWallet` returns only the claimed or pregenerated wallet's receive addresses and public keys. It deliberately omits enrollment state and enclave encryption metadata, allowing clients to resolve an ATProto handle to a DID and then find its receiving wallet without authenticating.
+
+`prepareRecipient` is the authenticated, idempotent provisioning step for handle-to-wallet transfers. It returns an existing claimed/pregenerated wallet or creates a receive-only pregenerated wallet for the target DID. A client must obtain explicit sender confirmation before provisioning an external DID and explain that the recipient can claim the funds only after that exact DID migrates to this ePDS; until then the wallet is enclave-custodial and cannot spend.
 
 ### The user check (wallet flow)
 

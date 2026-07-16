@@ -15,6 +15,7 @@
  *   | app.gainforest.wallet.create        | procedure | POST /wallet/create  |
  *   | app.gainforest.wallet.getWallet     | query     | GET  /wallet/info    |
  *   | app.gainforest.wallet.getPublicWallet | query   | GET  /wallet/public-info |
+ *   | app.gainforest.wallet.prepareRecipient | procedure | POST /wallet/prepare-recipient |
  *   | app.gainforest.wallet.sign          | procedure | POST /wallet/sign    |
  *   | app.gainforest.wallet.export        | procedure | POST /wallet/export  |
  *   | app.gainforest.wallet.recover       | procedure | POST /wallet/recover |
@@ -42,6 +43,10 @@
  *     receive addresses and public keys for a claimed or pregenerated
  *     wallet. This lets clients resolve an ATProto handle and transfer
  *     without exposing enrollment state or enclave metadata.
+ *   prepareRecipient/prepare-recipient — OAuth/access token required.
+ *     Idempotently pregenerates a receive-only wallet for a target DID
+ *     that has no wallet yet. Clients must warn that an external DID can
+ *     claim it only after migrating to this ePDS.
  *   sign    — NO PDS-side authorization on purpose: the envelope inside
  *     the body is signed by the user's enrolled request key and
  *     verified inside the signer. A PDS token is neither necessary nor
@@ -122,6 +127,7 @@ interface WalletHandlers {
   create: Handler
   info: Handler
   publicInfo: Handler
+  prepareRecipient: Handler
   sign: Handler
   export: Handler
   recover: Handler
@@ -210,6 +216,42 @@ function buildWalletHandlers(opts: WalletRouterOptions): WalletHandlers {
     }
   }
 
+  const prepareRecipient: Handler = async (req, res) => {
+    const callerDid = await verifyUserDid(req, res)
+    if (!callerDid) {
+      res.status(401).json({ error: 'authentication required' })
+      return
+    }
+    const did: unknown = req.body?.did
+    if (!isPlausibleWalletDid(did)) {
+      res.status(400).json({ error: 'missing or invalid did' })
+      return
+    }
+    try {
+      const existing = await signer.walletInfo(did)
+      if (existing.wallet || existing.pregen) {
+        res.json({
+          did,
+          status: existing.wallet ? 'claimed' : 'pregenerated',
+          wallet: existing.wallet ?? existing.pregen,
+        })
+        return
+      }
+      const result = await signer.walletPregenerate(did)
+      logger.info(
+        { callerDid, did, status: result.status },
+        'recipient wallet prepared',
+      )
+      res.json({ did, status: 'pregenerated', wallet: result.wallet })
+    } catch (err) {
+      logger.warn(
+        { err, callerDid, did },
+        'recipient wallet preparation failed',
+      )
+      sendSignerError(res, err)
+    }
+  }
+
   const sign: Handler = async (req, res) => {
     const payload: unknown = req.body?.payload
     const sig: unknown = req.body?.sig
@@ -286,6 +328,7 @@ function buildWalletHandlers(opts: WalletRouterOptions): WalletHandlers {
     create,
     info,
     publicInfo,
+    prepareRecipient,
     sign,
     export: exportWallet,
     recover,
@@ -302,6 +345,7 @@ export function createWalletRouter(opts: WalletRouterOptions): Router {
   router.post('/create', h.create)
   router.get('/info', h.info)
   router.get('/public-info', h.publicInfo)
+  router.post('/prepare-recipient', h.prepareRecipient)
   router.post('/sign', h.sign)
   router.post('/export', h.export)
   router.post('/recover', h.recover)
@@ -325,6 +369,11 @@ export function createWalletXrpcRouter(opts: WalletRouterOptions): Router {
   router.post(`/${WALLET_NSID_PREFIX}.create`, json, h.create)
   router.get(`/${WALLET_NSID_PREFIX}.getWallet`, h.info)
   router.get(`/${WALLET_NSID_PREFIX}.getPublicWallet`, h.publicInfo)
+  router.post(
+    `/${WALLET_NSID_PREFIX}.prepareRecipient`,
+    json,
+    h.prepareRecipient,
+  )
   router.post(`/${WALLET_NSID_PREFIX}.sign`, json, h.sign)
   router.post(`/${WALLET_NSID_PREFIX}.export`, json, h.export)
   router.post(`/${WALLET_NSID_PREFIX}.recover`, json, h.recover)

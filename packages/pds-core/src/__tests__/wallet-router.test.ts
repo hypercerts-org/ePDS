@@ -31,6 +31,7 @@ const signerStub = {
   walletEnroll: vi.fn(),
   walletEnrollment: vi.fn(),
   walletCreate: vi.fn(),
+  walletPregenerate: vi.fn(),
   walletInfo: vi.fn(),
   walletSign: vi.fn(),
   walletExport: vi.fn(),
@@ -310,6 +311,81 @@ describe('GET /wallet/public-info', () => {
   })
 })
 
+describe('POST /wallet/prepare-recipient', () => {
+  it('requires authentication and validates the target DID', async () => {
+    authedDid = null
+    expect(
+      (
+        await post('/wallet/prepare-recipient', {
+          did: 'did:plc:recipient',
+        })
+      ).status,
+    ).toBe(401)
+    authedDid = 'did:plc:walletuser'
+    expect(
+      (await post('/wallet/prepare-recipient', { did: 'junk' })).status,
+    ).toBe(400)
+    expect(signerStub.walletPregenerate).not.toHaveBeenCalled()
+  })
+
+  it('returns an existing claimed wallet without pregenerating', async () => {
+    const wallet = {
+      did: 'did:plc:recipient',
+      evm: { address: '0xRecipient', publicKeyHex: '02aa' },
+      sol: { address: 'SolRecipient', publicKeyHex: 'bb' },
+      version: 1,
+      createdAt: 123,
+    }
+    signerStub.walletInfo.mockResolvedValue({
+      enrolled: true,
+      wallet,
+      pregen: null,
+      walletEncryptionPublicJwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+    })
+    const res = await post('/wallet/prepare-recipient', {
+      did: 'did:plc:recipient',
+    })
+    expect(res.status).toBe(200)
+    expect(res.json).toEqual({
+      did: 'did:plc:recipient',
+      status: 'claimed',
+      wallet,
+    })
+    expect(signerStub.walletPregenerate).not.toHaveBeenCalled()
+  })
+
+  it('pregenerates a receive-only wallet for a missing DID', async () => {
+    signerStub.walletInfo.mockResolvedValue({
+      enrolled: false,
+      wallet: null,
+      pregen: null,
+      walletEncryptionPublicJwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+    })
+    const wallet = {
+      did: 'did:plc:recipient',
+      evm: { address: '0xPregen', publicKeyHex: '02aa' },
+      sol: { address: 'SolPregen', publicKeyHex: 'bb' },
+      createdAt: 123,
+    }
+    signerStub.walletPregenerate.mockResolvedValue({
+      status: 'pregenerated',
+      wallet,
+    })
+    const res = await post('/wallet/prepare-recipient', {
+      did: 'did:plc:recipient',
+    })
+    expect(res.status).toBe(200)
+    expect(res.json).toEqual({
+      did: 'did:plc:recipient',
+      status: 'pregenerated',
+      wallet,
+    })
+    expect(signerStub.walletPregenerate).toHaveBeenCalledExactlyOnceWith(
+      'did:plc:recipient',
+    )
+  })
+})
+
 describe('POST /wallet/sign', () => {
   it('rejects malformed envelopes without calling the signer', async () => {
     expect((await post('/wallet/sign', {})).status).toBe(400)
@@ -479,7 +555,7 @@ describe('XRPC aliases (app.gainforest.wallet.*)', () => {
     expect(res.json).toEqual({ signatureHex: 'aa', recovery: 0 })
   })
 
-  it('serves enroll, create, export, and recover procedures', async () => {
+  it('serves enroll, create, prepareRecipient, export, and recover procedures', async () => {
     signerStub.walletEnroll.mockResolvedValue({ status: 'created' })
     expect(
       (
@@ -493,6 +569,24 @@ describe('XRPC aliases (app.gainforest.wallet.*)', () => {
     expect((await post(`/xrpc/${WALLET_NSID_PREFIX}.create`, {})).status).toBe(
       200,
     )
+
+    signerStub.walletInfo.mockResolvedValue({
+      enrolled: false,
+      wallet: null,
+      pregen: null,
+      walletEncryptionPublicJwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+    })
+    signerStub.walletPregenerate.mockResolvedValue({
+      status: 'pregenerated',
+      wallet: { did: 'did:plc:recipient' },
+    })
+    expect(
+      (
+        await post(`/xrpc/${WALLET_NSID_PREFIX}.prepareRecipient`, {
+          did: 'did:plc:recipient',
+        })
+      ).status,
+    ).toBe(200)
 
     signerStub.walletExport.mockResolvedValue({ exportJwe: 'x..y.z.w' })
     expect(
