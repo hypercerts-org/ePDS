@@ -362,9 +362,15 @@ export function createBetterAuth(
               isNewUser,
             })
             .catch((err: unknown) => {
-              // Log and swallow — caller does not await this
+              // Log and swallow — caller does not await this.
+              // `EmailSender.timedSendMail` stamps the SMTP handoff
+              // duration onto the error so this single line carries it.
+              const elapsedMs =
+                err instanceof Error
+                  ? (err as Error & { elapsedMs?: number }).elapsedMs
+                  : undefined
               logger.error(
-                { err, email, isNewUser },
+                { err, email, isNewUser, elapsedMs },
                 'better-auth: failed to send OTP email',
               )
             })

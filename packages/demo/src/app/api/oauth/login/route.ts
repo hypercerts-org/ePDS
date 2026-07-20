@@ -153,7 +153,8 @@ export async function GET(request: Request) {
       client_id: clientId,
       redirect_uri: redirectUri,
       response_type: 'code',
-      scope: 'atproto transition:generic',
+      scope:
+        'atproto include:org.hypercerts.authWrite include:app.certified.authWrite',
       state,
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',

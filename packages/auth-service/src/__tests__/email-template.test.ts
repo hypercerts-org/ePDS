@@ -13,6 +13,7 @@ import {
   EmailSender,
   _seedTemplateCacheForTest,
   _clearTemplateCacheForTest,
+  _loggerForTest,
 } from '../email/sender.js'
 import {
   formatOtpHtmlGrouped,
@@ -265,6 +266,104 @@ describe('EmailSender', () => {
           pdsDomain: 'pds.example',
         }),
       ).resolves.toBeUndefined()
+    })
+  })
+
+  // Regression cover for #183: the per-send completion line must carry
+  // the SMTP handoff duration and the provider's messageId / server
+  // response so app logs can be timed and joined to Resend delivery
+  // events. jsonTransport supplies a real messageId + response.
+  describe('per-send diagnostic logging', () => {
+    it('folds elapsedMs, messageId and smtpResponse into the success line', async () => {
+      const sender = makeSender()
+      const info = vi
+        .spyOn(_loggerForTest, 'info')
+        .mockImplementation(() => _loggerForTest)
+
+      await sender.sendOtpCode({
+        to: 'user@test.com',
+        code: '12345678',
+        clientAppName: 'Test App',
+        pdsName: 'Test PDS',
+        pdsDomain: 'pds.example',
+      })
+
+      expect(info).toHaveBeenCalledOnce()
+      const [fields, message] = info.mock.calls[0] as [
+        Record<string, unknown>,
+        string,
+      ]
+      expect(message).toBe('Sent sign-in OTP email')
+      expect(fields.email).toBe('user@test.com')
+      expect(fields.elapsedMs).toEqual(expect.any(Number))
+      expect(fields.elapsedMs as number).toBeGreaterThanOrEqual(0)
+      expect(fields.messageId).toEqual(expect.any(String))
+      // jsonTransport reports its serialized envelope as the response.
+      expect(fields).toHaveProperty('smtpResponse')
+
+      info.mockRestore()
+    })
+
+    it('carries clientId alongside the diagnostic fields on the branded line', async () => {
+      const TRUSTED_ID = 'https://branded.app/client-metadata.json'
+      _seedClientMetadataCacheForTest(TRUSTED_ID, {
+        client_name: 'Branded App',
+        email_template_uri: 'https://branded.app/email-template.html',
+        logo_uri: 'https://branded.app/logo.png',
+      })
+      _seedTemplateCacheForTest(
+        'https://branded.app/email-template.html',
+        '<html><body>Your code is {{code}}</body></html>',
+      )
+      const sender = makeSender([TRUSTED_ID])
+      const info = vi
+        .spyOn(_loggerForTest, 'info')
+        .mockImplementation(() => _loggerForTest)
+
+      await sender.sendOtpCode({
+        to: 'branded@test.com',
+        code: '99999999',
+        clientAppName: 'Fallback Name',
+        clientId: TRUSTED_ID,
+        pdsName: 'Test PDS',
+        pdsDomain: 'pds.example',
+      })
+
+      const [fields, message] = info.mock.calls[0] as [
+        Record<string, unknown>,
+        string,
+      ]
+      expect(message).toBe('Sent client-branded OTP email')
+      expect(fields.clientId).toBe(TRUSTED_ID)
+      expect(fields.elapsedMs).toEqual(expect.any(Number))
+      expect(fields.messageId).toEqual(expect.any(String))
+
+      info.mockRestore()
+    })
+
+    it('stamps elapsedMs onto a failed send for the caller error log', async () => {
+      const sender = makeSender()
+      vi.spyOn(sender['transporter'], 'sendMail').mockRejectedValue(
+        new Error('SMTP handshake timed out'),
+      )
+
+      let caught: (Error & { elapsedMs?: number }) | undefined
+      try {
+        await sender.sendOtpCode({
+          to: 'user@test.com',
+          code: '12345678',
+          clientAppName: 'Test App',
+          pdsName: 'Test PDS',
+          pdsDomain: 'pds.example',
+        })
+      } catch (e) {
+        caught = e as Error & { elapsedMs?: number }
+      }
+
+      expect(caught).toBeInstanceOf(Error)
+      expect(caught?.message).toBe('SMTP handshake timed out')
+      expect(caught?.elapsedMs).toEqual(expect.any(Number))
+      expect(caught?.elapsedMs as number).toBeGreaterThanOrEqual(0)
     })
   })
 })

@@ -98,6 +98,29 @@ describe('requestRateLimit', () => {
     expect(next2).toBe(true)
   })
 
+  it('keeps independently configured limiter namespaces separate', () => {
+    const ip = `namespace-${Date.now()}-${randomUUID()}`
+    const globalLimiter = requestRateLimit({
+      windowMs: 60_000,
+      maxRequests: 1,
+    })
+    const webhookLimiter = requestRateLimit({
+      windowMs: 60_000,
+      maxRequests: 1,
+      keyPrefix: 'resend-webhook',
+    })
+
+    for (const limiter of [globalLimiter, webhookLimiter]) {
+      const req = makeReq(ip)
+      const res = makeRes()
+      let nextCalled = false
+      limiter(req as never, res as never, () => {
+        nextCalled = true
+      })
+      expect(nextCalled).toBe(true)
+    }
+  })
+
   it('uses req.ip when available', () => {
     const limiter = requestRateLimit({ windowMs: 60000, maxRequests: 10 })
     const req = {

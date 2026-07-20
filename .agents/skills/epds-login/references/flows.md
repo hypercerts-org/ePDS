@@ -156,7 +156,8 @@ export async function handleLogin(email: string) {
     client_id: CLIENT_ID,
     redirect_uri: REDIRECT_URI,
     response_type: 'code',
-    scope: 'atproto transition:generic',
+    scope:
+      'atproto include:org.hypercerts.authWrite include:app.certified.authWrite',
     state,
     code_challenge: codeChallenge,
     code_challenge_method: 'S256',

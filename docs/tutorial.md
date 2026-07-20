@@ -190,7 +190,7 @@ The file must be served with `Content-Type: application/json`:
   "client_uri": "https://yourapp.example.com",
   "logo_uri": "https://yourapp.example.com/logo.png",
   "redirect_uris": ["https://yourapp.example.com/api/oauth/callback"],
-  "scope": "atproto transition:generic",
+  "scope": "atproto include:org.hypercerts.authWrite include:app.certified.authWrite",
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
   "token_endpoint_auth_method": "private_key_jwt",
@@ -674,7 +674,8 @@ const client = new NodeOAuthClient({
     client_id: 'https://yourapp.example.com/client-metadata.json',
     client_name: 'Your App',
     redirect_uris: ['https://yourapp.example.com/api/oauth/callback'],
-    scope: 'atproto transition:generic',
+    scope:
+      'atproto include:org.hypercerts.authWrite include:app.certified.authWrite',
     grant_types: ['authorization_code', 'refresh_token'],
     response_types: ['code'],
     token_endpoint_auth_method: 'private_key_jwt',
@@ -772,7 +773,8 @@ const parBody = new URLSearchParams({
   client_id: clientId,
   redirect_uri: redirectUri,
   response_type: 'code',
-  scope: 'atproto transition:generic',
+  scope:
+    'atproto include:org.hypercerts.authWrite include:app.certified.authWrite',
   state,
   code_challenge: codeChallenge,
   code_challenge_method: 'S256',

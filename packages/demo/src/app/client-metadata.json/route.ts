@@ -50,7 +50,8 @@ export async function GET() {
     client_uri: baseUrl,
     logo_uri: `${baseUrl}/certified-logo.png`,
     redirect_uris: [`${baseUrl}/api/oauth/callback`],
-    scope: 'atproto transition:generic',
+    scope:
+      'atproto include:org.hypercerts.authWrite include:app.certified.authWrite',
     grant_types: ['authorization_code', 'refresh_token'],
     response_types: ['code'],
     ...(isConfidential

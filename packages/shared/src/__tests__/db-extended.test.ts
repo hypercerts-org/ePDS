@@ -261,8 +261,9 @@ describe('Database initialization', () => {
       fs.rmSync(path.dirname(path.dirname(nestedPath)), {
         recursive: true,
       })
-      // eslint-disable-next-line no-empty
-    } catch {}
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+    }
   })
 
   it('runs migrations idempotently on second open', () => {

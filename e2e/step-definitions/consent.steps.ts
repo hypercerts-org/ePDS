@@ -45,24 +45,28 @@ Then('a consent screen is displayed', async function (this: EpdsWorld) {
     timeout: 30_000,
   })
 
-  // 2. The demo clients request `atproto transition:generic`. For that
-  //    scope set, @atproto/oauth-provider-ui's ScopeDescription renders
-  //    multiple permission cards — including one titled "Authenticate"
-  //    via the RpcMethodsDetails component, which fires on
-  //    hasTransitionGeneric. Assert that card is visible: this proves
-  //    the scope was actually parsed and rendered a permission summary,
-  //    not that the page loaded blank with just an Authorize button.
+  // 2. The demo clients request two granular permission sets —
+  //    `include:org.hypercerts.authWrite` and `include:app.certified.authWrite`.
+  //    @atproto/oauth-provider-ui's ScopeDescription resolves each
+  //    permission-set lexicon and renders a permission card titled from the
+  //    set's `title` field ("Manage your Hypercerts data" / "Manage your
+  //    Certified data"). Assert those cards are visible: this proves the
+  //    scopes were actually parsed, the permission-set lexicons resolved, and
+  //    a permission summary rendered — not that the page loaded blank with
+  //    just an Authorize button.
   //
-  //    We deliberately do NOT assert on the raw scope strings
-  //    (`atproto`, `transition:generic`) being visible on the page —
-  //    those only appear inside a collapsed "Technical details"
-  //    <Admonition> panel that is hidden (HTML `hidden` attribute +
-  //    aria-hidden="true") until the user clicks its disclosure
-  //    button. Asserting on the user-facing scope card is both more
-  //    meaningful (what users actually see) and more resilient
+  //    We deliberately do NOT assert on the raw scope strings (`atproto`,
+  //    `include:...`) being visible on the page — those only appear inside a
+  //    collapsed "Technical details" <Admonition> panel that is hidden (HTML
+  //    `hidden` attribute + aria-hidden="true") until the user clicks its
+  //    disclosure button. Asserting on the user-facing permission cards is
+  //    both more meaningful (what users actually see) and more resilient
   //    (doesn't depend on the details-panel implementation).
   await expect(
-    page.getByRole('heading', { name: 'Authenticate' }),
+    page.getByRole('heading', { name: 'Manage your Hypercerts data' }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Manage your Certified data' }),
   ).toBeVisible()
 })
 

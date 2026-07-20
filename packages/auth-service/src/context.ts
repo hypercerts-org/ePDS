@@ -22,6 +22,8 @@ export interface AuthServiceConfig {
   dbLocation: string
   otpLength: number
   otpCharset: 'numeric' | 'alphanumeric'
+  /** Resend webhook signing secret. When unset, the receiver is disabled. */
+  resendWebhookSecret?: string
   /**
    * OAuth client_id URLs trusted for branding injection. Used to gate
    * CSS branding injection AND client-supplied email templates

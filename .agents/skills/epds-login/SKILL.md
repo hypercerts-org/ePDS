@@ -15,6 +15,11 @@ AT Protocol universe (a DID, a handle, a data repository) automatically provisio
 From your app's perspective, ePDS uses standard AT Protocol OAuth (PAR + PKCE + DPoP).
 The reference implementation is `packages/demo` in the [ePDS repository](https://github.com/hypercerts-org/ePDS).
 
+For protocol-level detail beyond ePDS specifics — DPoP proof mechanics, granular
+scope design (`repo:`/`rpc:`/`blob:`/`account:`), identity verification after token
+exchange, and refresh-token race handling — see the `atproto-oauth` skill. This skill
+covers only what is ePDS-specific.
+
 ## Two Flows
 
 | Flow | App provides            | How user starts              | Implementation       |
@@ -57,7 +62,7 @@ are mutually exclusive:
   "client_id": "https://yourapp.example.com/client-metadata.json",
   "client_name": "Your App",
   "redirect_uris": ["https://yourapp.example.com/api/oauth/callback"],
-  "scope": "atproto transition:generic",
+  "scope": "atproto include:org.hypercerts.authWrite include:app.certified.authWrite",
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
   "token_endpoint_auth_method": "private_key_jwt",
@@ -66,6 +71,17 @@ are mutually exclusive:
   "dpop_bound_access_tokens": true
 }
 ```
+
+> **On the `scope` value:** `atproto` is mandatory and must be listed first; the
+> remaining entries request only the permissions your app needs. The examples here
+> reference two hypercerts specific permission sets via the `include:` prefix —
+> `include:org.hypercerts.authWrite` and `include:app.certified.authWrite`;
+> substitute the permission sets your own app defines. A
+> permission set that bundles `rpc:` service calls also needs an
+> `?aud=<service-did>` parameter (with `#` percent-encoded as `%23`); these are
+> write-only sets, so no `aud` is required. Avoid the legacy `transition:generic`
+> catch-all. See the `atproto-oauth` skill's "Scopes and Permission Sets" for the
+> grammar.
 
 Alternatively, replace `jwks_uri` with an inline `jwks` object containing
 the public key directly — see
@@ -85,7 +101,8 @@ const client = new NodeOAuthClient({
     client_id: 'https://yourapp.example.com/client-metadata.json',
     client_name: 'Your App',
     redirect_uris: ['https://yourapp.example.com/api/oauth/callback'],
-    scope: 'atproto transition:generic',
+    scope:
+      'atproto include:org.hypercerts.authWrite include:app.certified.authWrite',
     grant_types: ['authorization_code', 'refresh_token'],
     response_types: ['code'],
     token_endpoint_auth_method: 'private_key_jwt',

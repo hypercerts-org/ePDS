@@ -26,6 +26,7 @@ setInterval(
 export function requestRateLimit(opts: {
   windowMs: number
   maxRequests: number
+  keyPrefix?: string
 }) {
   const disabled = process.env.EPDS_DISABLE_RATE_LIMIT === 'true'
   return (req: Request, res: Response, next: NextFunction): void => {
@@ -34,12 +35,13 @@ export function requestRateLimit(opts: {
       return
     }
     const ip = req.ip || req.socket.remoteAddress || 'unknown'
+    const key = `${opts.keyPrefix ?? 'global'}:${ip}`
     const now = Date.now()
 
-    let entry = requestCounts.get(ip)
+    let entry = requestCounts.get(key)
     if (!entry || entry.resetAt < now) {
       entry = { count: 0, resetAt: now + opts.windowMs }
-      requestCounts.set(ip, entry)
+      requestCounts.set(key, entry)
     }
 
     entry.count++
