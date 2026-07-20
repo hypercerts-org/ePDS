@@ -80,7 +80,7 @@ export function normalizeOtpValue(
   const allowedValue =
     otpCharset === 'alphanumeric'
       ? compactValue.toUpperCase().replace(/[^A-Z0-9]/g, '')
-      : compactValue.replace(/[^0-9]/g, '')
+      : compactValue.replace(/\D/g, '')
 
   return allowedValue.slice(0, otpLength)
 }
