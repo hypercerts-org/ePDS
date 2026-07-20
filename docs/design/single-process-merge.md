@@ -22,9 +22,13 @@ adds a distinct set of wins that single-origin alone cannot deliver:
   auth-service can prove to pds-core that a redirect came from a legitimate auth
   flow, over the wire, signed with `EPDS_CALLBACK_SECRET`. In one process the
   auth flow can call the code-issuance path **directly** as a function — no
-  HMAC, no secret to rotate, no signature-verification code, no replay window.
-- **The internal HTTP lookups disappear.** `/_internal/account-by-email`,
-  `/_magic/check-email`, and the `/_internal/ping-request` keepalive become
+  HMAC, no secret to rotate, no signature-verification code. Note this removes
+  only the cross-service _authenticity_ check; the one-time, session-bound
+  issuance gating must be preserved in the direct path (see "Preserving
+  one-time issuance" below).
+- **The internal HTTP lookups disappear.** `/_internal/account-by-email` (which
+  replaced the old unauthenticated `/_magic/check-email`) and the
+  `/_internal/ping-request` keepalive become
   in-process function calls against the same objects (`pds.ctx.accountManager`,
   `provider.requestManager`) that pds-core already holds. No auth, no JSON
   round-trip, no drift between caller and callee.
@@ -132,9 +136,21 @@ Merged: the auth-complete handler calls the same `setAuthorized` path
   `requestManager.setAuthorized` / `createAccount`) into a plain function on a
   shared module, taking typed args instead of a signed request.
 - The auth `/auth/complete` handler calls that function directly.
-- `EPDS_CALLBACK_SECRET` and the signature-verification middleware are deleted.
-- **Keep the HTTP `/oauth/epds-callback` route only if** a transition period
-  needs old auth-service instances to still call it; otherwise remove it.
+- **Preserve the one-time issuance gating in the extracted function.** Dropping
+  HMAC removes only the cross-service _authenticity_ check — it does **not**
+  remove the need for one-time, session-bound, idempotent guards. The direct
+  path must still ensure a repeated or replayed `/auth/complete` cannot mint a
+  second authorization code (the auth-flow row is consumed exactly once, keyed
+  to the session). Carry these guards into the shared function; they are
+  independent of the HMAC and must not be deleted alongside it.
+- **Retain `EPDS_CALLBACK_SECRET`, the signature-verification middleware, and
+  the HTTP `/oauth/epds-callback` route while any legacy Auth instance can
+  still call it.** During a rolling deploy an old auth-service may still POST
+  the signed callback; deleting the verifier early would either break it or
+  (worse) expose an unauthenticated issuance route. Remove the secret, the
+  verifier, and the route **only** in a later compatibility gate, after all old
+  callers are drained and the direct-call path is fully deployed (see rollout
+  steps 4–5).
 
 This is the highest-value deletion in the whole merge and also the most
 security-sensitive change — the HMAC existed to stop an attacker forging a
@@ -172,10 +188,13 @@ come first. This process-merge adds:
    mounted at `/auth` on the PDS app; resolve hazards 1–6 above. Keep
    auth-service's standalone `listen()` behind a flag for rollback.
 4. **Switch `/auth/complete` to the in-process call.** Route code issuance
-   through the extracted function; stop signing/sending the HMAC callback.
-5. **Delete** `EPDS_CALLBACK_SECRET`, the callback signature middleware, the
-   `/_internal/*` + `/_magic/*` HTTP endpoints, and auth-service's standalone
-   server. Retire the second process.
+   through the extracted function; stop signing/sending the HMAC callback. The
+   signed HTTP route stays live and verified here — it is not yet removed.
+5. **Compatibility gate — delete only once legacy callers are drained.** After
+   confirming no old auth-service instance still POSTs the callback, delete
+   `EPDS_CALLBACK_SECRET`, the callback signature middleware, the HTTP
+   `/oauth/epds-callback` route, the `/_internal/*` HTTP endpoints, and
+   auth-service's standalone server. Retire the second process.
 
 Each step is independently shippable and reversible until step 5.
 

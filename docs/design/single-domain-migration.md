@@ -13,20 +13,46 @@ that case is accepted and focuses on _how_.
 
 ## Summary of the change
 
-| Concern                                | Today (two origins)                                                 | After (one origin)                                                    |
-| -------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| Auth UI location                       | `https://auth.pds.example/oauth/authorize`, `/auth/*`, `/account/*` | `https://pds.example/auth/*` (path-prefixed)                          |
-| `authorization_endpoint` (AS metadata) | `https://auth.<host>/oauth/authorize`                               | `https://<host>/auth/oauth/authorize`                                 |
-| `sec-fetch-site` on `/oauth/authorize` | `same-site`, rewritten to `same-origin` (item 5)                    | naturally `same-origin` — rewrite **deleted**                         |
-| Device-session cookies                 | `Domain=<parent>` so sibling subdomain can read them (items 14–15)  | host-only on the single origin — **plumbing deleted**                 |
-| Auth session cookie                    | `magic_account_session` / better-auth `session` on `auth.<host>`    | same names, path-scoped `/auth` on `<host>`                           |
-| CSP                                    | per-route in each service (unchanged approach)                      | per-route, unchanged                                                  |
-| Deploy units                           | two services                                                        | still two processes, one origin (Caddy path-routes) — or merged later |
+| Concern                                | Today (two origins)                                                                | After (one origin)                                                                                                     |
+| -------------------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Auth UI location                       | `https://auth.pds.example/oauth/authorize`, `/auth/*`, `/account/*`                | `https://pds.example/auth/*` — including `/auth/oauth/authorize` and `/auth/account/*` (see path-shadowing note below) |
+| `authorization_endpoint` (AS metadata) | `https://auth.<host>/oauth/authorize`                                              | `https://<host>/auth/oauth/authorize`                                                                                  |
+| `sec-fetch-site` on `/oauth/authorize` | `same-site`, rewritten to `same-origin` (item 5)                                   | naturally `same-origin` — rewrite **deleted**                                                                          |
+| Device-session cookies                 | `Domain=<parent>` so sibling subdomain can read them (items 14–15)                 | host-only on the single origin — **plumbing deleted** (see Set-Cookie contract below)                                  |
+| Auth session cookie                    | Better Auth session cookie (historically `magic_account_session`) on `auth.<host>` | same cookie, host-only on `<host>` (see Set-Cookie contract below)                                                     |
+| CSP                                    | per-route in each service (unchanged approach)                                     | per-route, unchanged                                                                                                   |
+| Deploy units                           | two services                                                                       | still two processes, one origin (Caddy path-routes) — or merged later                                                  |
 
 The routing model is exactly pds-gatekeeper's: **Caddy routes by path**, sending
-`/auth/*` (and the auth-owned `/oauth/authorize`, `/account/*`) to the
-auth-service process and everything else to the PDS. The auth-service stays a
-separate process; only its _origin_ changes.
+the auth surface to the auth-service process and everything else to the PDS. The
+auth-service stays a separate process; only its _origin_ changes.
+
+### Path shadowing — the auth surface must move under `/auth`
+
+On a single origin the auth service **cannot** keep serving `/oauth/authorize`
+and `/account/*` at the root: upstream `@atproto/oauth-provider` already renders
+`/oauth/*` and `/account*` on pds-core, so routing those roots to auth-service
+would shadow the PDS's own endpoints. The migration therefore exposes the entire
+auth surface under a non-conflicting prefix — `/auth/oauth/authorize`,
+`/auth/account/*`, `/auth/*` — optionally with a Caddy path-strip rewrite so the
+auth-service process can keep its current internal route paths unchanged.
+
+### Set-Cookie contract on the merged origin
+
+With one origin, the cookie isolation that the subdomain previously provided by
+separation must instead be provided by the cookie attributes:
+
+- **Auth session cookie** (Better Auth) and **CSRF / auth-flow cookies**
+  (`epds_csrf`, `epds_auth_flow`): guaranteed-**unique names**, **no `Domain`
+  attribute** (host-only), `Secure`, `HttpOnly` where applicable,
+  `SameSite=Lax`. Optionally scope non-`__Host-` cookies with `Path=/auth`.
+- **Device-session cookies** (`DEVICE_COOKIE_NAMES`): host-only — emit with **no
+  `Domain` attribute** at all, deleting the `Domain=<parent>` broadening (items
+  14–15).
+- `__Host-` prefixing is a possible hardening but is **mutually exclusive with a
+  `/auth` path scope**: `__Host-` requires `Path=/`. Pick unique-name +
+  host-only as the baseline; add either `__Host-` (at `Path=/`) or `Path=/auth`
+  scoping, not both.
 
 ## Two levels of "merge" — keep them distinct
 
@@ -46,7 +72,8 @@ This matters for both benefits and risks, so fix the terms up front:
 - **Fewer privileged cross-service endpoints.** The split _requires_ the two
   services to communicate over authenticated HTTP: the HMAC-signed
   `/oauth/epds-callback` plus the internal lookup endpoints (`/_internal/*`,
-  `/_magic/check-email`, `account-by-email`). Each is an attack surface that
+  e.g. `/_internal/account-by-email`, which replaced the old unauthenticated
+  `/_magic/check-email`). Each is an attack surface that
   must be signed, gated, and version-matched across the boundary. Merging the
   origin lets some of these relax; merging the processes lets most become
   in-process calls with no wire boundary at all.
@@ -87,7 +114,7 @@ The whole point. These exist solely because of cross-origin-same-site:
    `pds-core/src/index.ts:930`, and `authOrigin` derivation in
    `chooser-enrichment.ts`. The two hostnames become one.
 4. **(Process-merge only) some privileged cross-service endpoints** — the
-   `/_internal/*` / `/_magic/*` HTTP lookups become in-process calls. The
+   `/_internal/*` HTTP lookups become in-process calls. The
    HMAC-signed `/oauth/epds-callback` can also collapse to an in-process call
    if the processes merge. See "Two levels of merge" above.
 
@@ -116,17 +143,22 @@ would strand in-flight and cached clients.
 **Mitigation:** keep `auth.<host>` resolving during a transition window. Serve a
 301/302 (or continue proxying) from `auth.<host>/oauth/authorize` →
 `<host>/auth/oauth/authorize` until metadata TTLs expire and clients re-fetch.
-Only retire the subdomain DNS/cert after the window.
+The redirect/proxy **must preserve the complete request target** — full path and
+query string — because the authorization request carries `client_id`,
+`redirect_uri`, `code_challenge`, `state`, etc.; dropping the query breaks
+in-flight logins. Only retire the subdomain DNS/cert after the window.
 
 ### 2. `EPDS_LINK_BASE_URL` appears in live email links
 
 `auth-service/.env.example:94` — `EPDS_LINK_BASE_URL=https://auth.pds.example/auth/verify`.
 Verification/recovery links already delivered to inboxes point at the subdomain.
 
-**Mitigation:** same transition redirect covers these. Update the env var to the
-new path-based URL for _new_ emails; keep the subdomain redirecting for the
-lifetime of the longest-lived link (OTP/verification TTLs are short — 600s per
-`auth-flow.ts` — so this window is small).
+**Mitigation:** same transition redirect covers these — and, as above, it must
+**preserve the full path and query string** so the verification token in the
+link survives the hop. Update the env var to the new path-based URL for _new_
+emails; keep the subdomain redirecting for the lifetime of the longest-lived
+link (OTP/verification TTLs are short — `expiresIn: 600` in
+`auth-service/src/better-auth.ts` — so this window is small).
 
 ### 3. `AUTH_HOSTNAME` is load-bearing config
 
@@ -134,10 +166,20 @@ Referenced in `pds-core/src/index.ts:138`, `auth-service/src/index.ts:138`,
 `session-reuse.ts`, `chooser-enrichment.ts` (`authOrigin`),
 `sec-fetch-site-rewrite.ts` allowlist, `demo/.env.example` (`AUTH_ENDPOINT`).
 
-**Approach:** introduce an `AUTH_PATH_PREFIX` (default `/auth`) and derive the
-auth origin as `PDS_HOSTNAME + AUTH_PATH_PREFIX`. Keep `AUTH_HOSTNAME` as an
-optional legacy override so existing subdomain deployments keep working during
-transition (config-gated, not a hard cutover).
+**Approach:** keep these as distinct values rather than conflating them —
+`PDS_HOSTNAME + AUTH_PATH_PREFIX` yields `pds.example/auth`, which is a **base
+URL/path, not an origin**, and today's `AuthServiceConfig.hostname` expects a
+bare hostname while public-URL config carries the scheme. So:
+
+- keep `AuthServiceConfig.hostname` a hostname;
+- introduce `AUTH_PATH_PREFIX` (default `/auth`) as the path the auth surface
+  mounts under;
+- derive the full mount point from an explicit **origin** (`https://<host>`)
+  joined with the prefix — or introduce an explicit `AUTH_BASE_URL` — and update
+  URL-joining so paths and origins are never concatenated as bare strings.
+
+Keep `AUTH_HOSTNAME` as an optional legacy override so existing subdomain
+deployments keep working during transition (config-gated, not a hard cutover).
 
 ### Non-blockers (confirmed)
 

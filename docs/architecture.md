@@ -75,9 +75,16 @@ endpoint to issue an AT Protocol authorization code. For new users, a handle-pic
   `/oauth/epds-callback` is signed with `EPDS_CALLBACK_SECRET` so PDS Core can verify
   it was produced by a legitimate auth flow.
 
-- **Auth Service on a subdomain, not a single shared domain**: `AUTH_HOSTNAME`
-  must be a subdomain of `PDS_HOSTNAME` (e.g. `auth.pds.example` /
-  `pds.example`). A single-domain design — one origin, routing the auth paths
+- **Auth Service on a subdomain, not a single shared domain**: the
+  recommended production relationship is `AUTH_HOSTNAME` as a subdomain of
+  `PDS_HOSTNAME` (e.g. `auth.pds.example` / `pds.example`). This is not a hard
+  runtime requirement — the code also supports unrelated hostnames (e.g.
+  Railway preview envs where both services sit under `up.railway.app`), in
+  which case the shared cookie domain is `null` and device cookies stay
+  host-only (`deriveCookieDomain` in `pds-core/src/cookie-domain.ts`). The
+  cross-subdomain **device-session reuse** path only works when the subdomain
+  relationship holds, which is why it is the recommended arrangement. A
+  single-domain design — one origin, routing the auth paths
   by path prefix the way [pds-gatekeeper](https://tangled.org/baileytownsend.dev/pds-gatekeeper)
   does — was **considered and rejected**. The reasons:
   - **Mechanism (how the takeover happens)**: PDS Core overrides the
@@ -89,7 +96,8 @@ endpoint to issue an AT Protocol authorization code. For new users, a handle-pic
     motivation.
 
   - **Cookie isolation (the motivation)**: the Auth Service's session cookies
-    (Better Auth's `session`, historically `magic_account_session`) are a
+    (the Better Auth session cookie; historically `magic_account_session`,
+    no longer present in code) are a
     _separate authentication domain_ from AT Protocol access/refresh tokens.
     Giving the Auth Service its own origin keeps the two cookie namespaces from
     colliding by construction. (Note the tension: cross-subdomain cookie
@@ -117,12 +125,17 @@ endpoint to issue an AT Protocol authorization code. For new users, a handle-pic
   **On re-examination, none of the three benefits is a non-negotiable, and all
   the costs are artifacts of being cross-origin-but-same-site:**
   - _Cookie isolation_ is already done by explicit cookie **naming**
-    (`epds_csrf`, `magic_account_session`, the `DEVICE_COOKIE_NAMES` set), not
-    by origin — so it survives a collapse to one origin, optionally hardened
-    with a `__Host-`/path scope. The split does not just fail to be _required_
-    for isolation; it actively _creates_ a cookie problem — the
-    `Domain=<parent>` sharing in items 14–15 — that a single origin deletes
-    outright.
+    (`epds_csrf`, `epds_auth_flow`, the Better Auth session cookie, and the
+    `DEVICE_COOKIE_NAMES` device-session set), not by origin — so it survives a
+    collapse to one origin. Concretely, on a shared origin the contract is:
+    guaranteed-unique names, and **no parent `Domain` attribute** (cookies stay
+    host-only). This unique-name isolation is distinct from — and does not
+    require — `__Host-` prefixing; note `__Host-` mandates `Path=/` and so
+    cannot be combined with a `/auth` path scope, whereas plain path scoping
+    (`Path=/auth`) is an available but separate hardening option. The split
+    does not just fail to be _required_ for isolation; it actively _creates_ a
+    cookie problem — the `Domain=<parent>` sharing in items 14–15 — that a
+    single origin deletes outright.
   - _Security-header isolation_ is already per-route in both packages
     (`auth-service/src/lib/security-headers.ts` sets an auth-specific CSP per
     request; `pds-core` already rewrites the upstream CSP per response in
@@ -139,12 +152,14 @@ endpoint to issue an AT Protocol authorization code. For new users, a handle-pic
   benefits the split forecloses:
   - **Fewer privileged cross-service endpoints.** The split forces the two
     services to talk over authenticated HTTP: the HMAC-signed
-    `/oauth/epds-callback` and the `/_internal/*` / `/_magic/*` lookup
-    endpoints (e.g. `account-by-email`, `check-email`), each an attack surface
-    that has to be signed, gated, and kept in sync. Co-located on one origin,
-    much of this can become in-process calls with no wire boundary to secure.
-    (Whether to also merge the _processes_ — versus keep two behind path
-    routing — is a separate decision; see the migration doc.)
+    `/oauth/epds-callback` and the `/_internal/*` lookup endpoints (e.g.
+    `/_internal/account-by-email`, which replaced the old unauthenticated
+    `/_magic/check-email`), each an attack surface that has to be signed,
+    gated, and kept in sync. **Note this benefit requires merging the
+    _processes_, not just the origin**: a single origin with two processes
+    still has an HTTP boundary (merely same-origin now). Only a process merge
+    turns these into in-process calls with no wire boundary to secure — a
+    separate decision from origin-merging; see the migration doc.
 
   - **Operational simplicity.** One origin means one TLS cert, one DNS record,
     one CSP surface, and one set of cross-origin edge cases to reason about,
