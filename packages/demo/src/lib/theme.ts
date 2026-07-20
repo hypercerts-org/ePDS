@@ -125,7 +125,7 @@ function buildInjectedCss(
     `.field input:focus { border-color: ${page.focusBorder}; }`,
     `.field input::placeholder { color: ${page.textHint}; }`,
     `.otp-box { color: ${page.text}; }`,
-    `.otp-box:focus { border-color: ${page.focusBorder} !important; }`,
+    `.otp-box.active { border-color: ${page.focusBorder} !important; }`,
     `.btn-primary { background: ${page.primary}; color: ${page.primaryText}; }`,
     `.btn-primary:hover { background: ${page.primaryHover}; }`,
     // Standalone actions under Verify (.btn-secondary buttons and the

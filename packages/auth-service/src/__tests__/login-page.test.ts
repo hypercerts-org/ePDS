@@ -23,6 +23,7 @@ import {
   safeResolveClientMetadata,
 } from '../routes/login-page.js'
 import type { ClientMetadata } from '../lib/client-metadata.js'
+import { normalizeOtpValue } from '../otp-input.js'
 
 // ---------------------------------------------------------------------------
 // Shared DB helpers
@@ -739,10 +740,10 @@ describe('renderLoginPage flow-aborted notice + reactive abort gates', () => {
     const fnEnd = html.indexOf('function abortIfFlowDead', fnStart)
     expect(fnEnd).toBeGreaterThan(fnStart)
     const fnBody = html.slice(fnStart, fnEnd)
-    // OTP boxes, Resend, Back, and Verify must all get disabled —
+    // OTP input, Resend, Back, and Verify must all get disabled —
     // anything left enabled would let the user click into a path
     // that silently fails.
-    expect(fnBody).toMatch(/otpBoxes\[i\]\.disabled = true/)
+    expect(fnBody).toMatch(/otpInput\.disabled = true/)
     expect(fnBody).toMatch(/resendBtn\.disabled = true/)
     expect(fnBody).toMatch(/backBtn\.disabled = true/)
     expect(fnBody).toMatch(/verifyBtn\.disabled = true/)
@@ -865,64 +866,63 @@ describe('renderLoginPage flow-aborted notice + reactive abort gates', () => {
   })
 })
 
-// The segmented OTP grid used to strip whitespace only, so a code copied
+// The segmented OTP input used to strip whitespace only, so a code copied
 // with surrounding punctuation, or a letter typed into a digits-only code,
 // reached the server verbatim and failed verification. It also never
 // upper-cased, while alphanumeric codes are generated as A-Z0-9 and the
 // other two OTP forms upper-case on the way in — so a desktop user typing
 // lowercase (where `autocapitalize` does nothing) submitted a code the
-// server would always reject. These pin the shared charset filter.
-describe('renderLoginPage OTP grid charset filter', () => {
-  it('emits the numeric filter from the shared helper', () => {
-    const html = renderDefault({ otpCharset: 'numeric' })
-    expect(html).toContain(`var otpCharFilter = ${/\D/g.toString()};`)
-  })
-
-  it('emits the alphanumeric filter from the shared helper', () => {
-    const html = renderDefault({ otpCharset: 'alphanumeric' })
-    expect(html).toContain(`var otpCharFilter = ${/[^A-Za-z0-9]/g.toString()};`)
-  })
-
-  it('upper-cases only under the alphanumeric policy', () => {
-    expect(renderDefault({ otpCharset: 'alphanumeric' })).toContain(
-      "otpCharset === 'alphanumeric' ? cleaned.toUpperCase() : cleaned",
+// server would always reject. These pin the shared charset normalizer.
+describe('renderLoginPage OTP charset filter', () => {
+  // The single input replaced the per-box `filterOtpChars` helper these
+  // originally pinned. normalizeOtpValue subsumes it — it strips whitespace,
+  // drops out-of-charset characters, upper-cases alphanumeric codes, and caps
+  // the length — and is unit-tested directly in otp-input.test.ts. These now
+  // pin that the page really ships that shared function rather than a
+  // divergent client-side copy, and that every entry path routes through it.
+  it('serializes the shared normalizer into the page', () => {
+    const html = renderDefault()
+    expect(html).toContain(
+      `var normalizeOtpValue = (${normalizeOtpValue.toString()});`,
     )
   })
 
-  it('routes the input handler through the filter, not a whitespace-only strip', () => {
+  it('routes typed input through the normalizer, not a whitespace-only strip', () => {
     const html = renderDefault()
-    expect(html).toContain('var v = filterOtpChars(box.value);')
+    expect(html).toContain(
+      'var normalized = normalizeOtpValue(otpInput.value, otpLength, otpCharset);',
+    )
     // The old whitespace-only strip is a strict subset of every charset
-    // filter; leaving one behind would mean a handler was missed.
+    // filter; leaving one behind would mean an entry path was missed.
     expect(html).not.toMatch(/replace\(\/\\s\/g, ''\)/)
   })
 
-  it('routes the paste handler through the filter before slicing to the free boxes', () => {
+  it('routes pasted input through the normalizer', () => {
     const html = renderDefault()
-    expect(html).toContain(
-      'var cleaned = filterOtpChars(data).slice(0, otpBoxes.length - idx);',
+    const pasteStart = html.indexOf("otpInput.addEventListener('paste'")
+    expect(pasteStart).toBeGreaterThan(0)
+    const pasteEnd = html.indexOf(
+      "otpInput.addEventListener('focus'",
+      pasteStart,
     )
+    expect(pasteEnd).toBeGreaterThan(pasteStart)
+    expect(html.slice(pasteStart, pasteEnd)).toContain('normalizeOtpValue(')
   })
 
-  it('defines the filter before the box handlers that call it', () => {
-    const html = renderDefault()
-    const defIdx = html.indexOf('function filterOtpChars(s)')
-    const inputIdx = html.indexOf('var v = filterOtpChars(box.value);')
-    const pasteIdx = html.indexOf('var cleaned = filterOtpChars(data)')
-    expect(defIdx).toBeGreaterThan(0)
-    expect(inputIdx).toBeGreaterThan(defIdx)
-    expect(pasteIdx).toBeGreaterThan(defIdx)
-  })
-
-  it('declares otpCharset once, above the filter that reads it', () => {
+  it('declares otpCharset once, above the normalizer that reads it', () => {
     const html = renderDefault()
     expect(html.match(/var otpCharset =/g)).toHaveLength(1)
     expect(html.match(/var otpLength =/g)).toHaveLength(1)
-    // filterOtpChars is only ever called from event handlers, but keeping
-    // the declaration above it removes any reliance on var hoisting.
     expect(html.indexOf('var otpCharset =')).toBeLessThan(
-      html.indexOf('function filterOtpChars(s)'),
+      html.indexOf('var normalizeOtpValue ='),
     )
+  })
+
+  it('normalizes to the configured charset', () => {
+    // Behavioural cover for what the serialized normalizer will do in the
+    // browser under each policy the page can be rendered with.
+    expect(normalizeOtpValue('1a2-3 4', 6, 'numeric')).toBe('1234')
+    expect(normalizeOtpValue('a1-b2 c3', 6, 'alphanumeric')).toBe('A1B2C3')
   })
 })
 

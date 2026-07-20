@@ -76,8 +76,8 @@ export async function pickHandle(world: EpdsWorld): Promise<void> {
  *   2. Fill #email with the provided email, submit
  *   3. Wait for #step-otp.active (30 s)
  *   4. Fetch OTP from Mailpit via waitForEmail + extractOtp
- *   5. Fill the segmented OTP boxes via fillOtp (page auto-submits on
- *      the last digit; no explicit verify click needed)
+ *   5. Fill the OTP control via fillOtp (page auto-submits when the
+ *      complete code is entered; no explicit verify click needed)
  *   6. Wait for /auth/choose-handle, fill #handle-input with a generated
  *      local part, wait for the availability check to confirm "available",
  *      then click #submit-btn

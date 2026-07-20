@@ -46,14 +46,13 @@ async function buildIncorrectOtpCode(world: EpdsWorld): Promise<string> {
   // When world.otpCode is not set (e.g. the OTP email step was skipped),
   // we cannot read OTP_LENGTH / OTP_CHARSET from env directly because the
   // test runner has no access to the deployed service's environment on
-  // Railway. Instead, infer the config from the segmented OTP boxes that
-  // the auth service renders. Length comes from the box count; charset is
-  // inferred from the per-box inputmode attribute (the old hidden-input
-  // path's `pattern` attribute is no longer rendered).
+  // Railway. Instead, infer the config from the real OTP input rendered by
+  // the auth service.
   const page = getPage(world)
-  const boxes = page.locator('.otp-box')
-  const otpLength = (await boxes.count()) || testEnv.otpLength
-  const inputModeAttr = await boxes.first().getAttribute('inputmode')
+  const input = page.locator('#code')
+  const maxlengthAttr = await input.getAttribute('maxlength')
+  const otpLength = Number(maxlengthAttr) || testEnv.otpLength
+  const inputModeAttr = await input.getAttribute('inputmode')
   const otpCharset: 'numeric' | 'alphanumeric' =
     inputModeAttr === 'numeric' ? 'numeric' : testEnv.otpCharset
 
@@ -351,18 +350,16 @@ Then(
   async function (this: EpdsWorld) {
     const page = getPage(this)
     const boxes = page.locator('.otp-box')
+    const input = page.locator('#code')
     const count = await boxes.count()
     if (count === 0) {
       throw new Error('No .otp-box elements found — OTP form is not rendered')
     }
-    // Every box must be both visible AND enabled. Asserting on .first()
-    // alone hid regressions where a partial form (e.g. a stale
-    // "verifying..." latch on later boxes) blocked further attempts even
-    // though the first box looked fine.
-    for (let i = 0; i < count; i++) {
-      await expect(boxes.nth(i)).toBeVisible()
-      await expect(boxes.nth(i)).toBeEnabled()
+    for (let index = 0; index < count; index++) {
+      await expect(boxes.nth(index)).toBeVisible()
     }
+    await expect(input).toBeVisible()
+    await expect(input).toBeEnabled()
   },
 )
 
@@ -628,14 +625,15 @@ Then(
 When(
   'the user enters two digits from the old OTP',
   async function (this: EpdsWorld) {
-    const otpBoxes = getPage(this).locator('.otp-box')
-    await otpBoxes.nth(0).fill('1')
-    await otpBoxes.nth(1).fill('2')
-    // Prove the digits actually landed, so the later empty-box assertion
+    // The .otp-box divs are presentational; the code lives in the single
+    // #code input behind them.
+    const input = getPage(this).locator('#code')
+    await input.focus()
+    await input.pressSequentially('12')
+    // Prove the digits actually landed, so the later empty-input assertion
     // demonstrates that resend cleared them rather than that they were
     // never entered.
-    await expect(otpBoxes.nth(0)).toHaveValue('1')
-    await expect(otpBoxes.nth(1)).toHaveValue('2')
+    await expect(input).toHaveValue('12')
   },
 )
 
@@ -685,12 +683,20 @@ Then(
     if (!this.otpCode) {
       throw new Error('No fresh OTP was captured from the mail trap')
     }
-    const otpBoxes = getPage(this).locator('.otp-box')
+    const page = getPage(this)
+    const otpBoxes = page.locator('.otp-box')
+    const input = page.locator('#code')
     await expect(otpBoxes).toHaveCount(this.otpCode.length)
+    // The code lives in the single input behind the slots, so emptiness is
+    // its value. Each slot still renders a placeholder character when empty,
+    // hence the `empty` class rather than empty text.
+    await expect(input).toHaveValue('')
     for (let index = 0; index < this.otpCode.length; index += 1) {
-      await expect(otpBoxes.nth(index)).toHaveValue('')
+      await expect(otpBoxes.nth(index)).toHaveClass(/\bempty\b/)
     }
-    await expect(otpBoxes.first()).toBeFocused()
+    // Focus lands on the input; the first slot reflects it via `active`.
+    await expect(input).toBeFocused()
+    await expect(otpBoxes.first()).toHaveClass(/\bactive\b/)
   },
 )
 

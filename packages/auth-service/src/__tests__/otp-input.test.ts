@@ -1,19 +1,86 @@
 /**
- * Tests for buildOtpInputProps — derives HTML input attributes from OTP config.
+ * Tests for the pure OTP input helpers.
  *
- * Covers:
- * 1. Correct pattern and placeholder for numeric charset
- * 2. Correct pattern and placeholder for alphanumeric charset
- * 3. Pattern and placeholder length match the requested otpLength
- * 4. Numeric pattern rejects letters
- * 5. Alphanumeric pattern accepts both letters and digits
+ * Covers input normalization for one-shot mobile paste/autofill values and
+ * derives the HTML input attributes from the configured OTP format.
  */
 import { describe, it, expect } from 'vitest'
 import {
   buildOtpInputFilter,
   buildOtpInputProps,
+  normalizeOtpValue,
+  resolveOtpSelection,
   resolvePreviewOtpCharset,
 } from '../otp-input.js'
+
+describe('OTP input selection', () => {
+  it('leaves empty values and existing selections unchanged', () => {
+    expect(resolveOtpSelection(0, 6, 0, 0, 0, 0)).toBeNull()
+    expect(resolveOtpSelection(4, 6, 2, 3, 2, 3)).toBeNull()
+  })
+
+  it('keeps a collapsed caret at the end of a partial code for appending', () => {
+    expect(resolveOtpSelection(4, 6, 4, 4, 4, 4)).toBeNull()
+  })
+
+  it('selects the previous slot after moving left from append mode', () => {
+    expect(resolveOtpSelection(4, 6, 3, 3, 4, 4)).toEqual({
+      start: 3,
+      end: 4,
+      direction: 'backward',
+    })
+  })
+
+  it('continues selecting previous slots on repeated left-arrow presses', () => {
+    expect(resolveOtpSelection(4, 6, 3, 3, 3, 4)).toEqual({
+      start: 2,
+      end: 3,
+      direction: 'backward',
+    })
+  })
+
+  it('selects the first slot when the caret moves to the beginning', () => {
+    expect(resolveOtpSelection(4, 6, 0, 0, 1, 2)).toEqual({
+      start: 0,
+      end: 1,
+      direction: 'forward',
+    })
+  })
+
+  it('selects the next slot when moving forward', () => {
+    expect(resolveOtpSelection(4, 6, 2, 2, 1, 2)).toEqual({
+      start: 2,
+      end: 3,
+      direction: 'forward',
+    })
+  })
+
+  it('selects the final slot when a complete code receives focus', () => {
+    expect(resolveOtpSelection(6, 6, 6, 6, 6, 6)).toEqual({
+      start: 5,
+      end: 6,
+      direction: 'backward',
+    })
+  })
+})
+
+describe('OTP input value normalization', () => {
+  it('accepts a complete numeric code delivered at once', () => {
+    expect(normalizeOtpValue('123456', 6, 'numeric')).toBe('123456')
+  })
+
+  it('caps input at the configured code length', () => {
+    expect(normalizeOtpValue('123456789', 6, 'numeric')).toBe('123456')
+  })
+
+  it('removes whitespace from a copied code', () => {
+    expect(normalizeOtpValue('123 456', 6, 'numeric')).toBe('123456')
+  })
+
+  it('normalizes alphanumeric codes to supported uppercase characters', () => {
+    expect(normalizeOtpValue('a1-b2 c3', 6, 'alphanumeric')).toBe('A1B2C3')
+  })
+})
 
 describe('Recovery flow: OTP input props', () => {
   it('numeric charset produces digit-only pattern and zero placeholder', () => {
