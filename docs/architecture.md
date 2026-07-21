@@ -93,7 +93,19 @@ endpoint to issue an AT Protocol authorization code. For new users, a handle-pic
     stock `@atproto/pds` sign-in UI is never shown. This alone does not
     _require_ a separate origin — PDS Core already wraps upstream heavily and
     could shadow `/oauth/authorize` in place — so it is the mechanism, not the
-    motivation.
+    motivation. The takeover does, however, carry its own recurring cost
+    _independent of origin or process topology_: because clients are pointed
+    away from the stock UI, PDS Core must police every path on which upstream
+    `@atproto/oauth-provider` might still render one of its two unreachable
+    auth UIs (welcome page, password sign-in-view). The render decision lives
+    in upstream-private logic PDS Core cannot cleanly wrap, so the guard
+    (`auth-ui-guard.ts`; [pds-white-boxing.md](design/pds-white-boxing.md)
+    item 18) either mirrors that decision pre-route or detects it in the
+    rendered HTML — both brittle by construction (see
+    [HYPER-367](https://linear.app/hypercerts/issue/HYPER-367)). Merging the
+    origin does not remove this; merging the two ePDS _processes_ does not
+    either, because the opaque boundary here is PDS Core ↔ upstream atproto,
+    not PDS Core ↔ Auth Service.
 
   - **Cookie isolation (the motivation)**: the Auth Service's session cookies
     (the Better Auth session cookie; historically `magic_account_session`,
