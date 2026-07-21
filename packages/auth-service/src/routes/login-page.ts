@@ -45,6 +45,7 @@ import { socialProviders } from '../better-auth.js'
 import {
   buildOtpInputProps,
   normalizeOtpValue,
+  resolveOtpClickSelection,
   resolveOtpSelection,
 } from '../otp-input.js'
 import {
@@ -522,6 +523,7 @@ export function renderLoginPage(opts: {
   // It is self-contained, so serializing its source avoids maintaining a
   // second client-only implementation inside this server-rendered page.
   const normalizeOtpValueSource = normalizeOtpValue.toString()
+  const resolveOtpClickSelectionSource = resolveOtpClickSelection.toString()
   const resolveOtpSelectionSource = resolveOtpSelection.toString()
 
   // ATProto/Bluesky handle login button.
@@ -801,6 +803,7 @@ export function renderLoginPage(opts: {
       var otpLength = ${opts.otpLength};
       var otpCharset = ${JSON.stringify(opts.otpCharset)};
       var normalizeOtpValue = (${normalizeOtpValueSource});
+      var resolveOtpClickSelection = (${resolveOtpClickSelectionSource});
       var resolveOtpSelection = (${resolveOtpSelectionSource});
 
       // PAR heartbeat — slides the upstream request_uri inactivity
@@ -1114,7 +1117,29 @@ export function renderLoginPage(opts: {
 
       otpInput.addEventListener('focus', positionOtpSelection);
       otpInput.addEventListener('blur', renderOtpSlots);
-      otpInput.addEventListener('click', syncOtpSelection);
+      otpInput.addEventListener('click', function(e) {
+        // The real input must remain above the visual slots for iOS long-press
+        // paste. Read the box underneath the click without changing hit testing.
+        var clickedBox = document.elementsFromPoint(e.clientX, e.clientY).find(function(element) {
+          return element.hasAttribute('data-slot');
+        });
+        if (!clickedBox) {
+          syncOtpSelection();
+          return;
+        }
+
+        var selection = resolveOtpClickSelection(
+          otpInput.value.length,
+          Number(clickedBox.getAttribute('data-slot')),
+        );
+        otpInput.setSelectionRange(
+          selection.start,
+          selection.end,
+          selection.direction,
+        );
+        previousOtpSelection = [selection.start, selection.end];
+        renderOtpSlots();
+      });
       otpInput.addEventListener('keyup', syncOtpSelection);
       document.addEventListener('selectionchange', function() {
         if (document.activeElement === otpInput) syncOtpSelection();

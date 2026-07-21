@@ -1,14 +1,15 @@
 /**
  * Tests for the pure OTP input helpers.
  *
- * Covers input normalization for one-shot mobile paste/autofill values and
- * derives the HTML input attributes from the configured OTP format.
+ * Covers segmented selection, one-shot mobile paste/autofill normalization,
+ * and HTML input attributes derived from the configured OTP format.
  */
 import { describe, it, expect } from 'vitest'
 import {
   buildOtpInputFilter,
   buildOtpInputProps,
   normalizeOtpValue,
+  resolveOtpClickSelection,
   resolveOtpSelection,
   resolvePreviewOtpCharset,
 } from '../otp-input.js'
@@ -60,6 +61,24 @@ describe('OTP input selection', () => {
       start: 5,
       end: 6,
       direction: 'backward',
+    })
+  })
+})
+
+describe('OTP click selection', () => {
+  it('selects the clicked character when the slot is populated', () => {
+    expect(resolveOtpClickSelection(4, 2)).toEqual({
+      start: 2,
+      end: 3,
+      direction: 'forward',
+    })
+  })
+
+  it('places the caret at the end when an empty later slot is clicked', () => {
+    expect(resolveOtpClickSelection(4, 6)).toEqual({
+      start: 4,
+      end: 4,
+      direction: 'forward',
     })
   })
 })

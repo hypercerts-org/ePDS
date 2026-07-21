@@ -1,8 +1,8 @@
 /**
- * Pure helper for deriving HTML input attributes from OTP configuration.
+ * Pure helpers for OTP input attributes, normalization, and segmented selection.
  *
- * Extracted so that both the recovery and account-login routes use identical
- * logic, and so the logic can be unit-tested without rendering or parsing HTML.
+ * Shared attribute generation keeps recovery and account-login consistent,
+ * while the selection helpers preserve slot-style editing over one real input.
  */
 
 export type OtpCharset = 'numeric' | 'alphanumeric'
@@ -61,6 +61,22 @@ export function resolveOtpSelection(
     start: nextStart,
     end: nextStart + 1,
     direction: movingBackward ? 'backward' : 'forward',
+  }
+}
+
+/**
+ * Select a populated visual slot, or place the caret at the end when the
+ * clicked slot is beyond the current value.
+ */
+export function resolveOtpClickSelection(
+  valueLength: number,
+  slot: number,
+): OtpSelection {
+  const start = Math.min(slot, valueLength)
+  return {
+    start,
+    end: start < valueLength ? start + 1 : start,
+    direction: 'forward',
   }
 }
 
