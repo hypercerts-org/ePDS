@@ -601,6 +601,42 @@ describe('renderLoginPage OTP accessibility', () => {
   })
 })
 
+describe('renderLoginPage OTP pointer selection', () => {
+  it('selects mouse slots on pointerdown before native caret placement', () => {
+    const html = renderDefault()
+    const pointerStart = html.indexOf("otpInput.addEventListener('pointerdown'")
+    const pointerEnd = html.indexOf(
+      "otpInput.addEventListener('click'",
+      pointerStart,
+    )
+    expect(pointerStart).toBeGreaterThan(0)
+    expect(pointerEnd).toBeGreaterThan(pointerStart)
+
+    const pointerHandler = html.slice(pointerStart, pointerEnd)
+    expect(pointerHandler).toContain("e.pointerType !== 'mouse'")
+    const preventDefault = pointerHandler.indexOf('e.preventDefault();')
+    const focus = pointerHandler.indexOf('otpInput.focus();')
+    const selectSlot = pointerHandler.indexOf('selectOtpSlotAtPoint(')
+    expect(preventDefault).toBeGreaterThan(0)
+    expect(focus).toBeGreaterThan(preventDefault)
+    expect(selectSlot).toBeGreaterThan(focus)
+  })
+
+  it('retains click selection as the touch and iOS fallback', () => {
+    const html = renderDefault()
+    const clickStart = html.indexOf("otpInput.addEventListener('click'")
+    const clickEnd = html.indexOf(
+      "otpInput.addEventListener('keyup'",
+      clickStart,
+    )
+    expect(clickStart).toBeGreaterThan(0)
+    expect(clickEnd).toBeGreaterThan(clickStart)
+    expect(html.slice(clickStart, clickEnd)).toContain(
+      'selectOtpSlotAtPoint(e.clientX, e.clientY)',
+    )
+  })
+})
+
 describe('renderLoginPage OTP verify-form double-submit latch (regression)', () => {
   it('declares the verifying flag at IIFE scope so input/paste/submit handlers share it', () => {
     const html = renderDefault()

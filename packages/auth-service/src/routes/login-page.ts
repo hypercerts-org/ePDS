@@ -1123,18 +1123,12 @@ export function renderLoginPage(opts: {
         otpInput.dispatchEvent(new Event('input', { bubbles: true }));
       });
 
-      otpInput.addEventListener('focus', positionOtpSelection);
-      otpInput.addEventListener('blur', renderOtpSlots);
-      otpInput.addEventListener('click', function(e) {
-        // The real input must remain above the visual slots for iOS long-press
-        // paste. Read the box underneath the click without changing hit testing.
-        var clickedBox = document.elementsFromPoint(e.clientX, e.clientY).find(function(element) {
+      /** Select the visual OTP slot beneath a pointer coordinate. */
+      function selectOtpSlotAtPoint(clientX, clientY) {
+        var clickedBox = document.elementsFromPoint(clientX, clientY).find(function(element) {
           return element.hasAttribute('data-slot');
         });
-        if (!clickedBox) {
-          syncOtpSelection();
-          return;
-        }
+        if (!clickedBox) return false;
 
         var selection = resolveOtpClickSelection(
           otpInput.value.length,
@@ -1147,6 +1141,21 @@ export function renderLoginPage(opts: {
         );
         previousOtpSelection = [selection.start, selection.end];
         renderOtpSlots();
+        return true;
+      }
+
+      otpInput.addEventListener('focus', positionOtpSelection);
+      otpInput.addEventListener('blur', renderOtpSlots);
+      otpInput.addEventListener('pointerdown', function(e) {
+        if (e.pointerType !== 'mouse' || e.button !== 0) return;
+        // Stop the native caret jumping to the end before click selects the
+        // intended slot. Touch remains native so iOS long-press paste works.
+        e.preventDefault();
+        otpInput.focus();
+        selectOtpSlotAtPoint(e.clientX, e.clientY);
+      });
+      otpInput.addEventListener('click', function(e) {
+        if (!selectOtpSlotAtPoint(e.clientX, e.clientY)) syncOtpSelection();
       });
       otpInput.addEventListener('keyup', syncOtpSelection);
       document.addEventListener('selectionchange', function() {
