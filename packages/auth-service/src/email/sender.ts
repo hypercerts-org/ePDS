@@ -1,6 +1,6 @@
 import * as nodemailer from 'nodemailer'
 import { createLogger } from '@certified-app/shared'
-import type { Transporter } from 'nodemailer'
+import type { SendMailOptions, SentMessageInfo, Transporter } from 'nodemailer'
 import type { EmailConfig } from '@certified-app/shared'
 import {
   buildSignInCodeEmail,
@@ -10,6 +10,11 @@ import {
 import { buildClientBrandedEmail } from './client-template.js'
 
 const logger = createLogger('auth:email')
+
+// Exposed for tests that assert the structured fields on the per-send
+// completion line (elapsedMs / messageId / smtpResponse). Production
+// code must not import this.
+export const _loggerForTest: ReturnType<typeof createLogger> = logger
 
 // Re-exports so existing tests that reach for the template cache still
 // resolve through sender.js. New code should import directly from
@@ -95,6 +100,47 @@ export class EmailSender {
     }
   }
 
+  /**
+   * Send one message, measuring how long the SMTP handoff takes and
+   * folding the elapsed time plus the provider's `messageId` / server
+   * `response` into a single structured completion line. `messageId`
+   * lets these app logs be joined to Resend's per-message delivery
+   * events (see #183 / #198) so provider-side latency can be told apart
+   * from users submitting stale codes.
+   *
+   * On failure the error is re-thrown after stamping it with
+   * `elapsedMs`, so the caller's existing error log can carry the
+   * duration without adding a second line per failure.
+   */
+  private async timedSendMail(
+    mail: SendMailOptions,
+    message: string,
+    extra: Record<string, unknown> = {},
+  ): Promise<void> {
+    const startedAt = performance.now()
+    try {
+      const info: SentMessageInfo = await this.transporter.sendMail(mail)
+      const elapsedMs = Math.round(performance.now() - startedAt)
+      logger.info(
+        {
+          email: mail.to,
+          ...extra,
+          elapsedMs,
+          messageId: info.messageId,
+          smtpResponse: info.response,
+        },
+        message,
+      )
+    } catch (err) {
+      const elapsedMs = Math.round(performance.now() - startedAt)
+      if (err instanceof Error) {
+        // Stamp the duration so the caller's error log carries it.
+        ;(err as Error & { elapsedMs?: number }).elapsedMs = elapsedMs
+      }
+      throw err
+    }
+  }
+
   async sendOtpCode(opts: {
     to: string
     code: string
@@ -125,16 +171,16 @@ export class EmailSender {
         trustedClients: this.trustedClients,
       })
       if (branded) {
-        await this.transporter.sendMail({
-          from: `"${branded.fromName}" <${this.config.from}>`,
-          to,
-          subject: branded.subject,
-          text: branded.text,
-          html: branded.html,
-        })
-        logger.info(
-          { to, clientId: opts.clientId },
+        await this.timedSendMail(
+          {
+            from: `"${branded.fromName}" <${this.config.from}>`,
+            to,
+            subject: branded.subject,
+            text: branded.text,
+            html: branded.html,
+          },
           'Sent client-branded OTP email',
+          { clientId: opts.clientId },
         )
         return
       }
@@ -158,13 +204,16 @@ export class EmailSender {
     const { to, ...rest } = opts
     const { subject, text, html } = buildSignInCodeEmail(rest)
 
-    await this.transporter.sendMail({
-      from: `"${this.config.fromName}" <${this.config.from}>`,
-      to,
-      subject,
-      text,
-      html,
-    })
+    await this.timedSendMail(
+      {
+        from: `"${this.config.fromName}" <${this.config.from}>`,
+        to,
+        subject,
+        text,
+        html,
+      },
+      'Sent sign-in OTP email',
+    )
   }
 
   private async sendWelcomeCode(opts: {
@@ -176,13 +225,16 @@ export class EmailSender {
     const { to, ...rest } = opts
     const { subject, text, html } = buildWelcomeCodeEmail(rest)
 
-    await this.transporter.sendMail({
-      from: `"${this.config.fromName}" <${this.config.from}>`,
-      to,
-      subject,
-      text,
-      html,
-    })
+    await this.timedSendMail(
+      {
+        from: `"${this.config.fromName}" <${this.config.from}>`,
+        to,
+        subject,
+        text,
+        html,
+      },
+      'Sent welcome OTP email',
+    )
   }
 
   async sendBackupEmailVerification(opts: {
@@ -194,12 +246,15 @@ export class EmailSender {
     const { to, ...rest } = opts
     const { subject, text, html } = buildBackupEmailVerificationEmail(rest)
 
-    await this.transporter.sendMail({
-      from: `"${this.config.fromName}" <${this.config.from}>`,
-      to,
-      subject,
-      text,
-      html,
-    })
+    await this.timedSendMail(
+      {
+        from: `"${this.config.fromName}" <${this.config.from}>`,
+        to,
+        subject,
+        text,
+        html,
+      },
+      'Sent backup email verification',
+    )
   }
 }

@@ -33,7 +33,8 @@ When(
       client_id: clientMetaUrl,
       redirect_uri: `${testEnv.demoUrl}/api/oauth/callback`,
       response_type: 'code',
-      scope: 'atproto transition:generic',
+      scope:
+        'atproto include:org.hypercerts.authWrite include:app.certified.authWrite',
       state: 'test-state',
       code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
       code_challenge_method: 'S256',

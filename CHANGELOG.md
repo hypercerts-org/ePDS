@@ -1,5 +1,34 @@
 # ePDS
 
+## 0.7.0
+
+### Who should read this release
+
+- **Operators:**
+  - [Email delivery logs use a consistent recipient field.](#v0.7.0-email-delivery-logs-use-a-consistent-recipient-field)
+  - [OTP send logs now record how long the email handoff took, the provider's message ID, and the SMTP server response.](#v0.7.0-otp-send-logs-now-record-how-long-the-email-handoff-took)
+  - [Optional email-event logging for operators who choose the third-party Resend service to send email; ePDS continues to support other email providers.](#v0.7.0-optional-email-event-logging-for-operators-who-choose-the)
+
+### Minor Changes
+
+- <a id="v0.7.0-email-delivery-logs-use-a-consistent-recipient-field"></a> [#197](https://github.com/hypercerts-org/ePDS/pull/197) [`ce25beb`](https://github.com/hypercerts-org/ePDS/commit/ce25beba5e231e8300a875f1fc1d2ad37ae75527) Thanks [@aspiers](https://github.com/aspiers)! - Email delivery logs use a consistent recipient field.
+
+  **Affects:** Operators
+
+  **Operators:** All four email delivery paths now log the recipient as `email`: client-branded OTP, standard sign-in OTP, welcome OTP, and backup-email verification. Update structured-log queries for `Sent client-branded OTP email` to read `email` instead of `to`.
+
+- <a id="v0.7.0-otp-send-logs-now-record-how-long-the-email-handoff-took"></a> [#203](https://github.com/hypercerts-org/ePDS/pull/203) [`2193515`](https://github.com/hypercerts-org/ePDS/commit/2193515970c56035fd026c3df2b3f44e403eb801) Thanks [@aspiers](https://github.com/aspiers)! - OTP send logs now record how long the email handoff took, the provider's message ID, and the SMTP server response.
+
+  **Affects:** Operators
+
+  **Operators:** every OTP email completion line (all four paths — client-branded, sign-in, welcome, backup-email verification) now carries `elapsedMs`, `messageId`, and `smtpResponse` alongside `email`. `messageId` lets these logs be joined to Resend delivery events; `elapsedMs` isolates a slow SMTP handoff from other causes of late-arriving codes. Failed sends log `elapsedMs` too, on the existing `better-auth: failed to send OTP email` error line.
+
+- <a id="v0.7.0-optional-email-event-logging-for-operators-who-choose-the"></a> [#198](https://github.com/hypercerts-org/ePDS/pull/198) [`2bf9af4`](https://github.com/hypercerts-org/ePDS/commit/2bf9af420281c769ec88f19c9badd89f00acc03c) Thanks [@aspiers](https://github.com/aspiers)! - Optional email-event logging for operators who choose the third-party Resend service to send email; ePDS continues to support other email providers.
+
+  **Affects:** Operators
+
+  **Operators:** ePDS remains compatible with any SMTP provider and does not require Resend. Operators who already use Resend can opt in by registering `https://<AUTH_HOSTNAME>/webhooks/resend` for the documented email events and setting `RESEND_WEBHOOK_SECRET`; logs include delivery, open, complaint, suppression, and scheduling events. The route verifies each webhook, logs only events whose sender exactly matches `SMTP_FROM`, acknowledges unsupported click and inbound events without logging their payloads, and does not persist webhook data.
+
 ## 0.6.5
 
 ### Who should read this release

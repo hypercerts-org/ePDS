@@ -53,7 +53,7 @@ generate_secrets_in_file() {
 }
 
 # Copy shared vars from the top-level .env into a per-package .env.
-# Only sets vars that already have an uncommented line in the target file,
+# Only sets vars already present in the target or documented in its example,
 # so packages don't end up with vars they don't use.
 inject_shared_vars() {
   local target="$1"
@@ -63,12 +63,13 @@ inject_shared_vars() {
              PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX \
              EPDS_INVITE_CODE PDS_INTERNAL_URL \
              SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASS SMTP_FROM SMTP_FROM_NAME PDS_EMAIL_FROM_ADDRESS \
+             RESEND_WEBHOOK_SECRET \
              PDS_TERMS_OF_SERVICE_URL PDS_PRIVACY_POLICY_URL PDS_LEGAL_ENTITY_NAME; do
-    # Skip if the var isn't in the target AND isn't in the package's .env.example.
-    # This avoids injecting vars a package doesn't use, while still handling
-    # .env files created from an older .env.example that lacked the var.
-    if ! grep -qE "^${var}=" "$target" 2>/dev/null \
-       && ! grep -qE "^${var}=" "$example" 2>/dev/null; then
+    # Optional variables may be commented out in examples. Recognising those
+    # comments lets an explicitly configured top-level value propagate while
+    # leaving the option absent for everyone else.
+    if ! grep -qE "^(# ?)?${var}=" "$target" 2>/dev/null \
+       && ! grep -qE "^(# ?)?${var}=" "$example" 2>/dev/null; then
       continue
     fi
     local val
@@ -166,20 +167,20 @@ prompt_hostname() {
   set_env_var PDS_HOSTNAME "$pds_hostname" .env
   set_env_var PDS_PUBLIC_URL "$pds_public_url" .env
   set_env_var AUTH_HOSTNAME "$auth_hostname" .env
-  set_env_var EPDS_LINK_BASE_URL "${proto}://${auth_hostname}/auth/verify" .env
+  set_env_var EPDS_LINK_BASE_URL "${proto}://${auth_hostname}/auth/verify" .env # NOSONAR — HTTP is selected only for localhost development.
 
   # Set PDS_INTERNAL_URL for multi-service deployments (auth-service → pds-core).
   # Docker: http://core:3000; Railway: http://<service>.railway.internal:3000
   # Not needed for localhost (both services on same host).
   if [ "$pds_hostname" != "localhost" ] && [[ "$pds_hostname" != *.localhost ]]; then
-    set_env_var PDS_INTERNAL_URL "http://core:3000" .env
-    echo "  Set PDS_INTERNAL_URL=http://core:3000"
+    set_env_var PDS_INTERNAL_URL "http://core:3000" .env # NOSONAR — Docker's private network does not need TLS.
+    echo "  Set PDS_INTERNAL_URL=http://core:3000" # NOSONAR — Docker's private network does not need TLS.
   fi
 
   echo "  Set PDS_HOSTNAME=${pds_hostname}"
   echo "  Set PDS_PUBLIC_URL=${pds_public_url}"
   echo "  Set AUTH_HOSTNAME=${auth_hostname}"
-  echo "  Set EPDS_LINK_BASE_URL=${proto}://${auth_hostname}/auth/verify"
+  echo "  Set EPDS_LINK_BASE_URL=${proto}://${auth_hostname}/auth/verify" # NOSONAR — HTTP is selected only for localhost development.
 }
 
 # Ask for SMTP credentials. Sets discrete vars in .env (for auth-service) and
@@ -484,8 +485,8 @@ print_next_steps() {
   echo "  grep -v '^\s*#' packages/demo/.env | grep -v '^\s*$'"
   echo ""
   echo "  IMPORTANT: For Railway, change PDS_INTERNAL_URL in auth-service from"
-  echo "  the Docker value (http://core:3000) to the Railway internal URL:"
-  echo "    http://<pds-core-service>.railway.internal:3000"
+  echo "  the Docker value (http://core:3000) to the Railway internal URL:" # NOSONAR — Docker's private network does not need TLS.
+  echo "    http://<pds-core-service>.railway.internal:3000" # NOSONAR — Railway's private network does not need TLS.
   echo "  The auth service will fail to start without a correct PDS_INTERNAL_URL."
   echo ""
   echo "  IMPORTANT: EPDS_CLIENT_PRIVATE_JWK must be DIFFERENT per demo service."
