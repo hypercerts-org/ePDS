@@ -562,6 +562,45 @@ describe('renderLoginPage sign-in error copy', () => {
   })
 })
 
+describe('renderLoginPage OTP accessibility', () => {
+  it('announces asynchronous status and error messages', () => {
+    const html = renderDefault()
+    expect(html).toContain(
+      'role="status" aria-live="polite" aria-atomic="true"',
+    )
+  })
+
+  it('describes code format and automatic submission to assistive technology', () => {
+    const numericHtml = renderDefault()
+    expect(numericHtml).toContain('aria-label="6-digit verification code"')
+    expect(numericHtml).toContain(
+      'aria-describedby="otp-subtitle otp-auto-submit"',
+    )
+    expect(numericHtml).toContain(
+      'The code submits automatically when all 6 digits are entered.',
+    )
+    expect(numericHtml).toContain('spellcheck="false"')
+
+    const alphanumericHtml = renderDefault({ otpCharset: 'alphanumeric' })
+    expect(alphanumericHtml).toContain(
+      'aria-label="6-character verification code"',
+    )
+    expect(alphanumericHtml).toContain(
+      'The code submits automatically when all 6 characters are entered.',
+    )
+  })
+
+  it('provides visible focus, themed caret colour, and reduced motion', () => {
+    const html = renderDefault()
+    expect(html).toContain(
+      '.otp-box.active { border-color: var(--focus-border); outline: 2px solid var(--focus-border); outline-offset: 2px; }',
+    )
+    expect(html).toContain('background: currentColor')
+    expect(html).toContain('@media (prefers-reduced-motion: reduce)')
+    expect(html).toContain('.otp-fake-caret { animation: none; }')
+  })
+})
+
 describe('renderLoginPage OTP verify-form double-submit latch (regression)', () => {
   it('declares the verifying flag at IIFE scope so input/paste/submit handlers share it', () => {
     const html = renderDefault()

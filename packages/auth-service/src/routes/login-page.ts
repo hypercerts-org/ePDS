@@ -575,8 +575,12 @@ export function renderLoginPage(opts: {
   // server-rendered into whichever step is initially visible and moved
   // between the two slots on step transitions; both transitions call
   // clearError() first, so it is always empty when it moves.
+  //
+  // aria-atomic keeps a message and its inline action announcing as one
+  // utterance: setFlash() swaps the region's children wholesale, and
+  // without it a screen reader may read only the changed subtree.
   const flashRegionHtml =
-    '<div id="error-msg" class="flash-msg hidden" role="status" aria-live="polite"></div>'
+    '<div id="error-msg" class="flash-msg hidden" role="status" aria-live="polite" aria-atomic="true"></div>'
 
   // Social login buttons — redirect to better-auth provider endpoints
   const socialButtonsHtml = hasSocialProviders
@@ -623,6 +627,7 @@ export function renderLoginPage(opts: {
   <style>
     :root { --muted-foreground: #666; --input-bg: #ffffff; --input-border: #e5e5e5; --page-bg: #E8E8E8; --card-bg: #F8F8F8; --card-border: #E5E5E5; --btn-secondary-border: #e5e5e5; --focus-border: ${brandColor}; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--page-bg); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; color: #1A130F; }
     .page-wrap { display: flex; flex-direction: column; align-items: stretch; max-width: 497px; width: 100%; }
     .container { background: var(--card-bg); padding: 64px 48px 40px; width: 100%; text-align: center; border-radius: 20px; border: 1px solid var(--card-border); box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
@@ -638,14 +643,15 @@ export function renderLoginPage(opts: {
        text and caret are transparent preserves iOS long-press paste. */
     .otp-boxes { position: relative; display: flex; gap: 10px; justify-content: center; margin-bottom: 24px; cursor: text; }
     .otp-box { position: relative; display: flex; align-items: center; justify-content: center; width: 48px; height: 56px; padding: 0; text-align: center; font-size: 24px; font-family: 'SF Mono', Menlo, Consolas, monospace; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: #1A130F; outline: none; transition: border-color 0.15s; }
-    .otp-box.active { border-color: var(--focus-border); }
+    .otp-box.active { border-color: var(--focus-border); outline: 2px solid var(--focus-border); outline-offset: 2px; }
     .otp-character.placeholder { color: #d4d4d4; }
-    .otp-fake-caret { display: none; position: absolute; width: 1px; height: 28px; background: #1A130F; animation: otp-caret-blink 1.2s ease-out infinite; }
+    .otp-fake-caret { display: none; position: absolute; width: 1px; height: 28px; background: currentColor; animation: otp-caret-blink 1.2s ease-out infinite; }
     .otp-box.active.empty .otp-fake-caret { display: block; }
     .otp-input-overlay { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 1; color: transparent; -webkit-text-fill-color: transparent; caret-color: transparent; background: transparent; border: 0; outline: 0; box-shadow: none; font-family: monospace; font-size: 56px; line-height: 1; letter-spacing: -0.5em; }
     .otp-input-overlay::selection { color: transparent; background: transparent; }
     .otp-input-overlay:disabled { cursor: not-allowed; }
     @keyframes otp-caret-blink { 0%, 70%, 100% { opacity: 1; } 20%, 50% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { .otp-fake-caret { animation: none; } }
     .otp-actions { display: flex; gap: 32px; justify-content: center; margin-top: 12px; }
     .btn-primary { width: 100%; padding: 15px; background: ${brandColor}; color: white; border: none; border-radius: 9999px; font-size: 15px; font-weight: 500; cursor: pointer; transition: opacity 0.15s; }
     .btn-primary:hover { opacity: 0.9; }
@@ -738,6 +744,7 @@ export function renderLoginPage(opts: {
           ? `Code already sent to ${escapeHtml(opts.loginHint.replace(/(.{2})[^@]*(@.*)/, '$1***$2'))}`
           : ''
       }</p>
+      <span id="otp-auto-submit" class="sr-only">The code submits automatically when all ${opts.otpLength} ${opts.otpCharset === 'alphanumeric' ? 'characters' : 'digits'} are entered.</span>
       <form id="form-verify-otp">
         <input type="hidden" id="otp-email" name="email" value="${escapeHtml(opts.loginHint)}">
         <div class="otp-boxes" id="otp-boxes">
@@ -749,9 +756,10 @@ export function renderLoginPage(opts: {
             .join('\n          ')}
           <input type="text" class="otp-input-overlay" id="code" name="code"
                  maxlength="${opts.otpLength}" inputmode="${inputProps.inputmode}"
-                 autocapitalize="${inputProps.autocapitalize}"
+                 autocapitalize="${inputProps.autocapitalize}" spellcheck="false"
                  autocomplete="one-time-code" pattern="${inputProps.pattern}"
-                 aria-label="Verification code" aria-describedby="otp-subtitle">
+                 aria-label="${opts.otpLength}-${opts.otpCharset === 'alphanumeric' ? 'character' : 'digit'} verification code"
+                 aria-describedby="otp-subtitle otp-auto-submit">
         </div>
         <!-- Flash slot: see #flash-slot-email. Sitting between the
              boxes and Verify puts a rejected-code message at the point
