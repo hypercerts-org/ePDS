@@ -280,3 +280,5 @@ All final branch results are green. Raw logs were retained during the exercise u
 ## Local-only guarantee
 
 No `git push`, `gh pr create`, merge, release, deployment, or remote Beads/Dolt synchronization was performed. The branches and this report exist only in the local repository/worktree.
+
+The completed Beads state was exported and committed separately on local branch `split/pr165-beads-tracking` at `afa210f`, keeping the code and assessment branches free of task-database churn.
