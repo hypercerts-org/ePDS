@@ -19,7 +19,7 @@ All 16 branches pass `git diff --check`, formatting of supported changed files, 
 
 1. **Review first / strongest value:** recovery request URI, incomplete-code guard, clear-on-resend, accessible error announcements, account action banners, safe client-name fallback.
 2. **Then focused UX correctness:** clear-email-on-back, lockout recovery, autocomplete, keyboard focus, handle-unavailable copy.
-3. **Stack handle reservation after copy:** `split/pr165-reserved-handle-check` intentionally includes and depends on `split/pr165-handle-unavailable-copy`.
+3. **Stack handle reservation after copy:** `split-pr165/reserved-handle-check` intentionally includes and depends on `split-pr165/handle-unavailable-copy`.
 4. **Optional polish:** stale-link wording, spam hint, server-rendered charset filtering, demo error wording.
 
 PR #204 substantially rewrites the segmented OTP control. Merge or settle #204 before publishing the login-page branches, then rebase those branches; their behavior remains desirable, but several will conflict textually with #204.
@@ -39,28 +39,28 @@ The assessment included commit-by-commit diffs, current-main comparison, patch-e
 
 | Branch                                       | Tip       | Base/dependency    | Recommendation                                          |
 | -------------------------------------------- | --------- | ------------------ | ------------------------------------------------------- |
-| `split/pr165-clear-email-on-back`            | `f3648cf` | `origin/main`      | Keep; low risk                                          |
-| `split/pr165-ignore-incomplete-otp-submit`   | `e244ebd` | `origin/main`      | Keep; high-value correctness                            |
-| `split/pr165-otp-lockout-recovery`           | `e52fc08` | `origin/main`      | Keep; review string-coupling carefully                  |
-| `split/pr165-recovery-link-request-uri`      | `9ad8954` | `origin/main`      | Keep; clear bug fix                                     |
-| `split/pr165-friendly-stale-link-errors`     | `74f4ff3` | `origin/main`      | Keep; moderate-priority copy improvement                |
-| `split/pr165-clear-code-on-resend`           | `ea04aea` | `origin/main`      | Keep; low risk                                          |
-| `split/pr165-spam-folder-hint`               | `9da3263` | `origin/main`      | Optional polish                                         |
-| `split/pr165-email-autocomplete`             | `0f1e7a7` | `origin/main`      | Keep; low risk                                          |
-| `split/pr165-server-otp-charset-filter`      | `27afdef` | `origin/main`      | Keep, but add browser/manual coverage before publishing |
-| `split/pr165-accessible-error-announcements` | `133d135` | `origin/main`      | Keep; high confidence                                   |
-| `split/pr165-keyboard-focus-rings`           | `23dcd0f` | `origin/main`      | Keep; high confidence                                   |
-| `split/pr165-friendly-demo-errors`           | `85c50a7` | `origin/main`      | Optional copy polish                                    |
-| `split/pr165-handle-unavailable-copy`        | `b9b5803` | `origin/main`      | Keep; prerequisite for reserved-handle stack            |
-| `split/pr165-reserved-handle-check`          | `fc58e9f` | handle-copy branch | Keep; moderate deep-import maintenance risk             |
-| `split/pr165-safe-client-name-fallback`      | `b37db61` | `origin/main`      | Keep; trust/UX hardening                                |
-| `split/pr165-account-settings-flash`         | `f5f46c9` | `origin/main`      | Keep; review issues fixed                               |
+| `split-pr165/clear-email-on-back`            | `f3648cf` | `origin/main`      | Keep; low risk                                          |
+| `split-pr165/ignore-incomplete-otp-submit`   | `e244ebd` | `origin/main`      | Keep; high-value correctness                            |
+| `split-pr165/otp-lockout-recovery`           | `e52fc08` | `origin/main`      | Keep; review string-coupling carefully                  |
+| `split-pr165/recovery-link-request-uri`      | `9ad8954` | `origin/main`      | Keep; clear bug fix                                     |
+| `split-pr165/friendly-stale-link-errors`     | `74f4ff3` | `origin/main`      | Keep; moderate-priority copy improvement                |
+| `split-pr165/clear-code-on-resend`           | `ea04aea` | `origin/main`      | Keep; low risk                                          |
+| `split-pr165/spam-folder-hint`               | `9da3263` | `origin/main`      | Optional polish                                         |
+| `split-pr165/email-autocomplete`             | `0f1e7a7` | `origin/main`      | Keep; low risk                                          |
+| `split-pr165/server-otp-charset-filter`      | `27afdef` | `origin/main`      | Keep, but add browser/manual coverage before publishing |
+| `split-pr165/accessible-error-announcements` | `133d135` | `origin/main`      | Keep; high confidence                                   |
+| `split-pr165/keyboard-focus-rings`           | `23dcd0f` | `origin/main`      | Keep; high confidence                                   |
+| `split-pr165/friendly-demo-errors`           | `85c50a7` | `origin/main`      | Optional copy polish                                    |
+| `split-pr165/handle-unavailable-copy`        | `b9b5803` | `origin/main`      | Keep; prerequisite for reserved-handle stack            |
+| `split-pr165/reserved-handle-check`          | `fc58e9f` | handle-copy branch | Keep; moderate deep-import maintenance risk             |
+| `split-pr165/safe-client-name-fallback`      | `b37db61` | `origin/main`      | Keep; trust/UX hardening                                |
+| `split-pr165/account-settings-flash`         | `f5f46c9` | `origin/main`      | Keep; review issues fixed                               |
 
-The report itself is committed on `split/pr165-assessment-report`.
+The report itself is committed on `split-pr165/assessment-report`.
 
 ## Detailed branch assessments
 
-### `split/pr165-clear-email-on-back`
+### `split-pr165/clear-email-on-back`
 
 **Scope:** Clears the previous address and focuses the email field when the user chooses **Use different email**. Includes Cucumber coverage and a focused unit assertion.
 
@@ -68,7 +68,7 @@ The report itself is committed on `split/pr165-assessment-report`.
 
 **Validation:** All checks and the full unit suite pass.
 
-### `split/pr165-ignore-incomplete-otp-submit`
+### `split-pr165/ignore-incomplete-otp-submit`
 
 **Scope:** Stops empty or partial Verify submissions before they call better-auth, focuses the first unfilled slot, and adds E2E plus unit coverage.
 
@@ -76,7 +76,7 @@ The report itself is committed on `split/pr165-assessment-report`.
 
 **Validation:** All checks and the full unit suite pass.
 
-### `split/pr165-otp-lockout-recovery`
+### `split-pr165/otp-lockout-recovery`
 
 **Scope:** Treats the exact better-auth “Too many attempts” response as a dead code, offers **Send a new code**, remembers lockout in the interactive login page until Resend succeeds, and shares honest server-rendered error guidance between Account Settings login and account recovery.
 
@@ -90,7 +90,7 @@ The report itself is committed on `split/pr165-assessment-report`.
 
 **Validation:** All checks and the full unit suite pass.
 
-### `split/pr165-recovery-link-request-uri`
+### `split-pr165/recovery-link-request-uri`
 
 **Scope:** Replaces the hard-coded recovery `/placeholder` value with the active PAR `request_uri`, threads it through render and preview call sites, and tests the round trip.
 
@@ -98,7 +98,7 @@ The report itself is committed on `split/pr165-assessment-report`.
 
 **Validation:** All checks and the full unit suite pass.
 
-### `split/pr165-friendly-stale-link-errors`
+### `split-pr165/friendly-stale-link-errors`
 
 **Scope:** Replaces raw “Missing request_uri parameter” pages on direct/stale authorize and recovery visits with actionable explanations. E2E assertions inspect visible text only, avoiding the original review finding where hidden fields or scripts could cause false positives.
 
@@ -106,7 +106,7 @@ The report itself is committed on `split/pr165-assessment-report`.
 
 **Validation:** All checks and the full unit suite pass.
 
-### `split/pr165-clear-code-on-resend`
+### `split-pr165/clear-code-on-resend`
 
 **Scope:** Clears stale OTP slots and focuses the first slot after a successful resend, with unit coverage.
 
@@ -114,7 +114,7 @@ The report itself is committed on `split/pr165-assessment-report`.
 
 **Validation:** All checks and the full unit suite pass.
 
-### `split/pr165-spam-folder-hint`
+### `split-pr165/spam-folder-hint`
 
 **Scope:** Adds a small “check your spam folder” hint below the email-code form.
 
@@ -122,7 +122,7 @@ The report itself is committed on `split/pr165-assessment-report`.
 
 **Validation:** All checks and the full unit suite pass.
 
-### `split/pr165-email-autocomplete`
+### `split-pr165/email-autocomplete`
 
 **Scope:** Adds explicit email autocomplete tokens to all email entry forms. The reconstruction also changes the shared email/handle field to `username` autocomplete in handle mode and back to `email` when toggled, with unit coverage.
 
@@ -130,7 +130,7 @@ The report itself is committed on `split/pr165-assessment-report`.
 
 **Validation:** All checks and the full unit suite pass.
 
-### `split/pr165-server-otp-charset-filter`
+### `split-pr165/server-otp-charset-filter`
 
 **Scope:** Filters and uppercases the full-length OTP inputs used by Account Settings login and account recovery. It deliberately excludes the segmented login control because PR #204 replaces that control with a more accessible single-input architecture.
 
@@ -138,7 +138,7 @@ The report itself is committed on `split/pr165-assessment-report`.
 
 **Validation:** Formatting, lint, typecheck, and the full unit suite pass.
 
-### `split/pr165-accessible-error-announcements`
+### `split-pr165/accessible-error-announcements`
 
 **Scope:** Adds appropriate live-region/alert semantics to interactive auth errors, server-rendered auth errors, demo errors, and the shared error renderer.
 
@@ -146,7 +146,7 @@ The report itself is committed on `split/pr165-assessment-report`.
 
 **Validation:** All checks and the full unit suite pass.
 
-### `split/pr165-keyboard-focus-rings`
+### `split-pr165/keyboard-focus-rings`
 
 **Scope:** Adds visible `:focus-visible` outlines to primary and secondary controls across login, recovery, and handle selection.
 
@@ -154,7 +154,7 @@ The report itself is committed on `split/pr165-assessment-report`.
 
 **Validation:** All checks and the full unit suite pass.
 
-### `split/pr165-friendly-demo-errors`
+### `split-pr165/friendly-demo-errors`
 
 **Scope:** Rewrites known demo-client error banners in plain language and removes instructions such as “check server logs” from end-user UI.
 
@@ -162,7 +162,7 @@ The report itself is committed on `split/pr165-assessment-report`.
 
 **Validation:** All checks and the full unit suite pass.
 
-### `split/pr165-handle-unavailable-copy`
+### `split-pr165/handle-unavailable-copy`
 
 **Scope:** Uses “not available” consistently for submit-time errors and the live handle check rather than claiming every rejection means another user already took the handle. Adds focused render coverage.
 
@@ -170,9 +170,9 @@ The report itself is committed on `split/pr165-assessment-report`.
 
 **Validation:** All checks and the full unit suite pass.
 
-### `split/pr165-reserved-handle-check`
+### `split-pr165/reserved-handle-check`
 
-**Scope:** Extends the live availability result to include names rejected by upstream’s reserved-handle policy. It is stacked on `split/pr165-handle-unavailable-copy`.
+**Scope:** Extends the live availability result to include names rejected by upstream’s reserved-handle policy. It is stacked on `split-pr165/handle-unavailable-copy`.
 
 **Corrections made during reconstruction:**
 
@@ -185,7 +185,7 @@ The report itself is committed on `split/pr165-assessment-report`.
 
 **Validation:** All checks and the full unit suite pass, including focused reserved-handle tests.
 
-### `split/pr165-safe-client-name-fallback`
+### `split-pr165/safe-client-name-fallback`
 
 **Scope:** Prevents malformed or non-HTTP client IDs from becoming visible application names; callers fall back to neutral copy instead. Includes shared-library tests.
 
@@ -193,7 +193,7 @@ The report itself is committed on `split/pr165-assessment-report`.
 
 **Validation:** All checks and the full unit suite pass.
 
-### `split/pr165-account-settings-flash`
+### `split-pr165/account-settings-flash`
 
 **Scope:** Resolves whitelisted success/error query codes into accessible Account Settings banners and acknowledges backup-email, handle, and session actions.
 
@@ -214,41 +214,41 @@ The report itself is committed on `split/pr165-assessment-report`.
 | --- | -------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | 1   | `ccf4ece` hide Resend when sign-in cannot recover  | Already landed, refined in PR #187                                                     |
 | 2   | `a5cb519` demo cookie/error handling               | Already landed, substantially reworked in PR #187                                      |
-| 3   | `988be35` clear/focus different email              | `split/pr165-clear-email-on-back`                                                      |
-| 4   | `073da54` ignore empty Verify                      | `split/pr165-ignore-incomplete-otp-submit`                                             |
-| 5   | `4e23ee1` lockout inline resend                    | `split/pr165-otp-lockout-recovery`                                                     |
+| 3   | `988be35` clear/focus different email              | `split-pr165/clear-email-on-back`                                                      |
+| 4   | `073da54` ignore empty Verify                      | `split-pr165/ignore-incomplete-otp-submit`                                             |
+| 5   | `4e23ee1` lockout inline resend                    | `split-pr165/otp-lockout-recovery`                                                     |
 | 6   | `f6a243c` classify PDS timeout text                | Drop; ambiguous string inference and unsafe original logging                           |
-| 7   | `4a899b6` stale recovery wording                   | `split/pr165-friendly-stale-link-errors`                                               |
-| 8   | `f01f703` post-lockout latch                       | `split/pr165-otp-lockout-recovery`                                                     |
-| 9   | `7a177e5` stale authorize wording                  | `split/pr165-friendly-stale-link-errors`                                               |
-| 10  | `7dbd5d7` real recovery request URI                | `split/pr165-recovery-link-request-uri`                                                |
+| 7   | `4a899b6` stale recovery wording                   | `split-pr165/friendly-stale-link-errors`                                               |
+| 8   | `f01f703` post-lockout latch                       | `split-pr165/otp-lockout-recovery`                                                     |
+| 9   | `7a177e5` stale authorize wording                  | `split-pr165/friendly-stale-link-errors`                                               |
+| 10  | `7dbd5d7` real recovery request URI                | `split-pr165/recovery-link-request-uri`                                                |
 | 11  | `11ea1cc` login UX guard tests                     | Distributed to the clear-email, incomplete-submit, lockout, and recovery-link branches |
 | 12  | `5eddf75` segmented paste filtering                | Superseded by PR #204                                                                  |
 | 13  | `a3f594a` segmented keystroke filtering            | Superseded by PR #204                                                                  |
-| 14  | `4aab907` Account Settings lockout copy            | `split/pr165-otp-lockout-recovery`                                                     |
-| 15  | `3b82b31` Account Settings error tests             | `split/pr165-otp-lockout-recovery`                                                     |
+| 14  | `4aab907` Account Settings lockout copy            | `split-pr165/otp-lockout-recovery`                                                     |
+| 15  | `3b82b31` Account Settings error tests             | `split-pr165/otp-lockout-recovery`                                                     |
 | 16  | `010f0c0` classify token `invalid_grant` as expiry | Drop; `invalid_grant` has causes other than timeout                                    |
-| 17  | `f900a9a` shared server OTP error picker           | `split/pr165-otp-lockout-recovery`                                                     |
-| 18  | `e0c367b` clear code after resend                  | `split/pr165-clear-code-on-resend`                                                     |
-| 19  | `74459b8` spam-folder hint                         | `split/pr165-spam-folder-hint`                                                         |
-| 20  | `452eec3` deduplicate error-picker tests           | `split/pr165-otp-lockout-recovery`                                                     |
-| 21  | `453d9a5` email autocomplete                       | `split/pr165-email-autocomplete`, corrected for handle mode                            |
-| 22  | `35e76d2` announce auth errors                     | `split/pr165-accessible-error-announcements`                                           |
-| 23  | `c1cd111` friendly demo errors                     | `split/pr165-friendly-demo-errors`                                                     |
-| 24  | `619eedf` server-rendered charset filtering        | `split/pr165-server-otp-charset-filter`                                                |
-| 25  | `d3e75a2` handle unavailable wording               | `split/pr165-handle-unavailable-copy`, broadened to all picker surfaces                |
+| 17  | `f900a9a` shared server OTP error picker           | `split-pr165/otp-lockout-recovery`                                                     |
+| 18  | `e0c367b` clear code after resend                  | `split-pr165/clear-code-on-resend`                                                     |
+| 19  | `74459b8` spam-folder hint                         | `split-pr165/spam-folder-hint`                                                         |
+| 20  | `452eec3` deduplicate error-picker tests           | `split-pr165/otp-lockout-recovery`                                                     |
+| 21  | `453d9a5` email autocomplete                       | `split-pr165/email-autocomplete`, corrected for handle mode                            |
+| 22  | `35e76d2` announce auth errors                     | `split-pr165/accessible-error-announcements`                                           |
+| 23  | `c1cd111` friendly demo errors                     | `split-pr165/friendly-demo-errors`                                                     |
+| 24  | `619eedf` server-rendered charset filtering        | `split-pr165/server-otp-charset-filter`                                                |
+| 25  | `d3e75a2` handle unavailable wording               | `split-pr165/handle-unavailable-copy`, broadened to all picker surfaces                |
 | 26  | `97e5acb` demo-cookie E2E de-flake                 | Superseded by PR #187’s rewritten coverage                                             |
 | 27  | `fe13498` segmented autofill distribution          | Superseded by PR #204                                                                  |
-| 28  | `83de694` reserved handle live check               | `split/pr165-reserved-handle-check`, reimplemented                                     |
-| 29  | `50077c0` login focus rings                        | `split/pr165-keyboard-focus-rings`                                                     |
-| 30  | `645a2fb` remaining auth focus rings               | `split/pr165-keyboard-focus-rings`                                                     |
-| 31  | `1493801` focus-ring changeset                     | `split/pr165-keyboard-focus-rings`                                                     |
-| 32  | `116f833` demo alert semantics                     | `split/pr165-accessible-error-announcements`                                           |
-| 33  | `fea121e` reserved-handle helper refactor          | `split/pr165-reserved-handle-check`, reimplemented                                     |
-| 34  | `5fc9837` shared error alert semantics             | `split/pr165-accessible-error-announcements`                                           |
-| 35  | `3ed32b9` safe malformed-client fallback           | `split/pr165-safe-client-name-fallback`                                                |
-| 36  | `40ad0e0` Account Settings banners                 | `split/pr165-account-settings-flash`, corrected                                        |
-| 37  | `473f6a0` flash resolver refactor                  | `split/pr165-account-settings-flash`                                                   |
+| 28  | `83de694` reserved handle live check               | `split-pr165/reserved-handle-check`, reimplemented                                     |
+| 29  | `50077c0` login focus rings                        | `split-pr165/keyboard-focus-rings`                                                     |
+| 30  | `645a2fb` remaining auth focus rings               | `split-pr165/keyboard-focus-rings`                                                     |
+| 31  | `1493801` focus-ring changeset                     | `split-pr165/keyboard-focus-rings`                                                     |
+| 32  | `116f833` demo alert semantics                     | `split-pr165/accessible-error-announcements`                                           |
+| 33  | `fea121e` reserved-handle helper refactor          | `split-pr165/reserved-handle-check`, reimplemented                                     |
+| 34  | `5fc9837` shared error alert semantics             | `split-pr165/accessible-error-announcements`                                           |
+| 35  | `3ed32b9` safe malformed-client fallback           | `split-pr165/safe-client-name-fallback`                                                |
+| 36  | `40ad0e0` Account Settings banners                 | `split-pr165/account-settings-flash`, corrected                                        |
+| 37  | `473f6a0` flash resolver refactor                  | `split-pr165/account-settings-flash`                                                   |
 
 ## Why the dropped changes should stay dropped
 
@@ -281,4 +281,4 @@ All final branch results are green. Raw logs were retained during the exercise u
 
 No `git push`, `gh pr create`, merge, release, deployment, or remote Beads/Dolt synchronization was performed. The branches and this report exist only in the local repository/worktree.
 
-The completed Beads state was exported and committed separately on local branch `split/pr165-beads-tracking` at `afa210f`, keeping the code and assessment branches free of task-database churn.
+The completed Beads state was exported and committed separately on local branch `split-pr165/beads-tracking` at `afa210f`, keeping the code and assessment branches free of task-database churn.
