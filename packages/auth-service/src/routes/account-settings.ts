@@ -43,6 +43,10 @@ export const FLASH_ERROR_MESSAGES: Record<string, string> = {
   account_not_found: "We couldn't find an account for your sign-in.",
   send_failed:
     "We couldn't send the verification email. Please try again in a moment.",
+  backup_remove_failed:
+    "We couldn't remove that backup email. Please try again in a moment.",
+  revoke_failed:
+    "We couldn't revoke that session. Please try again in a moment.",
   verify_failed:
     'That verification link is no longer valid. Add the backup email again to receive a fresh link.',
   invalid_handle:
@@ -280,15 +284,26 @@ export function createAccountSettingsRouter(
     async (req: Request, res: Response) => {
       const session = res.locals.betterAuthSession
       const email = ((req.body.email as string) || '').trim().toLowerCase()
+      if (!email) {
+        res.redirect(303, '/account?error=invalid_email')
+        return
+      }
       const did = await getDidByEmail(
         session.user.email,
         pdsUrl,
         internalSecret,
       )
-      if (did && email) {
-        ctx.db.removeBackupEmail(did, email)
+      if (!did) {
+        res.redirect(303, '/account?error=account_not_found')
+        return
       }
-      res.redirect(303, '/account?success=backup_removed')
+      try {
+        ctx.db.removeBackupEmail(did, email)
+        res.redirect(303, '/account?success=backup_removed')
+      } catch (err) {
+        logger.error({ err }, 'Failed to remove backup email')
+        res.redirect(303, '/account?error=backup_remove_failed')
+      }
     },
   )
 
@@ -298,17 +313,20 @@ export function createAccountSettingsRouter(
     requireAuth,
     async (req: Request, res: Response) => {
       const tokenToRevoke = req.body.session_token as string
-      if (tokenToRevoke) {
-        try {
-          await auth.api.revokeSession({
-            body: { token: tokenToRevoke },
-            headers: fromNodeHeaders(req.headers),
-          })
-        } catch (err) {
-          logger.warn({ err }, 'Failed to revoke session')
-        }
+      if (!tokenToRevoke) {
+        res.redirect(303, '/account?error=revoke_failed')
+        return
       }
-      res.redirect(303, '/account?success=session_revoked')
+      try {
+        await auth.api.revokeSession({
+          body: { token: tokenToRevoke },
+          headers: fromNodeHeaders(req.headers),
+        })
+        res.redirect(303, '/account?success=session_revoked')
+      } catch (err) {
+        logger.warn({ err }, 'Failed to revoke session')
+        res.redirect(303, '/account?error=revoke_failed')
+      }
     },
   )
 

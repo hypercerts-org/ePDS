@@ -34,6 +34,8 @@ describe('account-settings flash messages', () => {
       'already_primary',
       'account_not_found',
       'send_failed',
+      'backup_remove_failed',
+      'revoke_failed',
       'verify_failed',
       'invalid_handle',
       'handle_failed',
