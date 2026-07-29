@@ -37,24 +37,26 @@ The assessment included commit-by-commit diffs, current-main comparison, patch-e
 
 ## Branch overview
 
-| Branch                                       | Tip       | Base/dependency    | Recommendation                                          |
-| -------------------------------------------- | --------- | ------------------ | ------------------------------------------------------- |
-| `split-pr165/clear-email-on-back`            | `f3648cf` | `origin/main`      | Keep; low risk                                          |
-| `split-pr165/ignore-incomplete-otp-submit`   | `e244ebd` | `origin/main`      | Keep; high-value correctness                            |
-| `split-pr165/otp-lockout-recovery`           | `e52fc08` | `origin/main`      | Keep; review string-coupling carefully                  |
-| `split-pr165/recovery-link-request-uri`      | `9ad8954` | `origin/main`      | Keep; clear bug fix                                     |
-| `split-pr165/friendly-stale-link-errors`     | `74f4ff3` | `origin/main`      | Keep; moderate-priority copy improvement                |
-| `split-pr165/clear-code-on-resend`           | `ea04aea` | `origin/main`      | Keep; low risk                                          |
-| `split-pr165/spam-folder-hint`               | `9da3263` | `origin/main`      | Optional polish                                         |
-| `split-pr165/email-autocomplete`             | `0f1e7a7` | `origin/main`      | Keep; low risk                                          |
-| `split-pr165/server-otp-charset-filter`      | `27afdef` | `origin/main`      | Keep, but add browser/manual coverage before publishing |
-| `split-pr165/accessible-error-announcements` | `133d135` | `origin/main`      | Keep; high confidence                                   |
-| `split-pr165/keyboard-focus-rings`           | `23dcd0f` | `origin/main`      | Keep; high confidence                                   |
-| `split-pr165/friendly-demo-errors`           | `85c50a7` | `origin/main`      | Optional copy polish                                    |
-| `split-pr165/handle-unavailable-copy`        | `b9b5803` | `origin/main`      | Keep; prerequisite for reserved-handle stack            |
-| `split-pr165/reserved-handle-check`          | `fc58e9f` | handle-copy branch | Keep; moderate deep-import maintenance risk             |
-| `split-pr165/safe-client-name-fallback`      | `b37db61` | `origin/main`      | Keep; trust/UX hardening                                |
-| `split-pr165/account-settings-flash`         | `f5f46c9` | `origin/main`      | Keep; review issues fixed                               |
+All branch names in this table are under `split-pr165/`. Priorities are: **P0** = publish first, **P1** = publish next, **P2** = worthwhile follow-up, and **P3** = optional polish.
+
+| Branch                           |              Commits | Benefit                                                       | Complexity                                                  | Recommendation                                  | Priority |
+| -------------------------------- | -------------------: | ------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------- | :------: |
+| `clear-email-on-back`            |                    2 | Medium — makes account switching start cleanly                | Low — local state reset plus tests                          | Keep; rebase after #204                         |    P1    |
+| `ignore-incomplete-otp-submit`   |                    2 | High — avoids false errors and wasted attempts                | Low — client-side completeness guard                        | Keep; rebase after #204                         |    P0    |
+| `otp-lockout-recovery`           |                    8 | High — gives locked-out users a recovery path                 | High — three surfaces and string-based error classification | Keep; scrutinize coupling and rebase after #204 |    P1    |
+| `recovery-link-request-uri`      |                    2 | High — repairs the return to the active auth flow             | Medium — render plumbing plus E2E coverage                  | Keep                                            |    P0    |
+| `friendly-stale-link-errors`     |                    3 | Medium — turns dead links into actionable guidance            | Medium — two flows and E2E coverage                         | Keep                                            |    P2    |
+| `clear-code-on-resend`           |                    1 | Medium — prevents stale-code confusion after resend           | Low — local input reset                                     | Keep; rebase after #204                         |    P1    |
+| `spam-folder-hint`               |                    1 | Low — may reduce email-delivery support friction              | Low — copy and styling only                                 | Optional; revisit after #204                    |    P3    |
+| `email-autocomplete`             |                    2 | Medium — improves autofill and password-manager behavior      | Low — input attributes and mode toggle                      | Keep; rebase after #204                         |    P1    |
+| `server-otp-charset-filter`      |                    1 | Medium — blocks impossible OTP characters early               | Low — two inline input filters                              | Keep after manual browser checks                |    P2    |
+| `accessible-error-announcements` |                    3 | High — makes errors available to screen-reader users          | Low — standard alert/live-region semantics                  | Keep                                            |    P0    |
+| `keyboard-focus-rings`           |                    3 | High — restores visible keyboard navigation                   | Low — CSS-only behavior                                     | Keep                                            |    P1    |
+| `friendly-demo-errors`           |                    1 | Medium — replaces developer wording with user guidance        | Low — known-error copy mapping                              | Optional                                        |    P3    |
+| `handle-unavailable-copy`        |                    2 | Medium — avoids falsely claiming a handle is taken            | Low — copy normalization plus tests                         | Keep before reserved-handle check               |    P1    |
+| `reserved-handle-check`          | 1 unique (3 stacked) | High — prevents false “Available” results                     | Medium — depends on a version-pinned upstream deep import   | Keep, stacked after handle-unavailable copy     |    P1    |
+| `safe-client-name-fallback`      |                    1 | High — avoids presenting attacker-controlled IDs as app names | Low — fallback logic plus tests                             | Keep                                            |    P0    |
+| `account-settings-flash`         |                    3 | High — gives truthful results for account actions             | Medium — multiple route actions and message states          | Keep                                            |    P0    |
 
 The report itself is committed on `split-pr165/assessment-report`.
 
