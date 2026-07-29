@@ -626,7 +626,9 @@ describe('buildChooserEnrichmentScript account row scoping', () => {
     const emailLabel = findEmailLabel(wrap)
 
     expect(emailLabel).toBeInstanceOf(FakeElement)
-    expect(emailLabel?.textContent).toBe('alice@example.test')
+    // Trimmed: the chooser label is rendered with a leading space for
+    // visual separation from the handle, which is presentation, not identity.
+    expect(emailLabel?.textContent.trim()).toBe('alice@example.test')
     expect(handle.classList.contains('epds-handle-label')).toBe(true)
     expect(handle.style.display).toBeUndefined()
     expect(row.getAttribute('aria-label')).toBe('Sign in as alice@example.test')
@@ -667,7 +669,7 @@ describe('buildChooserEnrichmentScript account row scoping', () => {
     const emailLabel = findEmailLabel(wrap)
     const handleDescription = findHiddenHandleDescription(row)
 
-    expect(emailLabel?.textContent).toBe('alice@example.test')
+    expect(emailLabel?.textContent.trim()).toBe('alice@example.test')
     expect(handle.style.display).toBe('none')
     expect(handleDescription?.textContent).toBe('Underlying handle: alice.test')
     expect(row.getAttribute('aria-describedby')).toBe(handleDescription?.id)
@@ -693,7 +695,7 @@ describe('buildChooserEnrichmentScript account row scoping', () => {
     const emailLabel = findEmailLabel(wrap)
     const handleDescription = findHiddenHandleDescription(row)
 
-    expect(emailLabel?.textContent).toBe('alice@example.test')
+    expect(emailLabel?.textContent.trim()).toBe('alice@example.test')
     expect(handle.style.display).toBe('none')
     expect(handleDescription?.textContent).toBe('Underlying handle: alice.test')
     expect(row.getAttribute('aria-describedby')).toBe(handleDescription?.id)

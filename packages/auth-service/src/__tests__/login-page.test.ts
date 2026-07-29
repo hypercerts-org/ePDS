@@ -587,7 +587,18 @@ describe('renderLoginPage email form readiness gate', () => {
 
   it('does not use a blind timer for readiness', () => {
     const html = renderDefault()
-    expect(html).not.toMatch(/set(?:Timeout|Interval)\s*\(/)
+    // Scoped to the gap between the last handler registration and the
+    // enable, rather than the whole page: the page legitimately uses
+    // setInterval elsewhere for the PAR heartbeat. What matters is that
+    // the enable is driven by handler setup completing, not by a timer.
+    const enableIdx = html.indexOf('sendOtpBtn.disabled = false;')
+    const lastHandlerIdx = html.lastIndexOf("addEventListener('click'")
+
+    expect(lastHandlerIdx).toBeGreaterThan(0)
+    expect(enableIdx).toBeGreaterThan(lastHandlerIdx)
+    expect(html.slice(lastHandlerIdx, enableIdx)).not.toMatch(
+      /set(?:Timeout|Interval)\s*\(/,
+    )
   })
 })
 

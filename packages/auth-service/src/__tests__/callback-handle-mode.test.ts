@@ -120,6 +120,11 @@ function verifySignedCallbackUrl(url: URL): boolean {
     ...(url.searchParams.has('handle')
       ? { handle: url.searchParams.get('handle') ?? '' }
       : {}),
+    // /auth/complete signs client_id too (so a dead-PAR clean exit can still
+    // reach the right client); omitting it here would fail verification.
+    ...(url.searchParams.has('client_id')
+      ? { client_id: url.searchParams.get('client_id') ?? '' }
+      : {}),
     ...(url.searchParams.has('epds_handle_mode')
       ? { epds_handle_mode: url.searchParams.get('epds_handle_mode') ?? '' }
       : {}),
