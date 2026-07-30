@@ -37,6 +37,12 @@ Skip changesets for:
   routes under `/_internal/`). These are contributor-facing, not
   consumer-facing.
 
+Create one changeset per coherent user-facing change, not one per file,
+route, or UI surface. Closely related fixes that ship together — such as
+the same error-state improvement across sign-in and recovery forms —
+share one concise changeset. Split them only when consumers could
+meaningfully adopt or release them independently.
+
 If in doubt, add one. An "empty" changeset (intentionally no
 release) can be created with `pnpm changeset add --empty` to
 document the decision.
