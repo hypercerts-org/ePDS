@@ -94,7 +94,7 @@ The report itself is committed on `split-pr165/assessment-report`.
 
 ### `split-pr165/recovery-link-request-uri`
 
-**Scope:** Replaces the hard-coded recovery `/placeholder` value with the active PAR `request_uri`, threads it through render and preview call sites, and tests the complete recovery → **Back to sign in** → restored OTP-form round trip in the browser.
+**Scope:** Replaces the hard-coded recovery `/placeholder` value with the active PAR `request_uri`, threads it through render and preview call sites, and tests the complete recovery → **Back to sign in** → restored live sign-in page round trip in the browser.
 
 **Assessment:** Keep with high priority. The placeholder is a concrete functional bug: recovery may succeed, but **Back to sign in** cannot return to the originating authorization request.
 
