@@ -329,3 +329,39 @@ Then(
     await assertNoEmailFor(this.backupEmail)
   },
 )
+
+// ---------------------------------------------------------------------------
+// Stale-recovery-link UX
+// ---------------------------------------------------------------------------
+
+When(
+  'the user navigates directly to the recovery page without an active sign-in',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    await page.goto(`${testEnv.authUrl}/auth/recover`)
+  },
+)
+
+Then(
+  'the page explains that recovery has to start from the sign-in page',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    await expect(page.locator('body')).toContainText(
+      /recovery has to be started from the sign-in page/i,
+      { timeout: 10_000 },
+    )
+  },
+)
+
+Then(
+  'the page does not mention the technical field name {string}',
+  async function (this: EpdsWorld, fieldName: string) {
+    const page = getPage(this)
+    const body = await page.locator('body').innerText()
+    if (body.toLowerCase().includes(fieldName.toLowerCase())) {
+      throw new Error(
+        `Expected the page to not surface the technical field name "${fieldName}", but its body text contained it. Page body: ${body}`,
+      )
+    }
+  },
+)
