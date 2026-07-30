@@ -40,9 +40,6 @@
 import {
   escapeHtml,
   renderPreviewIndexPage,
-  resolveHandleMode,
-  VALID_HANDLE_MODES,
-  type ClientMetadata,
   type HandleMode,
 } from '@certified-app/shared'
 import { buildChooserEnrichmentScript } from '../chooser-enrichment.js'
@@ -55,6 +52,7 @@ import {
   readClientIdQuery,
   renderHydration,
   resolveClientForPreview,
+  resolveQueryHandleMode,
   type PreviewAuthorizeFixture,
   type PreviewMetadataDeps,
   type RequestLike,
@@ -140,23 +138,6 @@ async function renderConsentHtml(opts: {
 }
 
 type PreviewConsentDeps = PreviewMetadataDeps
-
-function resolveQueryHandleMode(
-  req: RequestLike,
-  metadata: ClientMetadata,
-): HandleMode {
-  const queryMode =
-    typeof req.query.epds_handle_mode === 'string'
-      ? req.query.epds_handle_mode
-      : undefined
-  const rawMetaMode = metadata.epds_handle_mode
-  const metaMode =
-    typeof rawMetaMode === 'string' &&
-    (VALID_HANDLE_MODES as readonly string[]).includes(rawMetaMode)
-      ? rawMetaMode
-      : undefined
-  return resolveHandleMode(queryMode, metaMode)
-}
 
 /**
  * Express handler factory: creates a GET /preview/consent handler if the
