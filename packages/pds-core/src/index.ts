@@ -875,6 +875,7 @@ async function main() {
     resolveClientMetadata,
     resolveClientIdFromRequestUri,
     authOrigin,
+    logger,
   })
 
   pds.app.use(chooserEnrichmentMiddleware)
