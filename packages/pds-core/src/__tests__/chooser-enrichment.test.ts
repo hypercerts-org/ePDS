@@ -156,8 +156,8 @@ class FakeElement {
     this.eventListeners.set(event, listeners)
   }
 
-  dispatchEvent(eventName: string): FakeEvent {
-    const event = new FakeEvent()
+  dispatchEvent(eventName: string, init: { key?: string } = {}): FakeEvent {
+    const event = new FakeEvent(init.key)
     for (const listener of this.eventListeners.get(eventName) ?? []) {
       listener(event)
     }
@@ -232,6 +232,8 @@ class FakeEvent {
   defaultPrevented = false
   propagationStopped = false
 
+  constructor(readonly key?: string) {}
+
   preventDefault(): void {
     this.defaultPrevented = true
   }
@@ -254,6 +256,18 @@ class FakeDocument {
     return id === 'root' ? this.root : null
   }
 
+  /**
+   * Deliberate divergence from the browser: this snapshots the descendant
+   * list up front, whereas a real TreeWalker is live. The enrichment script
+   * inserts icons, tooltips and email labels *while* walking, so a browser
+   * walker visits those inserted nodes and this fake does not.
+   *
+   * Benign today because nothing the script inserts can match
+   * isConsentIdentityElement() (which requires a <b>/<strong> in an approved
+   * consent phrasing) or matchAccountIdentifier(). If either ever loosens,
+   * this fake would hide the resulting re-entrancy, so make it live rather
+   * than trusting that the tests still cover the browser's behaviour.
+   */
   createTreeWalker(root: FakeElement): { nextNode: () => FakeElement | null } {
     const elements = root.descendants()
     let index = 0
@@ -1257,6 +1271,46 @@ describe('buildChooserEnrichmentScript consent identity enrichment', () => {
     icon.dispatchEvent('click')
     expect(tooltip.hidden).toBe(true)
     expect(icon.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('dismisses the consent tooltip on Escape, including when pinned', () => {
+    const document = new FakeDocument()
+    const { container } = createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'alice.test',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(document, { __sessions: selectedAliceSession() })
+
+    const { icon, tooltip } = findConsentIdentityTooltip(container)
+
+    // Pinned is the case that matters: hide() bails out early while
+    // pinned, so before the Escape handler a keyboard user had no way
+    // to dismiss it without moving focus (WCAG 1.4.13 Dismissible).
+    icon.dispatchEvent('click')
+    expect(tooltip.hidden).toBe(false)
+
+    const escape = icon.dispatchEvent('keyup', { key: 'Escape' })
+    expect(tooltip.hidden).toBe(true)
+    expect(icon.getAttribute('aria-expanded')).toBe('false')
+    expect(escape.propagationStopped).toBe(true)
+
+    // Unpinned hover/focus content is dismissible the same way.
+    icon.dispatchEvent('focus')
+    expect(tooltip.hidden).toBe(false)
+    icon.dispatchEvent('keyup', { key: 'Escape' })
+    expect(tooltip.hidden).toBe(true)
+
+    // Other keys leave it alone, and Escape on an already-hidden tooltip
+    // does not claim the event from the surrounding page.
+    icon.dispatchEvent('focus')
+    icon.dispatchEvent('keyup', { key: 'a' })
+    expect(tooltip.hidden).toBe(false)
+    icon.dispatchEvent('keyup', { key: 'Escape' })
+    const escapeWhenHidden = icon.dispatchEvent('keyup', { key: 'Escape' })
+    expect(escapeWhenHidden.propagationStopped).toBe(false)
   })
 
   it('keeps the tooltip pinned open when touch focus fires before click', () => {

@@ -241,6 +241,19 @@ export function buildChooserEnrichmentScript(): string {
         icon.setAttribute('aria-expanded', 'false');
       }
     });
+    // WCAG 1.4.13 (Content on Hover or Focus) requires hover/focus content
+    // to be dismissible without moving the pointer or focus. Clearing
+    // pinned first matters: hide() returns early while pinned, so without
+    // it a keyboard user who pinned the tooltip has no way to close it.
+    // keyup rather than keydown so we do not race the surrounding page for
+    // an Escape it may also act on.
+    icon.addEventListener('keyup', function(e) {
+      if (e.key !== 'Escape' && e.key !== 'Esc') return;
+      if (tooltip.hidden) return;
+      e.stopPropagation();
+      pinned = false;
+      hide();
+    });
 
     el.insertAdjacentElement('afterend', tooltip);
     el.insertAdjacentElement('afterend', icon);
