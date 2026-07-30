@@ -1,5 +1,5 @@
 import { Given, Then, When } from '@cucumber/cucumber'
-import { expect, type Route } from '@playwright/test'
+import { expect, type Request, type Route } from '@playwright/test'
 import { testEnv } from '../support/env.js'
 import type { EpdsWorld } from '../support/world.js'
 import {
@@ -968,4 +968,62 @@ Then('the email input is empty and focused', async function (this: EpdsWorld) {
   const input = page.locator('#email')
   await expect(input).toHaveValue('', { timeout: 5_000 })
   await expect(input).toBeFocused({ timeout: 5_000 })
+})
+
+// ---------------------------------------------------------------------------
+// Incomplete-OTP submit guard
+// ---------------------------------------------------------------------------
+
+async function clickVerifyWithIncompleteOtp(
+  world: EpdsWorld,
+  digitCount: number,
+): Promise<void> {
+  const page = getPage(world)
+  const otpBoxes = page.locator('.otp-box')
+  for (let index = 0; index < digitCount; index += 1) {
+    await otpBoxes.nth(index).fill(String(index + 1))
+  }
+
+  let verifyRequestCount = 0
+  const countVerifyRequest = (request: Request) => {
+    if (request.url().includes('/sign-in/email-otp')) {
+      verifyRequestCount += 1
+    }
+  }
+  page.on('request', countVerifyRequest)
+  try {
+    await page.click('#form-verify-otp button[type=submit]')
+    await page.waitForTimeout(1_000)
+  } finally {
+    page.off('request', countVerifyRequest)
+  }
+  world.otpVerifyRequestCount = verifyRequestCount
+}
+
+When(
+  'the user clicks the Verify button without entering a code',
+  async function (this: EpdsWorld) {
+    await clickVerifyWithIncompleteOtp(this, 0)
+  },
+)
+
+When(
+  'the user enters two OTP digits and clicks the Verify button',
+  async function (this: EpdsWorld) {
+    await clickVerifyWithIncompleteOtp(this, 2)
+  },
+)
+
+Then('no OTP verification request is sent', function (this: EpdsWorld) {
+  expect(this.otpVerifyRequestCount).toBe(0)
+})
+
+Then('no "Invalid OTP" error is shown', async function (this: EpdsWorld) {
+  const page = getPage(this)
+  const errorText = await page.locator('#error-msg').textContent()
+  if (errorText && /invalid otp/i.test(errorText)) {
+    throw new Error(
+      `Expected no "Invalid OTP" error after incomplete submit but saw: "${errorText}"`,
+    )
+  }
 })

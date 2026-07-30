@@ -403,6 +403,32 @@ Feature: Passwordless authentication via email OTP
     When the user clicks "Use different email"
     Then the email input is empty and focused
 
+  # Clicking Verify before the code was complete used to flash "Invalid OTP",
+  # which is dishonest: the user had not entered an invalid full code. It also
+  # burned a real call to better-auth's /sign-in/email-otp endpoint, which
+  # counts against the rate-limiter. Cover both the empty and partial states.
+  @email @verify-incomplete-otp
+  Scenario: Submitting Verify with an empty code does not send a verification request
+    When the demo client initiates an OAuth login
+    Then the browser is redirected to the auth service login page
+    And the login page displays an email input form
+    When the user enters a unique test email and submits
+    Then the login page shows an OTP verification form
+    When the user clicks the Verify button without entering a code
+    Then no OTP verification request is sent
+    And no "Invalid OTP" error is shown
+
+  @email @verify-incomplete-otp
+  Scenario: Submitting Verify with a partial code does not send a verification request
+    When the demo client initiates an OAuth login
+    Then the browser is redirected to the auth service login page
+    And the login page displays an email input form
+    When the user enters a unique test email and submits
+    Then the login page shows an OTP verification form
+    When the user enters two OTP digits and clicks the Verify button
+    Then no OTP verification request is sent
+    And no "Invalid OTP" error is shown
+
   @email @demo-cookie-expiry @bug-report
   Scenario: Demo client's OAuth cookie has expired by the time of callback — useful error, not generic auth_failed
     When the demo client starts a new OAuth flow with random handle mode
