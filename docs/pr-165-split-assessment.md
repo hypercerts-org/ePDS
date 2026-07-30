@@ -22,7 +22,7 @@ All 16 branches pass `git diff --check`, formatting of supported changed files, 
 3. **Stack handle reservation after copy:** `split-pr165/reserved-handle-check` intentionally includes and depends on `split-pr165/handle-unavailable-copy`.
 4. **Optional polish:** stale-link wording, spam hint, server-rendered charset filtering, demo error wording.
 
-PR #204 substantially rewrites the segmented OTP control. Merge or settle #204 before publishing the login-page branches, then rebase those branches; their behavior remains desirable, but several will conflict textually with #204.
+PR #204 does **not** logically block any reconstructed branch. It substantially rewrites the segmented OTP control, so whichever side lands second must reconcile the interactive portions of `ignore-incomplete-otp-submit`, `otp-lockout-recovery`, and `clear-code-on-resend`. The remaining branches can proceed independently; sharing `login-page.ts` alone is not a dependency.
 
 ## Baseline and method
 
@@ -37,26 +37,26 @@ The assessment included commit-by-commit diffs, current-main comparison, patch-e
 
 ## Branch overview
 
-All branch names in this table are under `split-pr165/`. Priorities are: **P0** = publish first, **P1** = publish next, **P2** = worthwhile follow-up, and **P3** = optional polish.
+All branch names in this table are under `split-pr165/`. Priorities are: **P0** = publish first, **P1** = publish next, **P2** = worthwhile follow-up, and **P3** = optional polish. “Reconcile with #204” identifies overlapping OTP-control code, not a blocker or prerequisite.
 
-| Branch                           |              Commits | Benefit                                                       | Complexity                                                  | Recommendation                                  | Priority |
-| -------------------------------- | -------------------: | ------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------- | :------: |
-| `clear-email-on-back`            |                    2 | Medium — makes account switching start cleanly                | Low — local state reset plus tests                          | Keep; rebase after #204                         |    P1    |
-| `ignore-incomplete-otp-submit`   |                    2 | High — avoids false errors and wasted attempts                | Low — client-side completeness guard                        | Keep; rebase after #204                         |    P0    |
-| `otp-lockout-recovery`           |                    8 | High — gives locked-out users a recovery path                 | High — three surfaces and string-based error classification | Keep; scrutinize coupling and rebase after #204 |    P1    |
-| `recovery-link-request-uri`      |                    2 | High — repairs the return to the active auth flow             | Medium — render plumbing plus E2E coverage                  | Keep                                            |    P0    |
-| `friendly-stale-link-errors`     |                    3 | Medium — turns dead links into actionable guidance            | Medium — two flows and E2E coverage                         | Keep                                            |    P2    |
-| `clear-code-on-resend`           |                    1 | Medium — prevents stale-code confusion after resend           | Low — local input reset                                     | Keep; rebase after #204                         |    P1    |
-| `spam-folder-hint`               |                    1 | Low — may reduce email-delivery support friction              | Low — copy and styling only                                 | Optional; revisit after #204                    |    P3    |
-| `email-autocomplete`             |                    2 | Medium — improves autofill and password-manager behavior      | Low — input attributes and mode toggle                      | Keep; rebase after #204                         |    P1    |
-| `server-otp-charset-filter`      |                    1 | Medium — blocks impossible OTP characters early               | Low — two inline input filters                              | Keep after manual browser checks                |    P2    |
-| `accessible-error-announcements` |                    3 | High — makes errors available to screen-reader users          | Low — standard alert/live-region semantics                  | Keep                                            |    P0    |
-| `keyboard-focus-rings`           |                    3 | High — restores visible keyboard navigation                   | Low — CSS-only behavior                                     | Keep                                            |    P1    |
-| `friendly-demo-errors`           |                    1 | Medium — replaces developer wording with user guidance        | Low — known-error copy mapping                              | Optional                                        |    P3    |
-| `handle-unavailable-copy`        |                    2 | Medium — avoids falsely claiming a handle is taken            | Low — copy normalization plus tests                         | Keep before reserved-handle check               |    P1    |
-| `reserved-handle-check`          | 1 unique (3 stacked) | High — prevents false “Available” results                     | Medium — depends on a version-pinned upstream deep import   | Keep, stacked after handle-unavailable copy     |    P1    |
-| `safe-client-name-fallback`      |                    1 | High — avoids presenting attacker-controlled IDs as app names | Low — fallback logic plus tests                             | Keep                                            |    P0    |
-| `account-settings-flash`         |                    3 | High — gives truthful results for account actions             | Medium — multiple route actions and message states          | Keep                                            |    P0    |
+| Branch                           |              Commits | Benefit                                                       | Complexity                                                  | Recommendation                                    | Priority |
+| -------------------------------- | -------------------: | ------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------- | :------: |
+| `clear-email-on-back`            |                    2 | Medium — makes account switching start cleanly                | Low — local state reset plus tests                          | Keep                                              |    P1    |
+| `ignore-incomplete-otp-submit`   |                    2 | High — avoids false errors and wasted attempts                | Low — client-side completeness guard                        | Keep; reconcile submit guard with #204            |    P0    |
+| `otp-lockout-recovery`           |                    8 | High — gives locked-out users a recovery path                 | High — three surfaces and string-based error classification | Keep; scrutinize coupling; reconcile UI with #204 |    P1    |
+| `recovery-link-request-uri`      |                    2 | High — repairs the return to the active auth flow             | Medium — render plumbing plus E2E coverage                  | Keep                                              |    P0    |
+| `friendly-stale-link-errors`     |                    3 | Medium — turns dead links into actionable guidance            | Medium — two flows and E2E coverage                         | Keep                                              |    P2    |
+| `clear-code-on-resend`           |                    1 | Medium — prevents stale-code confusion after resend           | Low — local input reset                                     | Keep; reconcile reset helper with #204            |    P1    |
+| `spam-folder-hint`               |                    1 | Low — may reduce email-delivery support friction              | Low — copy and styling only                                 | Optional                                          |    P3    |
+| `email-autocomplete`             |                    2 | Medium — improves autofill and password-manager behavior      | Low — input attributes and mode toggle                      | Keep                                              |    P1    |
+| `server-otp-charset-filter`      |                    1 | Medium — blocks impossible OTP characters early               | Low — two inline input filters                              | Keep after manual browser checks                  |    P2    |
+| `accessible-error-announcements` |                    3 | High — makes errors available to screen-reader users          | Low — standard alert/live-region semantics                  | Keep                                              |    P0    |
+| `keyboard-focus-rings`           |                    3 | High — restores visible keyboard navigation                   | Low — CSS-only behavior                                     | Keep                                              |    P1    |
+| `friendly-demo-errors`           |                    1 | Medium — replaces developer wording with user guidance        | Low — known-error copy mapping                              | Optional                                          |    P3    |
+| `handle-unavailable-copy`        |                    2 | Medium — avoids falsely claiming a handle is taken            | Low — copy normalization plus tests                         | Keep before reserved-handle check                 |    P1    |
+| `reserved-handle-check`          | 1 unique (3 stacked) | High — prevents false “Available” results                     | Medium — depends on a version-pinned upstream deep import   | Keep, stacked after handle-unavailable copy       |    P1    |
+| `safe-client-name-fallback`      |                    1 | High — avoids presenting attacker-controlled IDs as app names | Low — fallback logic plus tests                             | Keep                                              |    P0    |
+| `account-settings-flash`         |                    3 | High — gives truthful results for account actions             | Medium — multiple route actions and message states          | Keep                                              |    P0    |
 
 The report itself is committed on `split-pr165/assessment-report`.
 
@@ -66,7 +66,7 @@ The report itself is committed on `split-pr165/assessment-report`.
 
 **Scope:** Clears the previous address and focuses the email field when the user chooses **Use different email**. Includes Cucumber coverage and a focused unit assertion.
 
-**Assessment:** Keep. The control promises a fresh account choice; retaining the old address undermines that intent. The change is small and local. Expect a textual rebase conflict after PR #204.
+**Assessment:** Keep. The control promises a fresh account choice; retaining the old address undermines that intent. The change is small, local, and independent of PR #204.
 
 **Validation:** All checks and the full unit suite pass.
 
@@ -88,7 +88,7 @@ The report itself is committed on `split-pr165/assessment-report`.
 - Corrected documentation that had claimed stateless server routes could distinguish a post-lockout `Invalid OTP`; only the interactive page can do that because it keeps an in-page latch.
 - Preserved the current-main PAR-liveness gates so Resend is offered only while the authorization flow can still complete.
 
-**Assessment:** Keep, but it is the largest reconstructed branch and remains coupled to better-auth’s English error strings because no stable structured code is exposed at these call sites. Review it after PR #204 and consider a later upstream/API improvement for structured classification.
+**Assessment:** Keep, but it is the largest reconstructed branch and remains coupled to better-auth’s English error strings because no stable structured code is exposed at these call sites. Review that coupling carefully. If PR #204 lands first, port the interactive login portion onto its single-input controller; the Account Settings and recovery portions are independent.
 
 **Validation:** All checks and the full unit suite pass.
 
@@ -112,7 +112,7 @@ The report itself is committed on `split-pr165/assessment-report`.
 
 **Scope:** Clears stale OTP slots and focuses the first slot after a successful resend, with unit coverage.
 
-**Assessment:** Keep. A newly-issued code should not inherit the previous code’s UI state. Low risk; likely textual conflict with PR #204.
+**Assessment:** Keep. A newly-issued code should not inherit the previous code’s UI state. It is low risk and not blocked by PR #204; whichever lands second should use PR #204’s `clearOtpBoxes()` helper.
 
 **Validation:** All checks and the full unit suite pass.
 
