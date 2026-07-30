@@ -69,7 +69,7 @@ export function buildEpdsCallbackUrl(args: {
   flowClientId: string | null
   email: string
   isNewAccount: boolean
-  handleMode?: string | null
+  flowHandleMode?: string | null
   pdsPublicUrl: string
   epdsCallbackSecret: string
 }): string {
@@ -80,7 +80,7 @@ export function buildEpdsCallbackUrl(args: {
     new_account: args.isNewAccount ? '1' : '0',
   }
   if (args.flowClientId) callbackParams.client_id = args.flowClientId
-  if (args.handleMode) callbackParams.epds_handle_mode = args.handleMode
+  if (args.flowHandleMode) callbackParams.epds_handle_mode = args.flowHandleMode
   const { sig, ts } = signCallback(callbackParams, args.epdsCallbackSecret)
   const params = new URLSearchParams({ ...callbackParams, ts, sig })
   return `${args.pdsPublicUrl}/oauth/epds-callback?${params.toString()}`
@@ -182,7 +182,7 @@ export function createCompleteRouter(
       flowClientId: flow.clientId,
       email,
       isNewAccount: true,
-      handleMode: flow.handleMode,
+      flowHandleMode: flow.handleMode,
       pdsPublicUrl: ctx.config.pdsPublicUrl,
       epdsCallbackSecret: ctx.config.epdsCallbackSecret,
     })
@@ -289,7 +289,7 @@ export function createCompleteRouter(
       flowClientId: flow.clientId,
       email,
       isNewAccount: false,
-      handleMode: flow.handleMode,
+      flowHandleMode: flow.handleMode,
       pdsPublicUrl: ctx.config.pdsPublicUrl,
       epdsCallbackSecret: ctx.config.epdsCallbackSecret,
     })
