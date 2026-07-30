@@ -626,6 +626,15 @@ Then(
 )
 
 When(
+  'the user enters two digits from the old OTP',
+  async function (this: EpdsWorld) {
+    const otpBoxes = getPage(this).locator('.otp-box')
+    await otpBoxes.nth(0).fill('1')
+    await otpBoxes.nth(1).fill('2')
+  },
+)
+
+When(
   'the user requests a new OTP via the resend button',
   async function (this: EpdsWorld) {
     if (!testEnv.mailpitPass) return 'pending'
@@ -662,6 +671,21 @@ Then(
     const message = await waitForEmail(`to:${this.testEmail}`)
     this.lastEmailSubject = message.Subject
     this.otpCode = await extractOtp(message.ID)
+  },
+)
+
+Then(
+  'the OTP entry boxes are empty with the first box focused',
+  async function (this: EpdsWorld) {
+    if (!this.otpCode) {
+      throw new Error('No fresh OTP was captured from the mail trap')
+    }
+    const otpBoxes = getPage(this).locator('.otp-box')
+    await expect(otpBoxes).toHaveCount(this.otpCode.length)
+    for (let index = 0; index < this.otpCode.length; index += 1) {
+      await expect(otpBoxes.nth(index)).toHaveValue('')
+    }
+    await expect(otpBoxes.first()).toBeFocused()
   },
 )
 

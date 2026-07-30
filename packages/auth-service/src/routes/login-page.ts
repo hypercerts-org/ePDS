@@ -1324,6 +1324,10 @@ export function renderLoginPage(opts: {
         if (result.error) {
           showError(result.error);
         } else {
+          // Clear any characters typed for the old code so the new code
+          // starts from a clean, focused input grid.
+          clearOtpBoxes();
+          if (otpBoxes.length) otpBoxes[0].focus();
           showSuccess('Code resent!');
         }
       });
