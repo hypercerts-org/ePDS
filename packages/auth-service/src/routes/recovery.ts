@@ -17,7 +17,7 @@
 import { Router, type Request, type Response } from 'express'
 import type { AuthServiceContext } from '../context.js'
 import { createLogger, escapeHtml, maskEmail } from '@certified-app/shared'
-import { buildOtpInputProps } from '../otp-input.js'
+import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
 import { resolveClientBranding } from '../lib/client-metadata.js'
 import {
   renderOptionalStyleTag,
@@ -412,6 +412,7 @@ export function renderRecoveryOtpForm(opts: {
     ? `/oauth/authorize?request_uri=${encodeURIComponent(requestUriForBack)}`
     : '/oauth/authorize'
   const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
+  const inputFilter = buildOtpInputFilter(opts.otpCharset)
   // Forward the heartbeat-disabled flag through Resend (POST
   // /auth/recover) so the re-rendered OTP form keeps it disabled.
   // Verify (POST /auth/recover/verify) doesn't re-render this form,
@@ -452,7 +453,7 @@ export function renderRecoveryOtpForm(opts: {
                  autocapitalize="${inputProps.autocapitalize}"
                  placeholder="${inputProps.placeholder}"
                  class="otp-input"
-                  oninput="this.value=this.value.replace(/[\\s-]/g,'')"
+                 oninput="this.value=this.value.replace(${inputFilter.toString()},'')${opts.otpCharset === 'alphanumeric' ? '.toUpperCase()' : ''}"
                  style="letter-spacing: ${Math.max(2, Math.round(32 / opts.otpLength))}px">
         </div>
         <button type="submit" class="btn-primary">Verify</button>
