@@ -3,6 +3,7 @@ import {
   FLASH_SUCCESS_MESSAGES,
   FLASH_ERROR_MESSAGES,
   resolveAccountFlashFromQuery,
+  renderSettingsPage,
 } from '../routes/account-settings.js'
 
 describe('account-settings flash messages', () => {
@@ -65,6 +66,39 @@ describe('account-settings flash messages', () => {
     for (const msg of Object.values(FLASH_ERROR_MESSAGES)) {
       expect(msg).not.toMatch(/<[a-z]/i)
     }
+  })
+})
+
+describe('account-settings flash rendering', () => {
+  const renderPage = (messages: {
+    successMessage?: string
+    errorMessage?: string
+  }) =>
+    renderSettingsPage({
+      did: 'did:plc:test',
+      email: 'primary@example.com',
+      handleDomain: 'example.com',
+      currentHandle: null,
+      backupEmails: [],
+      sessions: [],
+      currentSessionToken: 'current-session',
+      csrfToken: 'csrf-token',
+      ...messages,
+    })
+
+  it('renders successful actions as an accessible status', () => {
+    const html = renderPage({ successMessage: 'Backup email removed.' })
+    expect(html).toContain(
+      '<div class="flash flash-success" role="status">Backup email removed.</div>',
+    )
+  })
+
+  it('renders escaped failures as an alert', () => {
+    const html = renderPage({ errorMessage: '<script>failed</script>' })
+    expect(html).toContain(
+      '<div class="flash flash-error" role="alert">&lt;script&gt;failed&lt;/script&gt;</div>',
+    )
+    expect(html).not.toContain('<script>failed</script>')
   })
 })
 

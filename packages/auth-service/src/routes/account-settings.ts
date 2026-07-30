@@ -502,7 +502,7 @@ export function createAccountSettingsRouter(
   return router
 }
 
-function renderSettingsPage(opts: {
+export function renderSettingsPage(opts: {
   did: string
   email: string
   handleDomain: string
