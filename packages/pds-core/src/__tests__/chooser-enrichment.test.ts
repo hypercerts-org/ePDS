@@ -361,19 +361,26 @@ function runChooserEnrichmentScript(
   globals: {
     __sessions?: unknown[]
     __deviceSessions?: unknown[]
+    // Opt-in hook receiving the script's MutationObserver callback, so a
+    // test can replay a re-render tick the way the real SPA would.
+    onObserve?: (tick: () => void) => void
   } = {},
   location: { pathname: string; search?: string } = DEFAULT_CHOOSER_LOCATION,
 ): void {
   const fakeWindow: Record<string, unknown> = {
     location,
   }
+  const onObserve = globals.onObserve
   const sandbox = {
     document,
     MutationObserver: class {
       observed = false
 
+      constructor(private readonly tick: () => void) {}
+
       observe(): void {
         this.observed = true
+        onObserve?.(this.tick)
       }
     },
     Node: { TEXT_NODE: 3 },
@@ -699,6 +706,37 @@ describe('buildChooserEnrichmentScript account row scoping', () => {
     expect(handle.style.display).toBe('none')
     expect(handleDescription?.textContent).toBe('Underlying handle: alice.test')
     expect(row.getAttribute('aria-describedby')).toBe(handleDescription?.id)
+  })
+
+  it('gives rows enriched on a later re-render tick a distinct hidden-handle id', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'random')
+    const { row: aliceRow } = createChooserRow(document, 'alice.test')
+
+    let replayTick: (() => void) | undefined
+    runChooserEnrichmentScript(document, {
+      onObserve: (tick) => {
+        replayTick = tick
+      },
+    })
+
+    // Bob's row arrives in a later SPA render. The first row is already
+    // marked enriched and so is excluded from the rebuilt match list,
+    // which is exactly the situation where a per-tick index restarts
+    // at 0 and collides with Alice's existing description id.
+    const { row: bobRow } = createChooserRow(document, 'bob.test')
+    expect(replayTick).toBeDefined()
+    replayTick?.()
+
+    const aliceId = findHiddenHandleDescription(aliceRow)?.id
+    const bobId = findHiddenHandleDescription(bobRow)?.id
+
+    expect(aliceId).toBeTruthy()
+    expect(bobId).toBeTruthy()
+    // Duplicate ids would make aria-describedby resolve to the first
+    // node, so Bob's row would announce Alice's handle.
+    expect(bobId).not.toBe(aliceId)
+    expect(bobRow.getAttribute('aria-describedby')).toBe(bobId)
   })
 
   it('does not hide random-mode handles outside oauth authorize', () => {

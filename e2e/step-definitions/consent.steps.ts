@@ -67,9 +67,16 @@ function escapeRegex(value: string): string {
 }
 
 async function openIdentityTooltip(page: Page): Promise<Locator> {
+  // .first(): enrichment walks every matching identity node, so a consent
+  // page rendering more than one approved phrasing ("Grant access to your
+  // X account" / "... wants to access your X account") gets an icon on
+  // each. Without this the locator resolves to several elements and
+  // Playwright throws a strict-mode error. Each icon carries its own
+  // aria-describedby, so asserting against the first is well-defined.
   const tooltipControl = page
     .getByRole('main')
     .getByRole('button', { name: 'Identity information' })
+    .first()
 
   await expect(tooltipControl).toHaveAttribute('type', 'button')
   await expect(tooltipControl).toHaveAttribute('aria-expanded', 'false')

@@ -578,25 +578,37 @@ describe('renderLoginPage email form readiness gate', () => {
 
   it('enables the button after handler setup', () => {
     const html = renderDefault()
-    const lastHandlerIdx = html.lastIndexOf("addEventListener('click'")
+    // The submit binding is the handler the button actually depends on,
+    // so assert against it directly — anchoring only on the last click
+    // handler would still pass if the submit binding moved below the
+    // enable. The click check stays as a second assertion so the enable
+    // is also pinned as the last thing handler setup does.
+    const submitHandlerIdx = html.indexOf(
+      "sendOtpForm.addEventListener('submit'",
+    )
+    const lastClickHandlerIdx = html.lastIndexOf("addEventListener('click'")
     const enableIdx = html.indexOf('sendOtpBtn.disabled = false;')
 
-    expect(lastHandlerIdx).toBeGreaterThan(0)
-    expect(enableIdx).toBeGreaterThan(lastHandlerIdx)
+    expect(submitHandlerIdx).toBeGreaterThan(0)
+    expect(lastClickHandlerIdx).toBeGreaterThan(0)
+    expect(enableIdx).toBeGreaterThan(submitHandlerIdx)
+    expect(enableIdx).toBeGreaterThan(lastClickHandlerIdx)
   })
 
   it('does not use a blind timer for readiness', () => {
     const html = renderDefault()
-    // Scoped to the gap between the last handler registration and the
-    // enable, rather than the whole page: the page legitimately uses
-    // setInterval elsewhere for the PAR heartbeat. What matters is that
-    // the enable is driven by handler setup completing, not by a timer.
+    // Scoped to the gap between the submit binding and the enable,
+    // rather than the whole page: the page legitimately uses setInterval
+    // elsewhere for the PAR heartbeat. What matters is that the enable is
+    // driven by handler setup completing, not by a timer.
+    const submitHandlerIdx = html.indexOf(
+      "sendOtpForm.addEventListener('submit'",
+    )
     const enableIdx = html.indexOf('sendOtpBtn.disabled = false;')
-    const lastHandlerIdx = html.lastIndexOf("addEventListener('click'")
 
-    expect(lastHandlerIdx).toBeGreaterThan(0)
-    expect(enableIdx).toBeGreaterThan(lastHandlerIdx)
-    expect(html.slice(lastHandlerIdx, enableIdx)).not.toMatch(
+    expect(submitHandlerIdx).toBeGreaterThan(0)
+    expect(enableIdx).toBeGreaterThan(submitHandlerIdx)
+    expect(html.slice(submitHandlerIdx, enableIdx)).not.toMatch(
       /set(?:Timeout|Interval)\s*\(/,
     )
   })

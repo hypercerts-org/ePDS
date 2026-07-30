@@ -424,6 +424,14 @@ export function buildChooserEnrichmentScript(): string {
     }
   }
 
+  // Monotonic across MutationObserver ticks. Deliberately NOT derived
+  // from the per-tick match index: the match list is rebuilt every tick
+  // and already-enriched rows are skipped, so a row enriched on a later
+  // re-render would restart at 0 and collide with an earlier row's id.
+  // Duplicate ids make aria-describedby resolve to the first match, so
+  // a row would announce a different account's handle.
+  var hiddenHandleSeq = 0;
+
   // Enrich each visible account row with its email. Runs repeatedly
   // via a MutationObserver because the SPA hydrates/re-renders after
   // initial HTML delivery.
@@ -558,7 +566,7 @@ export function buildChooserEnrichmentScript(): string {
       if (hideHandle) {
         if (ownText) {
           var description = document.createElement('span');
-          var descriptionId = 'epds-hidden-handle-' + matches.indexOf(m);
+          var descriptionId = 'epds-hidden-handle-' + (hiddenHandleSeq++);
           description.id = descriptionId;
           description.className = 'epds-hidden-handle-description';
           description.textContent = 'Underlying handle: ' + ownText;
