@@ -631,6 +631,11 @@ When(
     const otpBoxes = getPage(this).locator('.otp-box')
     await otpBoxes.nth(0).fill('1')
     await otpBoxes.nth(1).fill('2')
+    // Prove the digits actually landed, so the later empty-box assertion
+    // demonstrates that resend cleared them rather than that they were
+    // never entered.
+    await expect(otpBoxes.nth(0)).toHaveValue('1')
+    await expect(otpBoxes.nth(1)).toHaveValue('2')
   },
 )
 
