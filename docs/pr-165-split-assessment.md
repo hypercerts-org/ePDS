@@ -138,7 +138,7 @@ The report itself is committed on `split-pr165/assessment-report`.
 
 **Assessment:** Keep as a separate follow-up. The implementation is small; browser scenarios now exercise both numeric and alphanumeric policies through preview routes, while focused unit coverage verifies the exact filter patterns used by the renderer.
 
-**Validation:** Formatting, lint, typecheck, build, the full unit and coverage suites, and the Cucumber dry run pass.
+**Validation:** Formatting, lint, typecheck, build, the full unit and coverage suites, and the Cucumber dry run pass. GitHub format/lint/typecheck/test and Coveralls pass; an explicit deployed E2E run was canceled because the PR Railway environment remained unhealthy with HTTP 502 throughout service readiness.
 
 ### `split-pr165/accessible-error-announcements`
 
