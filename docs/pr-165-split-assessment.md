@@ -41,20 +41,20 @@ All branch names in this table are under `split-pr165/`; linked PRs are drafts. 
 
 | Branch                           | PR                                                      |              Commits | Benefit                                                       | Complexity                                                  | Recommendation                                    | Priority |
 | -------------------------------- | ------------------------------------------------------- | -------------------: | ------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------- | :------: |
-| `clear-email-on-back`            | [#215](https://github.com/hypercerts-org/ePDS/pull/215) |                    2 | Medium — makes account switching start cleanly                | Low — local state reset plus tests                          | Keep                                              |    P1    |
-| `ignore-incomplete-otp-submit`   | [#216](https://github.com/hypercerts-org/ePDS/pull/216) |                    2 | High — avoids false errors and wasted attempts                | Low — client-side completeness guard                        | Keep; reconcile submit guard with #204            |    P0    |
-| `otp-lockout-recovery`           | [#217](https://github.com/hypercerts-org/ePDS/pull/217) |                    9 | High — gives locked-out users a recovery path                 | High — three surfaces and string-based error classification | Keep; scrutinize coupling; reconcile UI with #204 |    P1    |
-| `recovery-link-request-uri`      | [#218](https://github.com/hypercerts-org/ePDS/pull/218) |                    2 | High — repairs the return to the active auth flow             | Medium — render plumbing plus E2E coverage                  | Keep                                              |    P0    |
-| `friendly-stale-link-errors`     | [#219](https://github.com/hypercerts-org/ePDS/pull/219) |                    3 | Medium — turns dead links into actionable guidance            | Medium — two flows and E2E coverage                         | Keep                                              |    P2    |
+| `clear-email-on-back`            | [#215](https://github.com/hypercerts-org/ePDS/pull/215) |                    1 | Medium — makes account switching start cleanly                | Low — local state reset plus tests                          | Keep                                              |    P1    |
+| `ignore-incomplete-otp-submit`   | [#216](https://github.com/hypercerts-org/ePDS/pull/216) |                    1 | High — avoids false errors and wasted attempts                | Low — client-side completeness guard                        | Keep; reconcile submit guard with #204            |    P0    |
+| `otp-lockout-recovery`           | [#217](https://github.com/hypercerts-org/ePDS/pull/217) |                    1 | High — gives locked-out users a recovery path                 | High — three surfaces and string-based error classification | Keep; scrutinize coupling; reconcile UI with #204 |    P1    |
+| `recovery-link-request-uri`      | [#218](https://github.com/hypercerts-org/ePDS/pull/218) |                    1 | High — repairs the return to the active auth flow             | Medium — render plumbing plus E2E coverage                  | Keep                                              |    P0    |
+| `friendly-stale-link-errors`     | [#219](https://github.com/hypercerts-org/ePDS/pull/219) |                    1 | Medium — turns dead links into actionable guidance            | Medium — two flows and E2E coverage                         | Keep                                              |    P2    |
 | `clear-code-on-resend`           | [#220](https://github.com/hypercerts-org/ePDS/pull/220) |                    1 | Medium — prevents stale-code confusion after resend           | Low — local input reset                                     | Keep; reconcile reset helper with #204            |    P1    |
 | `spam-folder-hint`               | [#221](https://github.com/hypercerts-org/ePDS/pull/221) |                    1 | Low — may reduce email-delivery support friction              | Low — copy and styling only                                 | Optional                                          |    P3    |
-| `email-autocomplete`             | [#222](https://github.com/hypercerts-org/ePDS/pull/222) |                    3 | Medium — improves autofill and password-manager behavior      | Low — input attributes and mode toggle                      | Keep                                              |    P1    |
-| `server-otp-charset-filter`      | [#223](https://github.com/hypercerts-org/ePDS/pull/223) |                    2 | Medium — blocks impossible OTP characters early               | Low — two inline input filters                              | Keep after manual browser checks                  |    P2    |
+| `email-autocomplete`             | [#222](https://github.com/hypercerts-org/ePDS/pull/222) |                    1 | Medium — improves autofill and password-manager behavior      | Low — input attributes and mode toggle                      | Keep                                              |    P1    |
+| `server-otp-charset-filter`      | [#223](https://github.com/hypercerts-org/ePDS/pull/223) |                    1 | Medium — blocks impossible OTP characters early               | Low — two inline input filters                              | Keep after manual browser checks                  |    P2    |
 | `accessible-error-announcements` | [#224](https://github.com/hypercerts-org/ePDS/pull/224) |                    4 | High — makes errors available to screen-reader users          | Low — standard alert/live-region semantics                  | Keep                                              |    P0    |
 | `keyboard-focus-rings`           | [#225](https://github.com/hypercerts-org/ePDS/pull/225) |                    3 | High — restores visible keyboard navigation                   | Low — CSS-only behavior                                     | Keep                                              |    P1    |
 | `friendly-demo-errors`           | [#226](https://github.com/hypercerts-org/ePDS/pull/226) |                    1 | Medium — replaces developer wording with user guidance        | Low — known-error copy mapping                              | Optional                                          |    P3    |
-| `handle-unavailable-copy`        | [#227](https://github.com/hypercerts-org/ePDS/pull/227) |                    2 | Medium — avoids falsely claiming a handle is taken            | Low — copy normalization plus tests                         | Keep before reserved-handle check                 |    P1    |
-| `reserved-handle-check`          | [#228](https://github.com/hypercerts-org/ePDS/pull/228) | 1 unique (3 stacked) | High — prevents false “Available” results                     | Medium — depends on a version-pinned upstream deep import   | Keep, stacked after handle-unavailable copy       |    P1    |
+| `handle-unavailable-copy`        | [#227](https://github.com/hypercerts-org/ePDS/pull/227) |                    1 | Medium — avoids falsely claiming a handle is taken            | Low — copy normalization plus tests                         | Keep before reserved-handle check                 |    P1    |
+| `reserved-handle-check`          | [#228](https://github.com/hypercerts-org/ePDS/pull/228) | 1 unique (2 stacked) | High — prevents false “Available” results                     | Medium — depends on a version-pinned upstream deep import   | Keep, stacked after handle-unavailable copy       |    P1    |
 | `safe-client-name-fallback`      | [#229](https://github.com/hypercerts-org/ePDS/pull/229) |                    1 | High — avoids presenting attacker-controlled IDs as app names | Low — fallback logic plus tests                             | Keep                                              |    P0    |
 | `account-settings-flash`         | [#230](https://github.com/hypercerts-org/ePDS/pull/230) |                    4 | High — gives truthful results for account actions             | Medium — multiple route actions and message states          | Keep                                              |    P0    |
 
@@ -64,7 +64,7 @@ The report itself is committed on `split-pr165/assessment-report`.
 
 ### `split-pr165/clear-email-on-back`
 
-**Scope:** Clears the previous address and focuses the email field when the user chooses **Use different email**. Includes Cucumber coverage and a focused unit assertion.
+**Scope:** Clears the previous address and focuses the email field when the user chooses **Use different email**. Browser coverage clicks the control and verifies the live input state.
 
 **Assessment:** Keep. The control promises a fresh account choice; retaining the old address undermines that intent. The change is small, local, and independent of PR #204.
 
@@ -72,7 +72,7 @@ The report itself is committed on `split-pr165/assessment-report`.
 
 ### `split-pr165/ignore-incomplete-otp-submit`
 
-**Scope:** Stops empty or partial Verify submissions before they call better-auth, focuses the first unfilled slot, and adds E2E plus unit coverage.
+**Scope:** Stops empty or partial Verify submissions before they call better-auth and focuses the first unfilled slot. Browser coverage verifies both empty and partial codes send no verification request and show no misleading error.
 
 **Assessment:** Keep with high priority. It prevents a misleading “Invalid OTP” response and avoids spending a verification attempt when no complete code was submitted. The current segmented fields are not individually `required`, so the JavaScript guard is meaningful.
 
@@ -94,7 +94,7 @@ The report itself is committed on `split-pr165/assessment-report`.
 
 ### `split-pr165/recovery-link-request-uri`
 
-**Scope:** Replaces the hard-coded recovery `/placeholder` value with the active PAR `request_uri`, threads it through render and preview call sites, and tests the round trip.
+**Scope:** Replaces the hard-coded recovery `/placeholder` value with the active PAR `request_uri`, threads it through render and preview call sites, and tests the complete recovery → **Back to sign in** → restored OTP-form round trip in the browser.
 
 **Assessment:** Keep with high priority. The placeholder is a concrete functional bug: recovery may succeed, but **Back to sign in** cannot return to the originating authorization request.
 
@@ -110,7 +110,7 @@ The report itself is committed on `split-pr165/assessment-report`.
 
 ### `split-pr165/clear-code-on-resend`
 
-**Scope:** Clears stale OTP slots and focuses the first slot after a successful resend, with unit coverage.
+**Scope:** Clears stale OTP slots and focuses the first slot after a successful resend, with browser coverage of the complete interaction.
 
 **Assessment:** Keep. A newly-issued code should not inherit the previous code’s UI state. It is low risk and not blocked by PR #204; whichever lands second should use PR #204’s `clearOtpBoxes()` helper.
 
@@ -126,7 +126,7 @@ The report itself is committed on `split-pr165/assessment-report`.
 
 ### `split-pr165/email-autocomplete`
 
-**Scope:** Adds explicit email autocomplete tokens to all email entry forms. The reconstruction also changes the shared email/handle field to `username` autocomplete in handle mode and back to `email` when toggled, with unit coverage.
+**Scope:** Adds explicit email autocomplete tokens to all email entry forms. The reconstruction also changes the shared email/handle field to `username` autocomplete in handle mode and back to `email` when toggled, with browser assertions against the live fields.
 
 **Assessment:** Keep. The original commit’s static email token would have remained active after switching the shared field to handle mode; the follow-up fixes that oversight.
 
@@ -136,9 +136,9 @@ The report itself is committed on `split-pr165/assessment-report`.
 
 **Scope:** Filters and uppercases the full-length OTP inputs used by Account Settings login and account recovery. It deliberately excludes the segmented login control because PR #204 replaces that control with a more accessible single-input architecture.
 
-**Assessment:** Keep as a separate follow-up, but manually test numeric and alphanumeric configurations before publishing. The implementation is small, yet it relies on inline input handlers and has less direct test coverage than the stronger branches.
+**Assessment:** Keep as a separate follow-up. The implementation is small; browser scenarios now exercise both numeric and alphanumeric policies through preview routes, while focused unit coverage verifies the exact filter patterns used by the renderer.
 
-**Validation:** Formatting, lint, typecheck, and the full unit suite pass.
+**Validation:** Formatting, lint, typecheck, build, the full unit and coverage suites, and the Cucumber dry run pass.
 
 ### `split-pr165/accessible-error-announcements`
 
@@ -166,7 +166,7 @@ The report itself is committed on `split-pr165/assessment-report`.
 
 ### `split-pr165/handle-unavailable-copy`
 
-**Scope:** Uses “not available” consistently for submit-time errors and the live handle check rather than claiming every rejection means another user already took the handle. Adds focused render coverage.
+**Scope:** Uses “not available” consistently for submit-time errors and the live handle check rather than claiming every rejection means another user already took the handle. Browser coverage controls the availability response and verifies the visible result.
 
 **Assessment:** Keep. Reserved names and policy rejections are not ownership collisions. This branch is also the base for the reserved-handle check.
 
@@ -189,7 +189,7 @@ The report itself is committed on `split-pr165/assessment-report`.
 
 ### `split-pr165/safe-client-name-fallback`
 
-**Scope:** Prevents malformed or non-HTTP client IDs from becoming visible application names; callers fall back to neutral copy instead. Includes shared-library tests.
+**Scope:** Prevents malformed, non-URL, and parseable non-HTTP(S) client IDs from becoming visible application names; callers fall back to neutral copy instead. Includes shared-library regression tests.
 
 **Assessment:** Keep. Existing escaping prevented markup injection, but reflecting an attacker-controlled malformed identifier as the application’s identity is still poor trust UX.
 
