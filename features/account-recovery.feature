@@ -39,6 +39,17 @@ Feature: Account recovery via backup emails
     Then the recovery OTP form is displayed
     And no email arrives for that non-existent address
 
+  # The recovery link must carry the active authorization request rather
+  # than a placeholder. Exercise the complete browser round trip so the
+  # test proves Back to sign in restores the live OTP flow.
+  Scenario: Recovery link round-trips to the active OAuth flow
+    Given the demo client initiates OAuth with the test email as login_hint
+    Then an OTP email arrives in the mail trap
+    And the login page shows an OTP verification form
+    And the recovery link points at the active OAuth flow's request_uri
+    When the user follows the recovery link and then returns to sign in
+    Then the original OAuth flow's sign-in page is restored
+
   # --- Backup email management ---
 
   Scenario: User removes a backup email
