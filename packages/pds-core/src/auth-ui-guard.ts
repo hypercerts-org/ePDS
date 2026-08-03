@@ -33,13 +33,14 @@
  * See docs/design/session-reuse-bugs.md for the full failure-mode taxonomy.
  */
 import type { NextFunction, Request, Response } from 'express'
-import type { DeviceAccount, OAuthProvider } from '@atproto/oauth-provider'
+import type { DeviceAccount } from '@atproto/oauth-provider/store'
+import type { OAuthProvider } from '@atproto/oauth-provider/provider'
 import {
   DEVICE_ID_BYTES_LENGTH,
   DEVICE_ID_PREFIX,
   SESSION_ID_BYTES_LENGTH,
   SESSION_ID_PREFIX,
-} from '@atproto/oauth-provider'
+} from '@atproto/oauth-provider/constants'
 import type { Logger } from 'pino'
 import {
   parsePromptTokens as parsePromptTokensShared,

@@ -35,7 +35,7 @@ const atprotoPdsPkg: { version: string } = JSON.parse(
     'utf8',
   ),
 )
-import { HandleUnavailableError } from '@atproto/oauth-provider'
+import { HandleUnavailableError } from '@atproto/oauth-provider/errors'
 import {
   generateRandomHandle,
   createLogger,
