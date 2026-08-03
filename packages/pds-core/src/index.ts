@@ -38,11 +38,12 @@ const atprotoPdsPkg: { version: string } = JSON.parse(
 )
 import { HandleUnavailableError } from '@atproto/oauth-provider/errors'
 import type { Account } from '@atproto/oauth-provider/store'
+import { isValidHandle, type DidString } from '@atproto/syntax'
 import {
-  isValidHandle,
-  isValidAtIdentifier,
-  type DidString,
-} from '@atproto/syntax'
+  canLookUpAccountByHandle,
+  canCheckHandle,
+  canResolveHandle,
+} from './lib/identifier-guards.js'
 import {
   generateRandomHandle,
   createLogger,
@@ -1037,7 +1038,7 @@ async function main() {
       res.status(400).json({ error: 'Missing handle' })
       return
     }
-    if (!isValidAtIdentifier(handle)) {
+    if (!canLookUpAccountByHandle(handle)) {
       // A syntactically invalid identifier cannot match any account.
       res.json({ email: null })
       return
@@ -1064,7 +1065,7 @@ async function main() {
       res.status(400).json({ error: 'missing handle param' })
       return
     }
-    if (!isValidHandle(handle)) {
+    if (!canCheckHandle(handle)) {
       // A syntactically invalid handle can never be registered, so report it as
       // unavailable rather than "free" (which would let signup proceed and then
       // fail at account creation).
@@ -1237,7 +1238,7 @@ async function checkHandleRoute(
         message: 'handles are not provided on this domain',
       })
     }
-    if (!isValidHandle(domain)) {
+    if (!canResolveHandle(domain)) {
       return res.status(404).json({
         error: 'NotFound',
         message: 'handle not found for this domain',
