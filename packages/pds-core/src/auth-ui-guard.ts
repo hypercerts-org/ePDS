@@ -381,8 +381,9 @@ function filterCandidateBindings(
 ): Binding[] {
   if (!loginHint) return bindings
   const matched = bindings.filter(
-    ({ account }) =>
-      account.sub === loginHint || account.preferred_username === loginHint,
+    // Account is now strongly typed (oauth-provider-api 0.7): sub -> did,
+    // preferred_username -> handle (handle is optional).
+    ({ account }) => account.did === loginHint || account.handle === loginHint,
   )
   return matched.length === 1 ? matched : bindings
 }

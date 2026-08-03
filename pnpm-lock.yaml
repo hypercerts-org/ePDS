@@ -152,6 +152,9 @@ importers:
       '@atproto/pds':
         specifier: ^0.5.23
         version: 0.5.23
+      '@atproto/syntax':
+        specifier: ^0.7.2
+        version: 0.7.2
       '@certified-app/shared':
         specifier: workspace:*
         version: link:../shared
