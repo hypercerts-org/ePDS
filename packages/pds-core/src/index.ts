@@ -27,9 +27,13 @@ import { randomBytes } from 'node:crypto'
 import * as path from 'node:path'
 import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
 import { readFileSync } from 'node:fs'
-/* v8 ignore next 3 -- module-level init, only testable via e2e */
+import { createRequire } from 'node:module'
+/* v8 ignore next 4 -- module-level init, only testable via e2e */
 const atprotoPdsPkg: { version: string } = JSON.parse(
-  readFileSync(require.resolve('@atproto/pds/package.json'), 'utf8'),
+  readFileSync(
+    createRequire(import.meta.url).resolve('@atproto/pds/package.json'),
+    'utf8',
+  ),
 )
 import { HandleUnavailableError } from '@atproto/oauth-provider'
 import {

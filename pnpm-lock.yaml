@@ -172,8 +172,8 @@ importers:
         specifier: ^4.17.21
         version: 4.17.25
       '@types/node':
-        specifier: ^20.11.0
-        version: 20.19.33
+        specifier: ^22.0.0
+        version: 22.19.11
       '@types/serialize-javascript':
         specifier: ^5.0.4
         version: 5.0.4
@@ -6489,11 +6489,11 @@ snapshots:
 
   '@types/better-sqlite3@7.6.13':
     dependencies:
-      '@types/node': 20.19.33
+      '@types/node': 22.19.11
 
   '@types/bn.js@5.2.0':
     dependencies:
-      '@types/node': 20.19.33
+      '@types/node': 22.19.11
 
   '@types/body-parser@1.19.6':
     dependencies:
@@ -6557,7 +6557,7 @@ snapshots:
 
   '@types/nodemailer@6.4.22':
     dependencies:
-      '@types/node': 20.19.33
+      '@types/node': 22.19.11
 
   '@types/normalize-package-data@2.4.4': {}
 
