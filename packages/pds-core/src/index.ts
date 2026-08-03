@@ -26,16 +26,9 @@ import type * as http from 'node:http'
 import { randomBytes } from 'node:crypto'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-/* v8 ignore next 4 -- module-level init, only testable via e2e */
-const atprotoPdsPkg: { version: string } = JSON.parse(
-  readFileSync(
-    createRequire(import.meta.url).resolve('@atproto/pds/package.json'),
-    'utf8',
-  ),
-)
+import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
 import { HandleUnavailableError } from '@atproto/oauth-provider/errors'
 import type { Account } from '@atproto/oauth-provider/store'
 import type { DidString } from '@atproto/syntax'
@@ -80,6 +73,14 @@ import { createAuthUiGuard, parsePromptTokens } from './auth-ui-guard.js'
 import { loadDeviceAccountEmails } from './lib/device-accounts.js'
 import { handleCallbackError } from './lib/epds-callback-error.js'
 import { installTestHooks } from './lib/test-hooks.js'
+
+/* v8 ignore next 4 -- module-level init, only testable via e2e */
+const atprotoPdsPkg: { version: string } = JSON.parse(
+  readFileSync(
+    createRequire(import.meta.url).resolve('@atproto/pds/package.json'),
+    'utf8',
+  ),
+)
 
 const logger = createLogger('pds-core')
 
