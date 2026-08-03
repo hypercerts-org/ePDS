@@ -238,6 +238,11 @@ export function buildChooserEnrichmentScript(): string {
   // its compiled bundle. Match by exact text content; the button lives
   // inside #root alongside the chooser list. Idempotent via
   // dataset.epdsHidden so the MutationObserver doesn't thrash.
+  //
+  // NOTE: oauth-provider-ui 0.8 dropped the "Sign up" button from the
+  // account-selector page (no "Sign up"/"Create account" string in the
+  // account-page bundle), so this is currently a no-op. Kept as a cheap
+  // guard in case a signup affordance returns to the chooser upstream.
   function hideSignup() {
     var root = document.getElementById('root');
     if (!root) return;
@@ -269,19 +274,29 @@ export function buildChooserEnrichmentScript(): string {
     if (!root) return;
     // Upstream @atproto/oauth-provider-ui renders this as a
     // div-with-role, NOT a native button:
-    //   <div role="button" aria-label="Login to account that is not listed">
-    //     Another account
+    //   <div role="button" aria-label="Sign in to an account that is not listed">
+    //     Select another account
     //   </div>
-    // The aria-label is more stable across upstream copy changes than
-    // the visible text, so match on that with a text-content fallback
-    // scoped to anything with role=button (div OR button).
-    var btn = root.querySelector(
-      '[role="button"][aria-label="Login to account that is not listed"]',
-    );
+    // The aria-label copy changed in oauth-provider-ui 0.8 ("Login to
+    // account…" -> "Sign in to an account…", visible text "Another
+    // account" -> "Select another account"). Match either aria-label,
+    // then fall back to either visible-text variant scoped to role=button
+    // (div OR button) so a future copy tweak degrades rather than breaks.
+    var ARIA_LABELS = [
+      'Sign in to an account that is not listed',
+      'Login to account that is not listed',
+    ];
+    var TEXTS = ['Select another account', 'Another account'];
+    var btn = null;
+    for (var a = 0; a < ARIA_LABELS.length && !btn; a++) {
+      btn = root.querySelector(
+        '[role="button"][aria-label="' + ARIA_LABELS[a] + '"]',
+      );
+    }
     if (!btn) {
       var candidates = root.querySelectorAll('[role="button"]');
       for (var i = 0; i < candidates.length; i++) {
-        if ((candidates[i].textContent || '').trim() === 'Another account') {
+        if (TEXTS.indexOf((candidates[i].textContent || '').trim()) >= 0) {
           btn = candidates[i];
           break;
         }

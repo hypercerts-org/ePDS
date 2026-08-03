@@ -507,9 +507,13 @@ describe('buildChooserEnrichmentScript sign-up hide + another-account rebind', (
     // Capture-phase is essential — React's delegated root-level click
     // listener fires in bubble phase, so a bubble listener on the button
     // would run AFTER React swaps to upstream's stock sign-in component.
-    expect(script).toContain(
-      '\'[role="button"][aria-label="Login to account that is not listed"]\'',
-    )
+    // oauth-provider-ui 0.8 changed the copy, so the script matches both
+    // the current and previous aria-label / visible-text variants.
+    expect(script).toContain('Sign in to an account that is not listed')
+    expect(script).toContain('Login to account that is not listed')
+    expect(script).toContain('Select another account')
+    expect(script).toContain('Another account')
+    expect(script).toContain('[role="button"][aria-label="')
     expect(script).toContain('e.preventDefault()')
     expect(script).toContain('e.stopImmediatePropagation()')
     expect(script).toContain('window.location.href')
