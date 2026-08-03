@@ -723,6 +723,28 @@ describe('renderLoginPage flow-aborted notice + reactive abort gates', () => {
     expect(branchSlice).toContain('showFlowAbortedNotice();')
   })
 
+  it('tells the user on resend that earlier codes are dead', () => {
+    const html = renderDefault()
+    // Resending invalidates every earlier OTP, and a user who got as
+    // far as resending may have mail sitting in spam. Both facts are
+    // noise for the majority who sign in on the first code, so they
+    // live in the resend confirmation rather than in permanently
+    // visible page copy — which is what makes this worth pinning: a
+    // refactor that "tidies" the message back to a bare
+    // acknowledgement silently loses both.
+    const handlerStart = html.indexOf("'btn-resend').addEventListener")
+    expect(handlerStart).toBeGreaterThan(0)
+    const handlerEnd = html.indexOf(
+      "'btn-back').addEventListener",
+      handlerStart,
+    )
+    const handlerBody = html.slice(handlerStart, handlerEnd)
+    expect(handlerBody).toContain('earlier ones no longer work')
+    expect(handlerBody).toContain('spam folder')
+    // The success branch must not regress to a bare acknowledgement.
+    expect(handlerBody).not.toContain("showSuccess('Code resent!')")
+  })
+
   it('gates the Resend click on abortIfFlowDead', () => {
     const html = renderDefault()
     // The Resend click handler must call abortIfFlowDead and
