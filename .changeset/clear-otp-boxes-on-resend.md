@@ -2,8 +2,8 @@
 'ePDS': patch
 ---
 
-Clicking "Resend code" now empties the digit boxes for the new code.
+Asking for a new sign-in code now clears the boxes and tells you the old code has stopped working.
 
 **Affects:** End users
 
-**End users:** if you started typing your sign-in code, realised you'd made a mistake, and clicked **Resend code**, the boxes still held the digits you had typed. You had to delete them yourself before you could enter the fresh code. The boxes now reset on Resend so you can just type the new code straight away.
+**End users:** the boxes reset on **Resend code**, so a half-typed old code no longer has to be deleted by hand before you can type the new one. The confirmation message that replaces "Code resent!" also warns that only the newest code will be accepted, and points at the spam folder — the two things most likely to be going wrong for anyone who got as far as resending.

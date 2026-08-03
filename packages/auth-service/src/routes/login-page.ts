@@ -1328,7 +1328,14 @@ export function renderLoginPage(opts: {
           // starts from a clean, focused input grid.
           clearOtpBoxes();
           if (otpBoxes.length) otpBoxes[0].focus();
-          showSuccess('Code resent!');
+          // Both facts only matter once a resend has happened, so they
+          // live here rather than in permanently-visible page copy:
+          // sending a new OTP invalidates every earlier one, and a user
+          // who needed to resend is the user whose mail may be in spam.
+          showSuccess(
+            'Use the new code; earlier ones no longer work. ' +
+              'It may be in your spam folder.',
+          );
         }
       });
 
