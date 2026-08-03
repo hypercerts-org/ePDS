@@ -3,6 +3,7 @@ import {
   canLookUpAccountByHandle,
   canCheckHandle,
   canResolveHandle,
+  isValidConstructedHandle,
 } from '../lib/identifier-guards.js'
 
 describe('canLookUpAccountByHandle', () => {
@@ -58,5 +59,23 @@ describe('canResolveHandle', () => {
 
   it('rejects an empty domain', () => {
     expect(canResolveHandle('')).toBe(false)
+  })
+})
+
+describe('isValidConstructedHandle', () => {
+  it('accepts a well-formed `${local}.${domain}` handle', () => {
+    expect(isValidConstructedHandle('alice.example.com')).toBe(true)
+  })
+
+  it('accepts a generated random-style handle', () => {
+    expect(isValidConstructedHandle('brave-otter-42.example.com')).toBe(true)
+  })
+
+  it('rejects a handle with no domain suffix (construction bug)', () => {
+    expect(isValidConstructedHandle('alice')).toBe(false)
+  })
+
+  it('rejects a handle containing whitespace', () => {
+    expect(isValidConstructedHandle('alice bob.example.com')).toBe(false)
   })
 })

@@ -38,11 +38,12 @@ const atprotoPdsPkg: { version: string } = JSON.parse(
 )
 import { HandleUnavailableError } from '@atproto/oauth-provider/errors'
 import type { Account } from '@atproto/oauth-provider/store'
-import { isValidHandle, type DidString } from '@atproto/syntax'
+import type { DidString } from '@atproto/syntax'
 import {
   canLookUpAccountByHandle,
   canCheckHandle,
   canResolveHandle,
+  isValidConstructedHandle,
 } from './lib/identifier-guards.js'
 import {
   generateRandomHandle,
@@ -348,7 +349,7 @@ async function main() {
         // validateLocalPart above. Brand it as HandleString for the strongly
         // typed account APIs; a failure here means the constructed handle is
         // malformed (a bug), so fail loudly rather than proceed.
-        if (!isValidHandle(chosenHandle)) {
+        if (!isValidConstructedHandle(chosenHandle)) {
           logger.error(
             { handle: chosenHandle },
             'constructed handle failed validation',
@@ -437,7 +438,7 @@ async function main() {
             const randomHandle = generateRandomHandle(handleDomain)
             // generateRandomHandle always yields `${local}.${domain}`; brand it
             // for the strongly typed createAccount input.
-            if (!isValidHandle(randomHandle)) {
+            if (!isValidConstructedHandle(randomHandle)) {
               throw new Error(
                 `generated handle failed validation: ${randomHandle}`,
               )

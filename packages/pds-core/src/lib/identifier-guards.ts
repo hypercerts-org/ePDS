@@ -48,3 +48,17 @@ export function canCheckHandle(handle: string): handle is HandleString {
 export function canResolveHandle(handle: string): handle is HandleString {
   return isValidHandle(handle)
 }
+
+/**
+ * A handle constructed for account creation — either `${localPart}.${domain}`
+ * from the user's chosen local part (already validated by `validateLocalPart`)
+ * or one produced by `generateRandomHandle`. Both should always be valid; a
+ * `false` result means the construction is buggy, and the caller fails loudly
+ * (500 for the chosen handle, throw+retry for the random one) rather than
+ * passing an unbranded string to `createAccount`.
+ */
+export function isValidConstructedHandle(
+  handle: string,
+): handle is HandleString {
+  return isValidHandle(handle)
+}
