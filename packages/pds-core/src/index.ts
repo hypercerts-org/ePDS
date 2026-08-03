@@ -25,6 +25,7 @@ applyPdsPortFallback()
 import type * as http from 'node:http'
 import { randomBytes } from 'node:crypto'
 import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -941,7 +942,9 @@ async function main() {
   // pds-core-rendered error page and the /preview/consent shell can
   // reference the Certified favicon without a cross-origin request to
   // the auth-service host.
-  const publicDir = path.resolve(__dirname, '..', 'public')
+  // ESM has no __dirname; derive this module's directory from import.meta.url.
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url))
+  const publicDir = path.resolve(moduleDir, '..', 'public')
   pds.app.get('/favicon.ico', (_req, res) => {
     res.sendFile(path.join(publicDir, 'favicon.svg'))
   })
