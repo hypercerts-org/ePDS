@@ -14,9 +14,9 @@
   },
   "dependencies": {
     "@atproto/crypto": "^0.4.5",
-    "@atproto/oauth-provider": "^0.15.9",
-    "@atproto/oauth-provider-ui": "^0.4.3",
-    "@atproto/pds": "^0.4.209",
+    "@atproto/oauth-provider": "^0.21.1",
+    "@atproto/oauth-provider-ui": "^0.8.9",
+    "@atproto/pds": "^0.5.23",
     "@certified-app/shared": "workspace:*",
     "@did-plc/lib": "^0.0.4",
     "dotenv": "^16.3.1",
