@@ -537,6 +537,14 @@ export function renderLoginPage(opts: {
       },
       'Unable to apply OTP branding projections; using the original client CSS. Check branding.css in /preview/login-otp',
     )
+    logger.debug(
+      {
+        err: otpBranding.failure.cause,
+        clientId: opts.clientId,
+        failureKind: otpBranding.failure.kind,
+      },
+      'OTP branding projection failure details',
+    )
   }
   // The browser uses the exact pure normalizer covered by otp-input.test.ts.
   // It is self-contained, so serializing its source avoids maintaining a

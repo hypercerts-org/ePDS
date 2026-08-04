@@ -139,6 +139,22 @@ describe('adaptOtpBrandingCss', () => {
     expect(result.css).toContain(OTP_PLACEHOLDER_ALIAS)
   })
 
+  it('preserves keyframe offsets while projecting ordinary selectors', () => {
+    const result = adaptOtpBrandingCss(`
+      @keyframes otp-caret-blink {
+        0%, 70%, 100% { opacity: 1; }
+        20%, 50% { opacity: 0; }
+      }
+      input { color: #1a130f !important; }
+    `)
+
+    expect(result.status).toBe('adapted')
+    expect(result.rewrites).toEqual(['input'])
+    expect(result.css).toContain('@keyframes otp-caret-blink')
+    expect(result.css).toContain('20%, 50% { opacity: 0; }')
+    expect(result.css).toContain(SLOT_ALIAS)
+  })
+
   it('does not project mechanical declarations onto visual slots', () => {
     const css = `
       input,

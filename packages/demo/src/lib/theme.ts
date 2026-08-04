@@ -126,8 +126,8 @@ function buildInjectedCss(
     `.field input::placeholder { color: ${page.textHint}; }`,
     // Deliberately use the broad selectors found in trusted production
     // clients so the bundled demo continuously exercises OTP projection.
-    `input { background: ${page.inputBg}; border-color: ${page.inputBorder}; color: ${page.text}; }`,
-    `input::placeholder { color: ${page.textHint}; }`,
+    `input { background: ${page.inputBg} !important; border-color: ${page.inputBorder} !important; color: ${page.text} !important; }`,
+    `input::placeholder { color: ${page.textHint} !important; }`,
     `input:focus { border-color: ${page.focusBorder} !important; }`,
     `.btn-primary { background: ${page.primary}; color: ${page.primaryText}; }`,
     `.btn-primary:hover { background: ${page.primaryHover}; }`,

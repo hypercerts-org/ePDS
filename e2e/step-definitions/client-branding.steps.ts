@@ -30,6 +30,17 @@ const INJECTED_CSS_SIGNATURE = 'body { background: #1a1208'
 // retint it.
 const DEFAULT_LOGIN_BG_RGB = 'rgb(232, 232, 232)' // #E8E8E8
 
+// Stable computed signatures for the trusted demo's default amber theme.
+// These are intentionally independent of other elements on the rendered page
+// so a regression affecting both source inputs and projected slots still fails.
+const TRUSTED_OTP_STYLE = {
+  slotColor: 'rgb(254, 243, 199)', // #fef3c7
+  slotBackground: 'rgb(26, 18, 8)', // #1a1208
+  slotBorderColor: 'rgb(74, 53, 32)', // #4a3520
+  placeholderColor: 'rgb(185, 139, 85)', // #b98b55
+  activeBorderColor: 'rgb(245, 158, 11)', // #f59e0b
+} as const
+
 async function waitForLoginPage(world: EpdsWorld): Promise<void> {
   const page = getPage(world)
   // Wait for auth-service-specific element — #step-otp only exists on
@@ -117,17 +128,12 @@ Then(
     const input = page.locator('#code')
     await expect(input).toBeVisible()
     await input.focus()
-    await page.waitForFunction(() => {
+    await page.waitForFunction((expectedBorder) => {
       const slot = document.querySelector<HTMLElement>('.otp-box.active')
-      if (!slot) return false
-
-      const probe = document.createElement('span')
-      probe.style.color = 'var(--focus-border)'
-      document.body.appendChild(probe)
-      const expectedFocus = getComputedStyle(probe).color
-      probe.remove()
-      return getComputedStyle(slot).borderColor === expectedFocus
-    })
+      return slot
+        ? getComputedStyle(slot).borderColor === expectedBorder
+        : false
+    }, TRUSTED_OTP_STYLE.activeBorderColor)
 
     const result = await page.evaluate(() => {
       const slot = document.querySelector<HTMLElement>('.otp-box.active')
@@ -137,17 +143,7 @@ Then(
       const idleSlot = document.querySelector<HTMLElement>(
         '.otp-box:not(.active)',
       )
-      const emailInput = document.querySelector<HTMLInputElement>('#email')
-      const heading = document.querySelector<HTMLElement>('#heading')
-      if (!slot || !character || !idleSlot || !emailInput || !heading) {
-        return null
-      }
-
-      const probe = document.createElement('span')
-      probe.style.color = 'var(--focus-border)'
-      document.body.appendChild(probe)
-      const expectedFocus = getComputedStyle(probe).color
-      probe.remove()
+      if (!slot || !character || !idleSlot) return null
 
       const css = Array.from(document.querySelectorAll('style'))
         .map((style) => style.textContent)
@@ -162,16 +158,10 @@ Then(
           ':where(#otp-boxes)>div:where(.otp-box)>span:where(.otp-character.placeholder)',
         ),
         slotColor: getComputedStyle(slot).color,
-        headingColor: getComputedStyle(heading).color,
         slotBackground: getComputedStyle(idleSlot).backgroundColor,
-        expectedInputBackground: getComputedStyle(emailInput).backgroundColor,
         slotBorderColor: getComputedStyle(idleSlot).borderColor,
-        expectedInputBorderColor: getComputedStyle(emailInput).borderColor,
         placeholderColor: getComputedStyle(character).color,
-        expectedPlaceholderColor: getComputedStyle(emailInput, '::placeholder')
-          .color,
         activeBorderColor: getComputedStyle(slot).borderColor,
-        expectedFocus,
       }
     })
 
@@ -180,12 +170,8 @@ Then(
       hasInputAlias: true,
       hasFocusAlias: true,
       hasPlaceholderAlias: true,
+      ...TRUSTED_OTP_STYLE,
     })
-    expect(result?.slotColor).toBe(result?.headingColor)
-    expect(result?.slotBackground).toBe(result?.expectedInputBackground)
-    expect(result?.slotBorderColor).toBe(result?.expectedInputBorderColor)
-    expect(result?.placeholderColor).toBe(result?.expectedPlaceholderColor)
-    expect(result?.activeBorderColor).toBe(result?.expectedFocus)
   },
 )
 
