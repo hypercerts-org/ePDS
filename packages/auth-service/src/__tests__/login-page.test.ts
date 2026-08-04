@@ -500,7 +500,9 @@ describe('renderLoginPage handle login button', () => {
 // tests pin its structure so accidental refactors (removing the guard,
 // moving it after the fetch, resetting the flag unconditionally on
 // success) fail loudly.
-function renderDefault(): string {
+type LoginPageOpts = Parameters<typeof renderLoginPage>[0]
+
+function renderDefault(overrides: Partial<LoginPageOpts> = {}): string {
   return renderLoginPage({
     flowId: 'flow-1',
     clientId: 'https://example.com/client-metadata.json',
@@ -518,6 +520,7 @@ function renderDefault(): string {
     otpLength: 6,
     otpCharset: 'numeric',
     heartbeatEnabled: false,
+    ...overrides,
   })
 }
 
@@ -618,14 +621,53 @@ describe('renderLoginPage inline Resend action on expired OTP', () => {
     expect(html).toContain("document.getElementById('btn-resend').click()")
   })
 
-  it('falls back to the plain showError on non-expired errors', () => {
+  it('renders exactly one flash region, inside the active step', () => {
+    // One element, so there is only ever one aria-live region for a
+    // screen reader to track; it is reparented between the two slots
+    // on step transitions rather than duplicated.
+    const emailStep = renderDefault()
+    expect(emailStep.match(/id="error-msg"/g)).toHaveLength(1)
+    expect(emailStep).toMatch(/flash-slot-email"><div id="error-msg"/)
+
+    const otpStep = renderDefault({
+      loginHint: 'a@b.com',
+      initialStep: 'otp',
+      otpAlreadySent: true,
+    })
+    expect(otpStep.match(/id="error-msg"/g)).toHaveLength(1)
+    expect(otpStep).toMatch(/flash-slot-otp"><div id="error-msg"/)
+  })
+
+  it('places the OTP flash slot between the boxes and Verify', () => {
     const html = renderDefault()
-    // The non-expired branch must NOT route through
-    // showErrorWithAction (otherwise an "Invalid code" message
-    // would carry an inappropriate "Send a new code" link).
+    // Position is the point of the slot: a rejected code must read at
+    // the input the user just filled, not above the subtitle.
+    const boxes = html.indexOf('id="otp-boxes"')
+    const slot = html.indexOf('id="flash-slot-otp"')
+    const verify = html.indexOf('>Verify<')
+    expect(boxes).toBeGreaterThan(-1)
+    expect(slot).toBeGreaterThan(boxes)
+    expect(verify).toBeGreaterThan(slot)
+  })
+
+  it('offers an inline resend on any rejected code', () => {
+    const html = renderDefault()
+    // "Invalid OTP" is not reliably a typo — better-auth also throws it
+    // when no stored code exists at all, which is the terminal state
+    // after a lockout, after the code was consumed in another tab, and
+    // after expiry cleanup. Retyping cannot recover any of those, so
+    // the action must not be withheld from the plain-invalid branch.
     expect(html).toMatch(
-      /if \(isExpired\) \{[\s\S]*?\} else \{[\s\S]*?showError\(result\.error\);\s*\}/,
+      /else if \(!parLikelyDead\(\)\)[\s\S]*?showErrorWithAction\(\s*result\.error,\s*'Resend code'/,
     )
+  })
+
+  it('withholds the inline resend once the flow is dead', () => {
+    const html = renderDefault()
+    // refreshResendVisibility() hides the standalone Resend button when
+    // the PAR is dead; an inline one would re-offer a withdrawn action.
+    // The bare else is that path — plain message, no CTA.
+    expect(html).toMatch(/\} else \{\s*showError\(result\.error\);\s*\}/)
   })
 })
 
@@ -721,6 +763,28 @@ describe('renderLoginPage flow-aborted notice + reactive abort gates', () => {
     const branchSlice = html.slice(guardIdx, guardIdx + 600)
     expect(branchSlice).toContain('stopHeartbeat();')
     expect(branchSlice).toContain('showFlowAbortedNotice();')
+  })
+
+  it('tells the user on resend that earlier codes are dead', () => {
+    const html = renderDefault()
+    // Resending invalidates every earlier OTP, and a user who got as
+    // far as resending may have mail sitting in spam. Both facts are
+    // noise for the majority who sign in on the first code, so they
+    // live in the resend confirmation rather than in permanently
+    // visible page copy — which is what makes this worth pinning: a
+    // refactor that "tidies" the message back to a bare
+    // acknowledgement silently loses both.
+    const handlerStart = html.indexOf("'btn-resend').addEventListener")
+    expect(handlerStart).toBeGreaterThan(0)
+    const handlerEnd = html.indexOf(
+      "'btn-back').addEventListener",
+      handlerStart,
+    )
+    const handlerBody = html.slice(handlerStart, handlerEnd)
+    expect(handlerBody).toContain('earlier ones no longer work')
+    expect(handlerBody).toContain('spam folder')
+    // The success branch must not regress to a bare acknowledgement.
+    expect(handlerBody).not.toContain("showSuccess('Code resent!')")
   })
 
   it('gates the Resend click on abortIfFlowDead', () => {

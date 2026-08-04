@@ -559,6 +559,14 @@ export function renderLoginPage(opts: {
   const hasGithub = 'github' in socialProviders
   const hasSocialProviders = hasGoogle || hasGithub
 
+  // The flash region is a single element shared by both steps, so there
+  // is only ever one live region for assistive tech to track. It is
+  // server-rendered into whichever step is initially visible and moved
+  // between the two slots on step transitions; both transitions call
+  // clearError() first, so it is always empty when it moves.
+  const flashRegionHtml =
+    '<div id="error-msg" class="flash-msg hidden" role="status" aria-live="polite"></div>'
+
   // Social login buttons — redirect to better-auth provider endpoints
   const socialButtonsHtml = hasSocialProviders
     ? `
@@ -633,6 +641,7 @@ export function renderLoginPage(opts: {
     .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: var(--muted-foreground); font-size: 13px; }
     .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #ececec; }
     .flash-msg { padding: 12px; border-radius: 10px; margin: 12px 0; font-size: 14px; text-align: center; }
+    .flash-msg.hidden { display: none; }
     .flash-msg.error { color: #dc3545; background: #fdf0f0; }
     .flash-msg.success { color: #28a745; background: #f0fff4; }
     /* Inline action button rendered next to an OTP-expired error so
@@ -662,8 +671,6 @@ export function renderLoginPage(opts: {
     ${logoHtml}
     <h1 id="heading">${opts.initialStep === 'otp' ? 'Enter your code' : 'Sign in'}</h1>
 
-    <div id="error-msg" class="flash-msg" style="display:none;" role="status" aria-live="polite"></div>
-
     ${socialButtonsHtml}
 
     <!-- Step 1: Email entry (calls better-auth sendOtp) -->
@@ -677,6 +684,11 @@ export function renderLoginPage(opts: {
                  value="${escapeHtml(opts.loginHint)}">
         </div>
         ${renderEmailTypoGuardMarkup()}
+        <!-- Flash slot: the shared #error-msg region is moved in here
+             while the email step is active, so a send failure reads
+             directly under the field that caused it rather than above
+             the heading. -->
+        <div id="flash-slot-email">${opts.initialStep === 'otp' ? '' : flashRegionHtml}</div>
         <button type="submit" class="btn-primary">Continue</button>
       </form>
       ${handleLoginButtonHtml}
@@ -704,6 +716,12 @@ export function renderLoginPage(opts: {
             )
             .join('\n          ')}
         </div>
+        <!-- Flash slot: see #flash-slot-email. Sitting between the
+             boxes and Verify puts a rejected-code message at the point
+             of failure — where the user's attention already is after
+             typing — instead of above the subtitle, and places the
+             inline Resend action next to it. -->
+        <div id="flash-slot-otp">${opts.initialStep === 'otp' ? flashRegionHtml : ''}</div>
         <button type="submit" class="btn-primary">Verify</button>
       </form>
       <div class="otp-actions">
@@ -1023,7 +1041,7 @@ export function renderLoginPage(opts: {
       function setFlash(kind, buildContent) {
         errorEl.classList.remove('error', 'success');
         errorEl.classList.add(kind);
-        errorEl.style.display = 'block';
+        errorEl.classList.remove('hidden');
 
         var frag = document.createDocumentFragment();
         buildContent(frag);
@@ -1078,13 +1096,32 @@ export function renderLoginPage(opts: {
         });
       }
 
+      /**
+       * Reparent the single flash region into the active step's slot,
+       * so a message always renders at the point of failure — under
+       * the email field on the email step, between the code boxes and
+       * Verify on the OTP step.
+       *
+       * Callers must clearError() first: moving a *populated* live
+       * region across parents can re-announce or drop the message
+       * depending on the screen reader. Both step transitions already
+       * clear before switching, so the region is empty whenever it
+       * moves here.
+       */
+      function moveFlashTo(slotId) {
+        var slot = document.getElementById(slotId);
+        if (slot && errorEl && errorEl.parentNode !== slot) {
+          slot.appendChild(errorEl);
+        }
+      }
+
       function clearError() {
         // Empty the region before hiding it. Clearing after the
-        // display:none would mutate a region that is already out of
+        // region is hidden would mutate one that is already out of
         // the accessibility tree, which some assistive tech reports
         // as a stale announcement.
         errorEl.replaceChildren();
-        errorEl.style.display = 'none';
+        errorEl.classList.add('hidden');
         errorEl.classList.remove('error', 'success');
       }
 
@@ -1138,6 +1175,7 @@ export function renderLoginPage(opts: {
         clearOtpBoxes();
         if (otpBoxes.length) otpBoxes[0].focus();
         clearError();
+        moveFlashTo('flash-slot-otp');
         startHeartbeat();
         refreshResendVisibility();
       }
@@ -1148,6 +1186,7 @@ export function renderLoginPage(opts: {
         headingEl.textContent = 'Sign in';
         if (termsEl) termsEl.style.display = 'block';
         clearError();
+        moveFlashTo('flash-slot-email');
         stopHeartbeat();
         // Reset the email field — the user clicked "Use different
         // email" precisely to escape the previous value, so leaving
@@ -1285,6 +1324,43 @@ export function renderLoginPage(opts: {
                   document.getElementById('btn-resend').click();
                 });
               }
+            } else if (!parLikelyDead()) {
+              // Every other verify failure gets the same inline
+              // shortcut, for the same reason as the expired path: the
+              // standalone Resend button sits below the form and is
+              // easy to miss.
+              //
+              // 3d31876 originally kept non-expired errors on the plain
+              // path, reasoning that a typo should be retyped rather
+              // than resent. But "Invalid OTP" does not reliably mean
+              // a typo: better-auth throws it from two places
+              // (1.4.18 email-otp/routes.mjs) — the wrong-code
+              // comparison, and a missing stored code. The second
+              // covers several states where retyping cannot possibly
+              // work and a fresh code is the only recovery:
+              //
+              //   - after a lockout. TOO_MANY_ATTEMPTS deletes the
+              //     stored value, so it is reported exactly once and
+              //     every later submit falls through to "Invalid OTP".
+              //   - after the code was consumed elsewhere, e.g. the
+              //     user completed sign-in in another tab.
+              //   - after expiry cleanup deleted the value, so a later
+              //     submit reads "Invalid OTP" rather than "expired".
+              //
+              // Since the branch cannot distinguish those from a typo,
+              // withholding the action strands the users who need it
+              // most. Offering it costs a typo-ing user nothing: the
+              // boxes are cleared and focused for retyping either way.
+              //
+              // Gated on parLikelyDead() because
+              // refreshResendVisibility() hides the standalone Resend
+              // button in that state; surfacing an inline one anyway
+              // would re-offer an action the page has deliberately
+              // withdrawn. The aborted-flow notice carries its own
+              // restart action, so nothing is lost by staying quiet.
+              showErrorWithAction(result.error, 'Resend code', function() {
+                document.getElementById('btn-resend').click();
+              });
             } else {
               showError(result.error);
             }
@@ -1324,7 +1400,18 @@ export function renderLoginPage(opts: {
         if (result.error) {
           showError(result.error);
         } else {
-          showSuccess('Code resent!');
+          // Clear any characters typed for the old code so the new code
+          // starts from a clean, focused input grid.
+          clearOtpBoxes();
+          if (otpBoxes.length) otpBoxes[0].focus();
+          // Both facts only matter once a resend has happened, so they
+          // live here rather than in permanently-visible page copy:
+          // sending a new OTP invalidates every earlier one, and a user
+          // who needed to resend is the user whose mail may be in spam.
+          showSuccess(
+            'Resent! Make sure to use the new code; earlier ones no longer work. ' +
+              'It may be in your spam folder.',
+          );
         }
       });
 

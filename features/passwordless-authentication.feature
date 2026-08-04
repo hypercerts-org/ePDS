@@ -265,8 +265,10 @@ Feature: Passwordless authentication via email OTP
     And the user enters the OTP code
     Then the verification form shows an "OTP expired" error
     And the OTP entry boxes are visible and enabled
-    When the user requests a new OTP via the resend button
+    When the user enters two digits from the old OTP
+    And the user requests a new OTP via the resend button
     Then a fresh OTP email arrives in the mail trap for the test email
+    And the OTP entry boxes are empty with the first box focused
     When the user enters the OTP code
     And the user picks a handle
     Then the browser is redirected back to the demo client
