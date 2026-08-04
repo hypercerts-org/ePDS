@@ -1006,3 +1006,79 @@ describe('renderLoginPage link-affordance convention', () => {
     }
   })
 })
+
+describe('renderLoginPage incomplete-OTP guard', () => {
+  // Two layers: Verify renders disabled and only enables once every slot
+  // is filled (so an incomplete code is visibly un-submittable), and the
+  // submit handler still bails on a short code for the paths that reach
+  // submit without the button (Enter, autofill, requestSubmit).
+
+  it('renders the Verify button disabled', () => {
+    const html = renderDefault()
+    expect(html).toContain(
+      '<button type="submit" class="btn-primary" disabled>Verify</button>',
+    )
+  })
+
+  it('styles the disabled button as inert without breaking contrast', () => {
+    const html = renderDefault()
+    // 0.6 is the floor that keeps the white label on the default brand
+    // colour at ~4.9:1 (WCAG AA); fading further makes it unreadable.
+    expect(html).toContain('.btn-primary:disabled { opacity: 0.6;')
+    // Hover must not brighten a disabled button — that reads as clickable.
+    expect(html).toContain('.btn-primary:hover:not(:disabled)')
+  })
+
+  it('drives the button state from the filled-slot count', () => {
+    const html = renderDefault()
+    const fnStart = html.indexOf('function syncVerifyButtonState()')
+    expect(fnStart).toBeGreaterThan(0)
+    const fnEnd = html.indexOf('function updateHiddenCode', fnStart)
+    expect(fnEnd).toBeGreaterThan(fnStart)
+    const fnBody = html.slice(fnStart, fnEnd)
+    expect(fnBody).toMatch(
+      /verifyBtn\.disabled = hiddenCode\.value\.length < otpBoxes\.length/,
+    )
+  })
+
+  it('never re-enables Verify mid-verify or after the flow is aborted', () => {
+    const html = renderDefault()
+    const fnStart = html.indexOf('function syncVerifyButtonState()')
+    const fnEnd = html.indexOf('function updateHiddenCode', fnStart)
+    const fnBody = html.slice(fnStart, fnEnd)
+    // Those owners disabled the button for reasons unrelated to length;
+    // re-enabling would resurrect a control they deliberately killed.
+    expect(fnBody).toMatch(/if \(verifying \|\| flowAborted\) return/)
+  })
+
+  it('syncs the button whenever the code value changes', () => {
+    const html = renderDefault()
+    for (const fn of [
+      'function updateHiddenCode()',
+      'function clearOtpBoxes()',
+    ]) {
+      const fnStart = html.indexOf(fn)
+      expect(fnStart).toBeGreaterThan(0)
+      const fnBody = html.slice(fnStart, html.indexOf('}', fnStart))
+      expect(fnBody).toContain('syncVerifyButtonState()')
+    }
+  })
+
+  it('keeps the submit-handler completeness guard as a backstop', () => {
+    const html = renderDefault()
+    const handlerStart = html.indexOf("'form-verify-otp').addEventListener")
+    const handlerBody = html.slice(handlerStart)
+    // Enter / autofill / requestSubmit reach submit without the button.
+    expect(handlerBody).toMatch(/if \(otp\.length < otpBoxes\.length\)/)
+  })
+
+  it('re-enables via the sync helper after a failed verify, not blindly', () => {
+    const html = renderDefault()
+    const handlerStart = html.indexOf("'form-verify-otp').addEventListener")
+    const handlerBody = html.slice(handlerStart)
+    // The error path clears the boxes, so an unconditional
+    // btn.disabled = false would re-enable Verify on an empty code.
+    expect(handlerBody).not.toMatch(/btn\.disabled = false/)
+    expect(handlerBody).toContain('syncVerifyButtonState()')
+  })
+})

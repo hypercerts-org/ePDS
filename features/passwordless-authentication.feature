@@ -403,31 +403,36 @@ Feature: Passwordless authentication via email OTP
     When the user clicks "Use different email"
     Then the email input is empty and focused
 
-  # Clicking Verify before the code was complete used to flash "Invalid OTP",
+  # Submitting before the code was complete used to flash "Invalid OTP",
   # which is dishonest: the user had not entered an invalid full code. It also
   # burned a real call to better-auth's /sign-in/email-otp endpoint, which
-  # counts against the rate-limiter. Cover both the empty and partial states.
+  # counts against the rate-limiter. Verify is now disabled until every slot
+  # is filled, and the submit handler still guards the paths that bypass the
+  # button (Enter, autofill). Cover both the empty and partial states.
   @email @verify-incomplete-otp
-  Scenario: Submitting Verify with an empty code does not send a verification request
+  Scenario: Verify is disabled and an empty submit sends no verification request
     When the demo client initiates an OAuth login
     Then the browser is redirected to the auth service login page
     And the login page displays an email input form
     When the user enters a unique test email and submits
     Then the login page shows an OTP verification form
-    When the user clicks the Verify button without entering a code
+    And the Verify button is disabled
+    When the user tries to submit the OTP form without entering a code
     Then no OTP verification request is sent
     And no "Invalid OTP" error is shown
+    And the Verify button is disabled
 
   @email @verify-incomplete-otp
-  Scenario: Submitting Verify with a partial code does not send a verification request
+  Scenario: Verify stays disabled and a partial submit sends no verification request
     When the demo client initiates an OAuth login
     Then the browser is redirected to the auth service login page
     And the login page displays an email input form
     When the user enters a unique test email and submits
     Then the login page shows an OTP verification form
-    When the user enters two OTP digits and clicks the Verify button
+    When the user enters two OTP digits and tries to submit the OTP form
     Then no OTP verification request is sent
     And no "Invalid OTP" error is shown
+    And the Verify button is disabled
 
   @email @demo-cookie-expiry @bug-report
   Scenario: Demo client's OAuth cookie has expired by the time of callback — useful error, not generic auth_failed

@@ -974,7 +974,16 @@ Then('the email input is empty and focused', async function (this: EpdsWorld) {
 // Incomplete-OTP submit guard
 // ---------------------------------------------------------------------------
 
-async function clickVerifyWithIncompleteOtp(
+/**
+ * Fill `digitCount` OTP slots, then try to submit anyway.
+ *
+ * Verify is disabled while the code is incomplete, so a real click cannot
+ * reach the handler — Playwright would just wait for the button to become
+ * actionable. Submitting the form directly bypasses the disabled button and
+ * exercises the JS completeness guard, which is the layer that also covers
+ * Enter and autofill-triggered submits.
+ */
+async function attemptSubmitWithIncompleteOtp(
   world: EpdsWorld,
   digitCount: number,
 ): Promise<void> {
@@ -992,7 +1001,10 @@ async function clickVerifyWithIncompleteOtp(
   }
   page.on('request', countVerifyRequest)
   try {
-    await page.click('#form-verify-otp button[type=submit]')
+    await page.evaluate(() => {
+      const form = document.getElementById('form-verify-otp')
+      if (form instanceof HTMLFormElement) form.requestSubmit()
+    })
     await page.waitForTimeout(1_000)
   } finally {
     page.off('request', countVerifyRequest)
@@ -1001,18 +1013,25 @@ async function clickVerifyWithIncompleteOtp(
 }
 
 When(
-  'the user clicks the Verify button without entering a code',
+  'the user tries to submit the OTP form without entering a code',
   async function (this: EpdsWorld) {
-    await clickVerifyWithIncompleteOtp(this, 0)
+    await attemptSubmitWithIncompleteOtp(this, 0)
   },
 )
 
 When(
-  'the user enters two OTP digits and clicks the Verify button',
+  'the user enters two OTP digits and tries to submit the OTP form',
   async function (this: EpdsWorld) {
-    await clickVerifyWithIncompleteOtp(this, 2)
+    await attemptSubmitWithIncompleteOtp(this, 2)
   },
 )
+
+Then('the Verify button is disabled', async function (this: EpdsWorld) {
+  const page = getPage(this)
+  await expect(
+    page.locator('#form-verify-otp button[type=submit]'),
+  ).toBeDisabled({ timeout: 5_000 })
+})
 
 Then('no OTP verification request is sent', function (this: EpdsWorld) {
   expect(this.otpVerifyRequestCount).toBe(0)
