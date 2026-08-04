@@ -250,7 +250,7 @@ Feature: Passwordless authentication via email OTP
   # better-auth verification row only. We deliberately leave the
   # auth_flow row + cookie alive to mirror reality at the 10-minute mark.
   # After the OTP has been aged past expiry, submitting it must fail with
-  # the helpful "OTP expired" message; resending must produce a fresh
+  # the "That code has expired." message; resending must produce a fresh
   # code that completes the flow normally.
   #
   @email @otp-expiry
@@ -263,7 +263,7 @@ Feature: Passwordless authentication via email OTP
     And the login page shows an OTP verification form
     When more than 10 minutes pass before the user enters the OTP
     And the user enters the OTP code
-    Then the verification form shows an "OTP expired" error
+    Then the verification form shows the "That code has expired." error
     And the OTP entry boxes are visible and enabled
     When the user enters two digits from the old OTP
     And the user requests a new OTP via the resend button

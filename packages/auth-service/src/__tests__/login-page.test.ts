@@ -524,6 +524,43 @@ function renderDefault(overrides: Partial<LoginPageOpts> = {}): string {
   })
 }
 
+describe('renderLoginPage sign-in error copy', () => {
+  it.each([
+    ['Invalid OTP', "That code didn't work."],
+    ['OTP expired', 'That code has expired.'],
+    ['Too many attempts', 'Too many tries — that code is no longer usable.'],
+  ])('rewrites better-auth %s as end-user copy', (raw, display) => {
+    const html = renderDefault()
+    expect(html).toContain(`case '${raw}':`)
+    expect(html).toContain(display)
+  })
+
+  it('passes an unrecognised error through verbatim', () => {
+    // A failure that names itself can be diagnosed from a screenshot;
+    // one collapsed into a generic apology cannot.
+    const html = renderDefault()
+    expect(html).toMatch(/default:\s*return raw;/)
+  })
+
+  it('keys the expired branch off the raw reason, not the display copy', () => {
+    // otpErrorText() owns the wording. If the branch matched the
+    // rewritten string instead, editing that copy could silently
+    // reroute which recovery action the user is offered.
+    const html = renderDefault()
+    expect(html).toContain('test(result.rawError || result.error)')
+    expect(html).toContain('rawError: raw')
+    expect(html).not.toMatch(
+      /isExpired = \/expir\|too long\/i\.test\(result\.error\)/,
+    )
+  })
+
+  it('separates the message from its inline action', () => {
+    // Without this the banner reads "Invalid OTP Send a new code".
+    const html = renderDefault()
+    expect(html).toMatch(/\/\[\.!\?\]\$\/\.test\(msg\) \? ' ' : '\. '/)
+  })
+})
+
 describe('renderLoginPage OTP verify-form double-submit latch (regression)', () => {
   it('declares the verifying flag at IIFE scope so input/paste/submit handlers share it', () => {
     const html = renderDefault()
@@ -886,5 +923,86 @@ describe('renderLoginPage OTP grid charset filter', () => {
     expect(html.indexOf('var otpCharset =')).toBeLessThan(
       html.indexOf('function filterOtpChars(s)'),
     )
+  })
+})
+
+describe('renderLoginPage link-affordance convention', () => {
+  // The sign-in page styles four kinds of clickable text. Before this
+  // suite they diverged: .recovery-link was underlined while the
+  // .btn-secondary buttons beside it were not, and .flash-action
+  // REMOVED its underline on hover while .recovery-link kept it.
+  //
+  // The convention pinned here:
+  //   STANDALONE actions (.btn-secondary, .recovery-link) sit in their
+  //     own row, so position and spacing already read as actionable —
+  //     no underline.
+  //   IN-SENTENCE actions (.flash-action, .terms-link) are surrounded
+  //     by prose and inherit its colour, so the underline is their only
+  //     affordance — always underlined.
+  //   Hover darkens to #1A130F everywhere and never toggles the
+  //     underline, in either direction.
+  //
+  // Assertions match whole declaration blocks so a rule that merely
+  // mentions the property elsewhere cannot satisfy them.
+
+  function ruleFor(html: string, selector: string): string {
+    const idx = html.indexOf(`\n    ${selector} {`)
+    expect(idx, `no rule found for "${selector}"`).toBeGreaterThan(0)
+    const open = html.indexOf('{', idx)
+    const close = html.indexOf('}', open)
+    expect(close).toBeGreaterThan(open)
+    return html.slice(open + 1, close)
+  }
+
+  const STANDALONE = ['.btn-secondary', '.recovery-link']
+  const IN_SENTENCE = ['.flash-action', '.terms-link']
+
+  it.each(STANDALONE)(
+    'renders %s without an underline (standalone action)',
+    (selector) => {
+      const rule = ruleFor(renderDefault(), selector)
+      expect(rule).toContain('text-decoration: none')
+      expect(rule).not.toContain('text-decoration: underline')
+    },
+  )
+
+  it.each(IN_SENTENCE)(
+    'renders %s underlined (in-sentence action)',
+    (selector) => {
+      const rule = ruleFor(renderDefault(), selector)
+      expect(rule).toContain('text-decoration: underline')
+    },
+  )
+
+  it.each([...STANDALONE, ...IN_SENTENCE])(
+    'darkens %s on hover without touching its underline',
+    (selector) => {
+      const rule = ruleFor(renderDefault(), `${selector}:hover`)
+      expect(rule).toContain('color: #1A130F')
+      // A disappearing (or appearing) underline under the cursor is
+      // disorienting — hover must never change text-decoration.
+      expect(rule).not.toContain('text-decoration')
+    },
+  )
+
+  it.each([...STANDALONE, ...IN_SENTENCE])(
+    'gives %s a visible focus ring for keyboard users',
+    (selector) => {
+      const rule = ruleFor(renderDefault(), `${selector}:focus-visible`)
+      expect(rule).toContain('outline: 2px solid var(--focus-border')
+      expect(rule).toContain('outline-offset: 2px')
+    },
+  )
+
+  it('drives both standalone actions from the overridable --muted-foreground token', () => {
+    // Trusted clients retheme via branding.css. If one standalone
+    // action hardcoded its colour and the other read the token, an
+    // override would split the cluster apart again.
+    const html = renderDefault()
+    for (const selector of STANDALONE) {
+      expect(ruleFor(html, selector)).toContain(
+        'color: var(--muted-foreground)',
+      )
+    }
   })
 })
