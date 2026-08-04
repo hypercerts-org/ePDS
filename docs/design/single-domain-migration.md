@@ -134,8 +134,9 @@ The whole point. These exist solely because of cross-origin-same-site:
    `auth-service/src/lib/session-reuse.ts`. On one origin the device session is
    directly readable; cookies stay host-only.
 3. **`authHostname.endsWith('.' + pdsHostname)` special-casing** — e.g.
-   `session-reuse.ts:195-200`, the `parentCookieDomain` derivation in
-   `pds-core/src/index.ts:930`, and `authOrigin` derivation in
+   `session-reuse.ts:195-200`, the `cookieDomain` derivation in
+   `pds-core/src/index.ts` (via `deriveCookieDomain(authHostname, handleDomain)`
+   in `pds-core/src/cookie-domain.ts`), and `authOrigin` derivation in
    `chooser-enrichment.ts`. The two hostnames become one.
 4. **(Process-merge only) some privileged cross-service endpoints** — the
    `/_internal/*` HTTP lookups become in-process calls. The
