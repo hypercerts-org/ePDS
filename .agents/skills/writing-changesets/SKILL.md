@@ -180,14 +180,14 @@ Every non-trivial changeset **must** contain, in this order:
    the plain-language rule only applies to the summary line above.
 
    **Capitalize the first word after the bold audience label.**
-   The `**Audience:**` label is a lead-in, but the text following
-   it is a full sentence and must start with a capital letter — the
-   colon does not make the following word mid-sentence. This applies
-   even when the first word is an identifier that is lowercase in
-   code: capitalize the surrounding prose, or reword so the
-   identifier isn't sentence-initial (e.g. start with "The
-   `email_verified` claim …", not "`email_verified` is now …").
-
+   A label such as `**End users:**` or `**Operators:**` is a
+   lead-in, but the text following it is a full sentence and must
+   start with a capital letter — the colon does not make the
+   following word mid-sentence. This applies even when the first
+   word is an identifier that is lowercase in code: capitalize the
+   surrounding prose, or reword so the identifier isn't
+   sentence-initial (e.g. start with "The `email_verified` claim
+   …", not "`email_verified` is now …").
    - ✅ **End users:** Apps no longer ask you to verify an address you have already confirmed.
    - ✅ **Client app developers:** The `email_verified` claim is now `true` …
    - ✅ **Operators:** Deploy the auth service and the PDS together …
