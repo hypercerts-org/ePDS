@@ -222,6 +222,10 @@ async function main() {
 
     const approvedStr = req.query.approved as string
     const newAccountStr = req.query.new_account as string
+    // Whether auth-service is claiming this sign-in proved control of
+    // `email`. Part of the HMAC payload, so it cannot be forged or
+    // stripped: a callback without it fails verifyCallback outright.
+    const emailVerifiedStr = req.query.email_verified as string
     const handleParam = req.query.handle as string | undefined
     const clientIdParam = req.query.client_id as string | undefined
     const handleModeParam = req.query.epds_handle_mode as string | undefined
@@ -234,6 +238,7 @@ async function main() {
         handle: handleParam,
         client_id: clientIdParam,
         epds_handle_mode: handleModeParam,
+        email_verified: emailVerifiedStr,
       },
       ts,
       sig,
@@ -490,11 +495,21 @@ async function main() {
       }
       await provider.accountManager.upsertDeviceAccount(deviceId, account.did)
 
-      // Step 4b: Record that the email is confirmed. Reaching this
-      // point means auth-service verified a one-time code sent to
-      // `email`, but upstream only records confirmation via
-      // confirmEmail()'s token flow, so without this the address stays
-      // marked unverified forever.
+      // Step 4b: Record that the email is confirmed, but only when
+      // auth-service explicitly claims this sign-in proved control of
+      // `email`. Upstream only records confirmation via confirmEmail()'s
+      // token flow, so without this the address stays marked unverified
+      // forever.
+      //
+      // The claim is read from the signed callback rather than inferred
+      // from "a valid callback arrived". Only the authenticating service
+      // knows *how* the user authenticated: today that is always an
+      // emailed one-time code, but a passkey or similar flow would
+      // legitimately send a signed callback carrying `email` merely to
+      // locate the account, having proved nothing about that address.
+      // Inferring verification here would assert `email_verified: true`
+      // to relying parties on no evidence, and would engage the
+      // email-change verification gate on an unproven address.
       //
       // Keyed on whether the account is *confirmed*, not on whether it
       // is new: a returning user whose earlier confirmation failed
@@ -502,7 +517,11 @@ async function main() {
       // rather than waiting for the backfill script. Already-confirmed
       // accounts skip it, so the common case costs no writes.
       // Best-effort: never fails the sign-in.
-      if (!existingAccount || needsEmailConfirmation(existingAccount)) {
+      const emailProven = emailVerifiedStr === '1'
+      if (
+        emailProven &&
+        (!existingAccount || needsEmailConfirmation(existingAccount))
+      ) {
         await markEmailConfirmed({
           accountManager: pds.ctx.accountManager,
           did: account.sub,

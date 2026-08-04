@@ -75,6 +75,28 @@ export interface CallbackParams {
   handle?: string // only set for new account creation with chosen handle
   client_id?: string // OAuth client this flow belongs to; carried only so a clean-exit redirect from the catch block on /oauth/epds-callback can recover the client's redirect_uri when the upstream PAR row is gone. Signed so an attacker cannot redirect a victim's flow at a different OAuth client.
   epds_handle_mode?: string
+  /**
+   * '1' when the sign-in that produced this callback actually proved
+   * control of `email`; '0' otherwise.
+   *
+   * pds-core records email confirmation on the PDS account from this
+   * flag alone. It exists because only the authenticating service
+   * knows *how* the user authenticated: today every callback follows
+   * an emailed one-time code, but a future passkey or similar flow
+   * would legitimately send a signed callback carrying `email` merely
+   * to locate the account, with nobody having proved control of that
+   * address. Without an explicit claim, pds-core would have to infer
+   * verification from the mere existence of a valid signature and
+   * would mark such an address confirmed — asserting
+   * `email_verified: true` to relying parties on no evidence.
+   *
+   * Deliberately REQUIRED rather than optional: the signed payload is
+   * positional, so a caller that omits it produces a different
+   * payload and its callback is rejected as an invalid signature. A
+   * future flow that forgets to set it therefore fails loudly at the
+   * trust boundary instead of silently claiming verification.
+   */
+  email_verified: string
 }
 
 /**
@@ -82,10 +104,11 @@ export interface CallbackParams {
  * Returns the hex signature and the Unix timestamp (seconds) used.
  *
  * Payload: request_uri, email, approved, new_account, handle (empty when absent),
- * client_id (empty when absent), epds_handle_mode (empty when absent), and ts,
- * joined by newlines.
+ * client_id (empty when absent), epds_handle_mode (empty when absent),
+ * email_verified, and ts, joined by newlines.
  * A timestamp is included so signatures expire (see verifyCallback).
  * handle, client_id and epds_handle_mode use empty string as sentinel when absent so existing flows still produce valid signatures and so the payload shape stays stable across releases.
+ * email_verified has no sentinel — it is required, so a caller that omits it signs a different payload and is rejected rather than being read as verified.
  */
 export function signCallback(
   params: CallbackParams,
@@ -100,6 +123,7 @@ export function signCallback(
     params.handle ?? '', // empty string when absent
     params.client_id ?? '', // empty string when absent
     params.epds_handle_mode ?? '', // empty string when absent
+    params.email_verified, // required — no sentinel, see the note above
     ts,
   ].join('\n')
   const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex')
@@ -134,6 +158,7 @@ export function verifyCallback(
     params.handle ?? '', // empty string when absent — matches signCallback sentinel
     params.client_id ?? '', // empty string when absent — matches signCallback sentinel
     params.epds_handle_mode ?? '', // empty string when absent — matches signCallback sentinel
+    params.email_verified, // required — matches signCallback, no sentinel
     ts,
   ].join('\n')
   const expected = crypto

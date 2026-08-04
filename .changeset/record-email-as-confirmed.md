@@ -8,7 +8,9 @@ Apps you sign in to are now told that your email address is confirmed.
 
 **Client app developers:** the `email_verified` claim is now `true` for accounts that signed in through the emailed-code flow, instead of always `false`. If your app gated any behaviour on `email_verified` being true, that gate will now open for those accounts.
 
-**Operators:** new accounts are recorded as confirmed at sign-up, and existing accounts are repaired the next time their owner signs in — so most accounts need no action. Use the backfill for accounts whose owners have not signed in since upgrading:
+**Operators:** deploy the auth service and the PDS together. The signed handover between them carries a new required field, so a sign-in served by one old and one new instance is rejected with `Invalid callback signature` until both are updated. Sign-in recovers on its own once the rollout completes; no data is affected.
+
+New accounts are recorded as confirmed at sign-up, and existing accounts are repaired the next time their owner signs in — so most accounts need no action. Use the backfill for accounts whose owners have not signed in since upgrading:
 
 - `pnpm --filter @certified-app/pds-core backfill:email-confirmed --dry-run` reports how many accounts would change.
 - Dropping `--dry-run` performs the update. It is idempotent, so re-running is safe.

@@ -168,6 +168,7 @@ describe('signCallback / verifyCallback', () => {
     email: 'user@example.com',
     approved: '1',
     new_account: '0',
+    email_verified: '1',
   }
 
   it('produces a hex signature and numeric timestamp string', () => {
@@ -213,6 +214,7 @@ describe('signCallback / verifyCallback', () => {
       '', // handle sentinel (absent)
       '', // client_id sentinel (absent)
       '', // epds_handle_mode sentinel (absent)
+      params.email_verified,
       staleTs,
     ].join('\n')
     const { createHmac } = await import('node:crypto')
@@ -248,6 +250,7 @@ describe('signCallback / verifyCallback', () => {
       '', // handle sentinel (absent)
       '', // client_id sentinel (absent)
       '', // epds_handle_mode sentinel (absent)
+      params.email_verified,
       futureTs,
     ].join('\n')
     const { createHmac } = await import('node:crypto')
@@ -274,6 +277,7 @@ describe('signCallback / verifyCallback with handle', () => {
       email: 'alice@example.com',
       approved: '1',
       new_account: '1',
+      email_verified: '1',
       handle: 'alice.pds.example.com',
     }
     const { sig, ts } = signCallback(params, secret)
@@ -287,6 +291,7 @@ describe('signCallback / verifyCallback with handle', () => {
       email: 'alice@example.com',
       approved: '1',
       new_account: '1',
+      email_verified: '1',
     }
     const { sig, ts } = signCallback(params, secret)
     expect(verifyCallback(params, ts, sig, secret)).toBe(true)
@@ -299,6 +304,7 @@ describe('signCallback / verifyCallback with handle', () => {
       email: 'alice@example.com',
       approved: '1',
       new_account: '1',
+      email_verified: '1',
     }
     // Sign without handle, then verify that adding a handle breaks the signature.
     // This proves handle is included in the HMAC payload without relying on two
@@ -321,6 +327,7 @@ describe('signCallback / verifyCallback with handle', () => {
       email: 'alice@example.com',
       approved: '1',
       new_account: '1',
+      email_verified: '1',
     }
     const withUndefined: CallbackParams = { ...baseParams, handle: undefined }
     const { sig, ts } = signCallback(baseParams, secret)
@@ -339,6 +346,7 @@ describe('signCallback / verifyCallback with handle', () => {
       email: 'alice@example.com',
       approved: '1',
       new_account: '1',
+      email_verified: '1',
       handle: 'alice.pds.example.com',
     }
     const { sig, ts } = signCallback(params, secret)
@@ -360,6 +368,7 @@ describe('signCallback / verifyCallback with client_id', () => {
       email: 'alice@example.com',
       approved: '1',
       new_account: '0',
+      email_verified: '1',
       client_id: 'https://demo.example.com/client-metadata.json',
     }
     const { sig, ts } = signCallback(params, secret)
@@ -372,6 +381,7 @@ describe('signCallback / verifyCallback with client_id', () => {
       email: 'alice@example.com',
       approved: '1',
       new_account: '0',
+      email_verified: '1',
       client_id: 'https://demo.example.com/client-metadata.json',
     }
     const { sig, ts } = signCallback(params, secret)
@@ -392,6 +402,7 @@ describe('signCallback / verifyCallback with client_id', () => {
       email: 'alice@example.com',
       approved: '1',
       new_account: '0',
+      email_verified: '1',
     }
     const withUndefined: CallbackParams = {
       ...baseParams,
@@ -403,12 +414,54 @@ describe('signCallback / verifyCallback with client_id', () => {
     expect(verifyCallback(baseParams, ts2, sig2, secret)).toBe(true)
   })
 
+  const emailVerifiedParams: CallbackParams = {
+    request_uri: 'urn:ietf:params:oauth:request_uri:test',
+    email: 'alice@example.com',
+    approved: '1',
+    new_account: '0',
+    email_verified: '1',
+  }
+
+  it('a caller that omits email_verified is rejected rather than read as verified', () => {
+    // The field is required, not sentinel-defaulted like handle /
+    // client_id. A future sign-in flow whose author forgets to set it
+    // signs a different payload and fails at the trust boundary — the
+    // one failure mode we can afford, versus silently asserting
+    // verification that never happened.
+    const omitted = {
+      request_uri: emailVerifiedParams.request_uri,
+      email: emailVerifiedParams.email,
+      approved: emailVerifiedParams.approved,
+      new_account: emailVerifiedParams.new_account,
+    } as unknown as CallbackParams
+    const { sig, ts } = signCallback(omitted, secret)
+
+    expect(verifyCallback(emailVerifiedParams, ts, sig, secret)).toBe(false)
+  })
+
+  it('email_verified is covered by the signature, so it cannot be flipped in transit', () => {
+    // pds-core records email confirmation from this field alone. If it
+    // were outside the HMAC, anyone holding a callback URL could
+    // upgrade '0' to '1' and have an unproven address marked verified.
+    const unverified: CallbackParams = {
+      ...emailVerifiedParams,
+      email_verified: '0',
+    }
+    const { sig, ts } = signCallback(unverified, secret)
+
+    expect(verifyCallback(unverified, ts, sig, secret)).toBe(true)
+    expect(
+      verifyCallback({ ...unverified, email_verified: '1' }, ts, sig, secret),
+    ).toBe(false)
+  })
+
   it('a sig produced WITH a client_id does not verify WITHOUT one', () => {
     const withClient: CallbackParams = {
       request_uri: 'urn:ietf:params:oauth:request_uri:test',
       email: 'alice@example.com',
       approved: '1',
       new_account: '0',
+      email_verified: '1',
       client_id: 'https://demo.example.com/client-metadata.json',
     }
     const { sig, ts } = signCallback(withClient, secret)
@@ -417,6 +470,7 @@ describe('signCallback / verifyCallback with client_id', () => {
       email: withClient.email,
       approved: withClient.approved,
       new_account: withClient.new_account,
+      email_verified: withClient.email_verified,
     }
     expect(verifyCallback(withoutClient, ts, sig, secret)).toBe(false)
   })
