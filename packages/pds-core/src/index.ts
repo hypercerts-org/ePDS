@@ -72,7 +72,10 @@ import { createUpstreamFaviconMiddleware } from './upstream-favicon.js'
 import { createAuthUiGuard, parsePromptTokens } from './auth-ui-guard.js'
 import { loadDeviceAccountEmails } from './lib/device-accounts.js'
 import { handleCallbackError } from './lib/epds-callback-error.js'
-import { markEmailConfirmed } from './lib/email-confirmed.js'
+import {
+  markEmailConfirmed,
+  needsEmailConfirmation,
+} from './lib/email-confirmed.js'
 import { installTestHooks } from './lib/test-hooks.js'
 import { buildPostCallbackAuthorizeUrl } from './lib/epds-callback-authorize.js'
 
@@ -489,15 +492,19 @@ async function main() {
 
       // Step 4b: Record that the email is confirmed. Reaching this
       // point means auth-service verified a one-time code sent to
-      // `email`, but upstream only populates `emailConfirmedAt` from
+      // `email`, but upstream only records confirmation via
       // confirmEmail()'s token flow, so without this the address stays
-      // marked unverified forever. Only new accounts need it —
-      // existing ones were stamped when they were created (or by the
-      // one-off backfill script for accounts predating this).
+      // marked unverified forever.
+      //
+      // Keyed on whether the account is *confirmed*, not on whether it
+      // is new: a returning user whose earlier confirmation failed
+      // (or who predates this code) is repaired on their next sign-in
+      // rather than waiting for the backfill script. Already-confirmed
+      // accounts skip it, so the common case costs no writes.
       // Best-effort: never fails the sign-in.
-      if (!existingAccount) {
+      if (!existingAccount || needsEmailConfirmation(existingAccount)) {
         await markEmailConfirmed({
-          db: pds.ctx.accountManager.db,
+          accountManager: pds.ctx.accountManager,
           did: account.sub,
           logger,
         })

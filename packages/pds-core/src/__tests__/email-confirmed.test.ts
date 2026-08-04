@@ -2,262 +2,226 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   backfillEmailConfirmedAt,
+  confirmAccountEmail,
   formatBackfillReport,
   markEmailConfirmed,
+  needsEmailConfirmation,
   parseDryRun,
-  setEmailConfirmedAt,
+  type EmailConfirmingAccountManager,
 } from '../lib/email-confirmed.js'
-
-/** Records the single-account UPDATE that setEmailConfirmedAt builds:
- *  which table, which values, which where-clause, and whether it was
- *  handed to executeWithRetry. */
-function makeFakeDb(opts: { failOnExecute?: boolean } = {}) {
-  const calls: {
-    table?: string
-    values?: { emailConfirmedAt: string }
-    where?: [string, string, string]
-    executed: number
-  } = { executed: 0 }
-
-  const db = {
-    executeWithRetry: (query: { execute: () => Promise<unknown> }) => {
-      calls.executed++
-      // Must receive the fully built statement — guards against a
-      // chain that hands executeWithRetry something unexecutable.
-      expect(query.execute).toBeTypeOf('function')
-      if (opts.failOnExecute) return Promise.reject(new Error('db down'))
-      return Promise.resolve(undefined)
-    },
-    db: {
-      updateTable: (table: string) => {
-        calls.table = table
-        return {
-          set: (values: { emailConfirmedAt: string }) => {
-            calls.values = values
-            return {
-              where: (column: string, op: string, value: string) => {
-                calls.where = [column, op, value]
-                return { execute: () => Promise.resolve(undefined) }
-              },
-            }
-          },
-        }
-      },
-    },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- structural fake standing in for AccountDb
-  } as any
-
-  return { db, calls }
-}
 
 const DID = 'did:plc:7iza6de2dwap2sbkpav7c6c6'
 
-describe('setEmailConfirmedAt', () => {
-  it('updates the account row for the given DID via executeWithRetry', async () => {
-    const { db, calls } = makeFakeDb()
+/**
+ * Fake AccountManager recording the mint/redeem pair. Typed against
+ * the real interface — no casts needed, so a signature change in
+ * `EmailConfirmingAccountManager` breaks these tests rather than
+ * silently passing.
+ */
+function makeAccountManager(
+  opts: { failOn?: 'createEmailToken' | 'confirmEmail' } = {},
+) {
+  const calls: {
+    minted: { did: string; purpose: string }[]
+    redeemed: { did: string; token: string }[]
+  } = { minted: [], redeemed: [] }
 
-    await setEmailConfirmedAt(db, DID, '2026-08-04T10:00:00.000Z')
+  let counter = 0
 
-    expect(calls.table).toBe('account')
-    expect(calls.values).toEqual({
-      emailConfirmedAt: '2026-08-04T10:00:00.000Z',
+  const accountManager: EmailConfirmingAccountManager = {
+    createEmailToken: (did, purpose) => {
+      if (opts.failOn === 'createEmailToken') {
+        return Promise.reject(new Error('db down'))
+      }
+      calls.minted.push({ did, purpose })
+      return Promise.resolve(`TOKEN-${++counter}`)
+    },
+    confirmEmail: ({ did, token }) => {
+      if (opts.failOn === 'confirmEmail') {
+        return Promise.reject(new Error('token rejected'))
+      }
+      calls.redeemed.push({ did, token })
+      return Promise.resolve()
+    },
+  }
+
+  return { accountManager, calls }
+}
+
+describe('confirmAccountEmail', () => {
+  it('redeems the token it just minted, for the same DID', async () => {
+    const { accountManager, calls } = makeAccountManager()
+
+    await confirmAccountEmail(accountManager, DID)
+
+    expect(calls.minted).toEqual([{ did: DID, purpose: 'confirm_email' }])
+    // The token must be the minted one — redeeming anything else
+    // would leave the freshly created token row behind.
+    expect(calls.redeemed).toEqual([{ did: DID, token: 'TOKEN-1' }])
+  })
+
+  it('propagates a minting failure without attempting to redeem', async () => {
+    const { accountManager, calls } = makeAccountManager({
+      failOn: 'createEmailToken',
     })
-    expect(calls.where).toEqual(['did', '=', DID])
-    expect(calls.executed).toBe(1)
+
+    await expect(confirmAccountEmail(accountManager, DID)).rejects.toThrow(
+      'db down',
+    )
+    expect(calls.redeemed).toEqual([])
   })
 
-  it('defaults emailConfirmedAt to an ISO timestamp of now', async () => {
-    const { db, calls } = makeFakeDb()
-    const before = Date.now()
+  it('propagates a redemption failure', async () => {
+    const { accountManager } = makeAccountManager({ failOn: 'confirmEmail' })
 
-    await setEmailConfirmedAt(db, DID)
-
-    const written = calls.values?.emailConfirmedAt as string
-    expect(written).toMatch(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/)
-    const writtenMs = Date.parse(written)
-    expect(writtenMs).toBeGreaterThanOrEqual(before)
-    expect(writtenMs).toBeLessThanOrEqual(Date.now())
-  })
-
-  it('propagates db failures to the caller', async () => {
-    const { db } = makeFakeDb({ failOnExecute: true })
-
-    await expect(setEmailConfirmedAt(db, DID)).rejects.toThrow('db down')
+    await expect(confirmAccountEmail(accountManager, DID)).rejects.toThrow(
+      'token rejected',
+    )
   })
 })
 
 describe('markEmailConfirmed', () => {
-  it('stamps the account and stays silent on success', async () => {
-    const { db, calls } = makeFakeDb()
+  it('confirms the account and stays silent on success', async () => {
+    const { accountManager, calls } = makeAccountManager()
     const logger = { warn: vi.fn() }
 
-    await markEmailConfirmed({ db, did: DID, logger })
+    await markEmailConfirmed({ accountManager, did: DID, logger })
 
-    expect(calls.where).toEqual(['did', '=', DID])
+    expect(calls.redeemed).toEqual([{ did: DID, token: 'TOKEN-1' }])
     expect(logger.warn).not.toHaveBeenCalled()
   })
 
-  it('swallows db failures so sign-in is never blocked, logging at warn', async () => {
-    const { db } = makeFakeDb({ failOnExecute: true })
+  it('swallows failures so sign-in is never blocked, logging at warn', async () => {
+    const { accountManager } = makeAccountManager({ failOn: 'confirmEmail' })
     const logger = { warn: vi.fn() }
 
     // Must resolve, not reject — the user has already proven ownership
     // of the address, so bookkeeping failure must not fail their sign-in.
     await expect(
-      markEmailConfirmed({ db, did: DID, logger }),
+      markEmailConfirmed({ accountManager, did: DID, logger }),
     ).resolves.toBeUndefined()
 
     expect(logger.warn).toHaveBeenCalledTimes(1)
-    const [context, message] = logger.warn.mock.calls[0]
+    const [context] = logger.warn.mock.calls[0]
     expect(context).toMatchObject({ did: DID })
-    expect((context as { err: Error }).err.message).toBe('db down')
-    expect(message).toMatch(/emailConfirmedAt/)
+    expect((context as { err: Error }).err.message).toBe('token rejected')
   })
 })
 
-/** Records the backfill's SELECT/UPDATE filters so the tests can
- *  assert the criteria, not just the row count. */
-function makeBackfillDb(opts: {
-  candidates: string[]
-  /** Rows the UPDATE reports touching; defaults to candidates.length
-   *  so the common case needs no wiring. */
-  numUpdatedRows?: number
-}) {
-  const selectWheres: [string, string, unknown][] = []
-  const updateWheres: [string, string, unknown][] = []
-  let updateValues: { emailConfirmedAt: string } | undefined
-  let updateExecuted = 0
-
-  // Mirrors the real Kysely surface: SELECTs are read with execute(),
-  // UPDATEs with executeTakeFirst() returning an UpdateResult whose
-  // numUpdatedRows is a bigint.
-  const chain = (
-    sink: [string, string, unknown][],
-    onExecute: () => Promise<unknown>,
-    onExecuteTakeFirst?: () => Promise<unknown>,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- self-referential fluent fake
-  ): any => ({
-    select: () => chain(sink, onExecute, onExecuteTakeFirst),
-    where: (column: string, op: string, value: unknown) => {
-      sink.push([column, op, value])
-      return chain(sink, onExecute, onExecuteTakeFirst)
-    },
-    execute: onExecute,
-    executeTakeFirst: onExecuteTakeFirst,
+describe('needsEmailConfirmation', () => {
+  it('is true for an account with an address and no confirmation', () => {
+    expect(
+      needsEmailConfirmation({ email: 'a@x.test', emailConfirmedAt: null }),
+    ).toBe(true)
   })
 
-  const db = {
-    db: {
-      selectFrom: (table: string) => {
-        expect(table).toBe('account')
-        return chain(selectWheres, () =>
-          Promise.resolve(opts.candidates.map((did) => ({ did }))),
-        )
-      },
-      updateTable: (table: string) => {
-        expect(table).toBe('account')
-        return {
-          set: (values: { emailConfirmedAt: string }) => {
-            updateValues = values
-            return chain(
-              updateWheres,
-              () =>
-                Promise.reject(new Error('UPDATE must use executeTakeFirst')),
-              () => {
-                updateExecuted++
-                return Promise.resolve({
-                  numUpdatedRows: BigInt(
-                    opts.numUpdatedRows ?? opts.candidates.length,
-                  ),
-                })
-              },
-            )
-          },
-        }
-      },
-    },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- structural fake standing in for AccountDb
-  } as any
+  it('is false once confirmed, so re-runs and sign-ins skip the work', () => {
+    expect(
+      needsEmailConfirmation({
+        email: 'a@x.test',
+        emailConfirmedAt: '2026-08-04T10:00:00.000Z',
+      }),
+    ).toBe(false)
+  })
 
-  return {
-    db,
-    inspect: () => ({
-      selectWheres,
-      updateWheres,
-      updateValues,
-      updateExecuted,
-    }),
-  }
-}
+  it('is false when there is no address to confirm', () => {
+    // The column is NOT NULL in the PDS schema, so "no address"
+    // arrives as the empty string; null is covered as insurance
+    // against that constraint being relaxed upstream.
+    expect(needsEmailConfirmation({ email: '', emailConfirmedAt: null })).toBe(
+      false,
+    )
+    expect(
+      needsEmailConfirmation({ email: null, emailConfirmedAt: null }),
+    ).toBe(false)
+  })
+
+  it('is false for a missing account', () => {
+    expect(needsEmailConfirmation(null)).toBe(false)
+  })
+})
 
 describe('backfillEmailConfirmedAt', () => {
-  it('stamps every unconfirmed account that has an email', async () => {
-    const { db, inspect } = makeBackfillDb({
-      candidates: ['did:plc:aaa', 'did:plc:bbb'],
-    })
+  const UNCONFIRMED = [
+    { did: 'did:plc:aaa', email: 'a@x.test', emailConfirmedAt: null },
+    { did: 'did:plc:bbb', email: 'b@x.test', emailConfirmedAt: null },
+  ]
+  const CONFIRMED = {
+    did: 'did:plc:ccc',
+    email: 'c@x.test',
+    emailConfirmedAt: '2026-08-04T10:00:00.000Z',
+  }
+  const NO_EMAIL = { did: 'did:plc:ddd', email: '', emailConfirmedAt: null }
+
+  it('confirms only the accounts that need it', async () => {
+    const { accountManager, calls } = makeAccountManager()
 
     const result = await backfillEmailConfirmedAt({
-      db,
-      emailConfirmedAt: '2026-08-04T10:00:00.000Z',
+      accountManager,
+      accounts: [...UNCONFIRMED, CONFIRMED, NO_EMAIL],
     })
 
-    expect(result).toEqual({ candidates: 2, updated: 2, dryRun: false })
-    const { updateValues, updateExecuted } = inspect()
-    expect(updateValues).toEqual({
-      emailConfirmedAt: '2026-08-04T10:00:00.000Z',
-    })
-    expect(updateExecuted).toBe(1)
-  })
-
-  it('only targets rows with a null emailConfirmedAt and a real email', async () => {
-    const { db, inspect } = makeBackfillDb({ candidates: ['did:plc:aaa'] })
-
-    await backfillEmailConfirmedAt({ db })
-
-    // Accounts with no address have nothing to confirm, and already
-    // stamped rows must be excluded so re-running is a no-op.
-    const expected = [
-      ['emailConfirmedAt', 'is', null],
-      ['email', 'is not', null],
-      ['email', '!=', ''],
-    ]
-    expect(inspect().selectWheres).toEqual(expected)
-    expect(inspect().updateWheres).toEqual(expected)
+    expect(result).toMatchObject({ candidates: 2, updated: 2, failed: 0 })
+    expect(calls.redeemed.map((r) => r.did)).toEqual([
+      'did:plc:aaa',
+      'did:plc:bbb',
+    ])
   })
 
   it('reports candidates without writing when dryRun is set', async () => {
-    const { db, inspect } = makeBackfillDb({
-      candidates: ['did:plc:aaa', 'did:plc:bbb', 'did:plc:ccc'],
+    const { accountManager, calls } = makeAccountManager()
+
+    const result = await backfillEmailConfirmedAt({
+      accountManager,
+      accounts: [...UNCONFIRMED, CONFIRMED],
+      dryRun: true,
     })
 
-    const result = await backfillEmailConfirmedAt({ db, dryRun: true })
-
-    expect(result).toEqual({ candidates: 3, updated: 0, dryRun: true })
-    expect(inspect().updateExecuted).toBe(0)
+    expect(result).toEqual({
+      candidates: 2,
+      updated: 0,
+      failed: 0,
+      failures: [],
+      dryRun: true,
+    })
+    expect(calls.minted).toEqual([])
   })
 
-  it('skips the UPDATE entirely when nothing needs backfilling', async () => {
-    const { db, inspect } = makeBackfillDb({ candidates: [] })
+  it('is a no-op when every account is already confirmed', async () => {
+    const { accountManager, calls } = makeAccountManager()
 
-    const result = await backfillEmailConfirmedAt({ db })
-
-    expect(result).toEqual({ candidates: 0, updated: 0, dryRun: false })
-    expect(inspect().updateExecuted).toBe(0)
-  })
-
-  it('reports the rows the UPDATE touched, not the rows the SELECT saw', async () => {
-    // The SELECT and UPDATE are separate statements: a sign-in that
-    // stamps one of these rows in between leaves the UPDATE touching
-    // fewer rows than were counted. Report the database's number, so
-    // the operator is not told more accounts changed than really did.
-    const { db } = makeBackfillDb({
-      candidates: ['did:plc:aaa', 'did:plc:bbb', 'did:plc:ccc'],
-      numUpdatedRows: 2,
+    const result = await backfillEmailConfirmedAt({
+      accountManager,
+      accounts: [CONFIRMED],
     })
 
-    const result = await backfillEmailConfirmedAt({ db })
+    expect(result).toMatchObject({ candidates: 0, updated: 0, failed: 0 })
+    expect(calls.minted).toEqual([])
+  })
 
-    expect(result).toEqual({ candidates: 3, updated: 2, dryRun: false })
+  it('keeps going after a failure and reports which accounts failed', async () => {
+    // One unconfirmable account must not strand the rest of the run,
+    // and the operator needs the DIDs to chase them up.
+    let attempt = 0
+    const accountManager: EmailConfirmingAccountManager = {
+      createEmailToken: () => Promise.resolve('TOKEN'),
+      confirmEmail: () => {
+        attempt++
+        return attempt === 1
+          ? Promise.reject(new Error('account deactivated'))
+          : Promise.resolve()
+      },
+    }
+
+    const result = await backfillEmailConfirmedAt({
+      accountManager,
+      accounts: UNCONFIRMED,
+    })
+
+    expect(result).toMatchObject({ candidates: 2, updated: 1, failed: 1 })
+    expect(result.failures).toEqual([
+      { did: 'did:plc:aaa', error: 'account deactivated' },
+    ])
   })
 })
 
@@ -278,10 +242,11 @@ describe('parseDryRun', () => {
 
 describe('formatBackfillReport', () => {
   const LOCATION = '/data/account.sqlite'
+  const base = { failed: 0, failures: [], dryRun: false }
 
   it('reports the candidate count and names the db on a dry run', () => {
     const line = formatBackfillReport(
-      { candidates: 3, updated: 0, dryRun: true },
+      { ...base, candidates: 3, updated: 0, dryRun: true },
       LOCATION,
     )
 
@@ -292,7 +257,7 @@ describe('formatBackfillReport', () => {
 
   it('reports what was actually written on a real run', () => {
     const line = formatBackfillReport(
-      { candidates: 3, updated: 3, dryRun: false },
+      { ...base, candidates: 3, updated: 3 },
       LOCATION,
     )
 
@@ -301,10 +266,24 @@ describe('formatBackfillReport', () => {
 
   it('makes a no-op run unambiguous rather than silent', () => {
     expect(
-      formatBackfillReport(
-        { candidates: 0, updated: 0, dryRun: false },
-        LOCATION,
-      ),
+      formatBackfillReport({ ...base, candidates: 0, updated: 0 }, LOCATION),
     ).toContain('0 account(s)')
+  })
+
+  it('names the accounts that failed so the operator can chase them', () => {
+    const line = formatBackfillReport(
+      {
+        candidates: 2,
+        updated: 1,
+        failed: 1,
+        failures: [{ did: 'did:plc:aaa', error: 'account deactivated' }],
+        dryRun: false,
+      },
+      LOCATION,
+    )
+
+    expect(line).toContain('Marked 1 account(s)')
+    expect(line).toContain('1 account(s) could not be confirmed')
+    expect(line).toContain('did:plc:aaa: account deactivated')
   })
 })

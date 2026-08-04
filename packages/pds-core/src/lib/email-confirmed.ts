@@ -6,8 +6,8 @@
  * address. The email is therefore *already* verified by the time the
  * account row exists — but the PDS `account` table's
  * `emailConfirmedAt` column stays null, because upstream only ever
- * populates it from `confirmEmail()`, which demands a
- * `confirm_email` token the OTP flow never issues.
+ * populates it from `confirmEmail()`, which consumes a
+ * `confirm_email` token that the OTP flow never mints.
  *
  * Leaving it null has two observable consequences:
  *   1. `email_verified` is false in every OIDC/token claim, because
@@ -17,94 +17,117 @@
  *      token when `emailConfirmedAt` is set, so a null value skips
  *      the verification gate on email change entirely.
  *
- * Lives in its own module so the write can be unit-tested against a
- * fake db without booting a real PDS, matching the extraction
- * pattern used by the other lib/ modules.
+ * ## Why mint-then-redeem rather than writing the column
  *
- * ## Why write via Kysely rather than upstream's helper
+ * AGENTS.md: "Do not directly read or modify `@atproto/pds` database
+ * tables — use `pds.ctx.accountManager.*` methods." `createEmailToken`
+ * and `confirmEmail` are both public `AccountManager` methods, and
+ * together they are exactly the supported route to a confirmed email:
+ * `confirmEmail` validates the token, deletes it, and sets
+ * `emailConfirmedAt` in a single transaction, so no token row is left
+ * behind.
  *
- * `@atproto/pds` does not re-export `setEmailConfirmedAt` from its
- * package root, and its package.json declares no `exports` map — so
- * the only way to call it directly is a deep import into `dist/`,
- * which nothing guarantees across upgrades. `AccountManager.db` is
- * public and typed (`readonly db: AccountDb`), so we issue the same
- * statement upstream's helper issues, through a supported surface.
- * Kept deliberately identical to upstream's implementation
- * (`account-manager/helpers/account.ts`) so behaviour matches.
+ * `createEmailToken` only inserts the row and returns the token —
+ * upstream's XRPC handlers do the mailing separately, so nothing is
+ * sent to the user here. That matters: the user already proved
+ * ownership of this address via the OTP, and a second unexpected mail
+ * would be worse than the bug being fixed.
+ *
+ * Lives in its own module so the flow can be unit-tested against a
+ * fake account manager without booting a real PDS, matching the
+ * extraction pattern used by the other lib/ modules.
  */
 import type { Logger } from 'pino'
 
 /**
- * The slice of `AccountDb` we depend on: `executeWithRetry` (SQLite
- * busy-retry wrapper) plus the Kysely instance. Structural typing
- * against the real `AccountDb` keeps the fake in tests honest
- * without importing PDS internals.
+ * The slice of `AccountManager` this module needs. Structurally
+ * compatible with the real class, so the call sites pass
+ * `pds.ctx.accountManager` directly and the fakes in tests stay
+ * honest without importing PDS internals.
  */
-export interface EmailConfirmedDb {
-  /** SQLite busy-retry wrapper; takes any executable Kysely statement. */
-  executeWithRetry: <T>(query: { execute: () => Promise<T> }) => Promise<T>
-  db: {
-    updateTable: (table: 'account') => {
-      set: (values: { emailConfirmedAt: string }) => {
-        where: (
-          column: 'did',
-          op: '=',
-          value: string,
-        ) => { execute: () => Promise<unknown> }
-      }
-    }
-  }
+export interface EmailConfirmingAccountManager {
+  createEmailToken: (did: string, purpose: 'confirm_email') => Promise<string>
+  confirmEmail: (opts: { did: string; token: string }) => Promise<void>
 }
 
 /**
- * Set `emailConfirmedAt` on a single account.
+ * Confirm a single account's email address.
  *
- * Mirrors upstream `setEmailConfirmedAt(db, did, emailConfirmedAt)`.
- * `emailConfirmedAt` defaults to now, which is the honest value for
- * the OTP flow: the code was verified moments ago.
+ * Mints a `confirm_email` token and immediately redeems it. Both
+ * halves are public `AccountManager` operations; the token never
+ * leaves this function and is deleted by `confirmEmail` as part of
+ * the same transaction that records the confirmation.
  */
-export async function setEmailConfirmedAt(
-  db: EmailConfirmedDb,
+export async function confirmAccountEmail(
+  accountManager: EmailConfirmingAccountManager,
   did: string,
-  emailConfirmedAt: string = new Date().toISOString(),
 ): Promise<void> {
-  await db.executeWithRetry(
-    db.db
-      .updateTable('account')
-      .set({ emailConfirmedAt })
-      .where('did', '=', did),
-  )
+  const token = await accountManager.createEmailToken(did, 'confirm_email')
+  await accountManager.confirmEmail({ did, token })
 }
 
 /**
- * The db slice the backfill needs: a Kysely instance able to run the
- * bulk UPDATE and count the rows it would touch.
+ * Best-effort variant used on the sign-in hot path.
+ *
+ * The email genuinely *is* verified at this point, so recording that
+ * fact is correct — but it is bookkeeping, not part of the sign-in
+ * contract. If it fails (SQLite busy, disk error) the user has still
+ * proven ownership of the address, so failing their sign-in over it
+ * would be a strictly worse outcome than a stale
+ * `email_verified: false` claim. The error is logged at `warn` so it
+ * stays visible without tripping error-level alerting, and the next
+ * sign-in retries — callers skip already-confirmed accounts, not
+ * already-*seen* ones, so a failure here is self-healing.
  */
-export interface BackfillDb {
-  db: {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- structural slice of Kysely's fluent builder; the real types come from AccountDb at the call site
-    selectFrom: (table: 'account') => any
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- ditto
-    updateTable: (table: 'account') => any
+export async function markEmailConfirmed(opts: {
+  accountManager: EmailConfirmingAccountManager
+  did: string
+  logger: Pick<Logger, 'warn'>
+}): Promise<void> {
+  try {
+    await confirmAccountEmail(opts.accountManager, opts.did)
+  } catch (err) {
+    opts.logger.warn(
+      { err, did: opts.did },
+      'Failed to record email confirmation after OTP-verified sign-in',
+    )
   }
+}
+
+/** An account as far as the backfill is concerned. */
+export interface BackfillCandidate {
+  did: string
+  email?: string | null
+  emailConfirmedAt?: string | null
+}
+
+/** True when this account has a real address that is not yet confirmed. */
+export function needsEmailConfirmation(
+  account: Pick<BackfillCandidate, 'email' | 'emailConfirmedAt'> | null,
+): boolean {
+  if (!account) return false
+  // An account with no address has nothing to confirm — upstream
+  // reports `email_verified` as undefined rather than false for those.
+  if (!account.email) return false
+  return !account.emailConfirmedAt
 }
 
 export interface BackfillResult {
-  /** Rows matching the backfill criteria before the update ran. */
+  /** Accounts found needing confirmation. */
   candidates: number
-  /**
-   * Rows the UPDATE actually touched, as reported by the database;
-   * 0 when `dryRun` is set. May be lower than `candidates` if
-   * something stamped a row between the two statements.
-   */
+  /** Accounts confirmed successfully. */
   updated: number
+  /** Accounts that failed to confirm; see `failures`. */
+  failed: number
+  /** DIDs that failed, with the reason, for the operator to chase. */
+  failures: { did: string; error: string }[]
   /** True when no write was attempted. */
   dryRun: boolean
 }
 
 /**
  * One-off backfill for accounts created before this fix landed, whose
- * `emailConfirmedAt` is still null.
+ * email was verified by OTP but never recorded as confirmed.
  *
  * Deliberately NOT run automatically at startup. Whether a null
  * `emailConfirmedAt` means "verified via OTP but never recorded" or
@@ -115,55 +138,55 @@ export interface BackfillResult {
  * silently promoted to verified. Only the operator knows which case
  * applies, so this is exposed as a script they choose to run.
  *
- * Restricted to rows with a real email address: an account with no
- * address has nothing to confirm, and upstream reports
- * `email_verified` as undefined rather than false for those. The
- * column is `NOT NULL` in the PDS schema, so "no address" shows up
- * as the empty string; the null check is kept alongside it as
- * cheap insurance against that constraint being relaxed upstream.
+ * Confirms one account at a time via the public API rather than a
+ * single set-based UPDATE. That is more round-trips, but it keeps to
+ * the account-manager boundary and lets one bad row be reported
+ * without abandoning the rest of the run.
  *
- * Idempotent — rows already stamped are excluded, so re-running is a
- * no-op. Use `dryRun` to report the candidate count without writing.
+ * Idempotent — already-confirmed accounts are skipped, so re-running
+ * is a no-op. Use `dryRun` to report the candidate count without
+ * writing.
  */
 export async function backfillEmailConfirmedAt(opts: {
-  db: BackfillDb
-  emailConfirmedAt?: string
+  accountManager: EmailConfirmingAccountManager
+  /** Every account to consider, typically the full account list. */
+  accounts: readonly BackfillCandidate[]
   dryRun?: boolean
 }): Promise<BackfillResult> {
   const dryRun = opts.dryRun ?? false
-  const emailConfirmedAt = opts.emailConfirmedAt ?? new Date().toISOString()
+  const candidates = opts.accounts.filter((a) => needsEmailConfirmation(a))
 
-  const rows = await opts.db.db
-    .selectFrom('account')
-    .select('did')
-    .where('emailConfirmedAt', 'is', null)
-    .where('email', 'is not', null)
-    .where('email', '!=', '')
-    .execute()
-  const candidates = rows.length
-
-  if (dryRun || candidates === 0) {
-    return { candidates, updated: 0, dryRun }
+  if (dryRun || candidates.length === 0) {
+    return {
+      candidates: candidates.length,
+      updated: 0,
+      failed: 0,
+      failures: [],
+      dryRun,
+    }
   }
 
-  // Report what the UPDATE actually touched rather than reusing the
-  // SELECT's count. The two are separate statements, so a sign-in
-  // that stamps one of these rows in between would make `candidates`
-  // an overstatement — and this number is the operator's only
-  // evidence of what the script did.
-  const result = await opts.db.db
-    .updateTable('account')
-    .set({ emailConfirmedAt })
-    .where('emailConfirmedAt', 'is', null)
-    .where('email', 'is not', null)
-    .where('email', '!=', '')
-    .executeTakeFirst()
+  let updated = 0
+  const failures: { did: string; error: string }[] = []
+  for (const account of candidates) {
+    try {
+      await confirmAccountEmail(opts.accountManager, account.did)
+      updated++
+    } catch (err) {
+      // One unconfirmable account must not strand the rest of the
+      // run; collect and report instead.
+      failures.push({
+        did: account.did,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
 
   return {
-    candidates,
-    // numUpdatedRows is a bigint; row counts here are far below
-    // Number.MAX_SAFE_INTEGER, so the narrowing is safe.
-    updated: Number(result?.numUpdatedRows ?? 0),
+    candidates: candidates.length,
+    updated,
+    failed: failures.length,
+    failures,
     dryRun,
   }
 }
@@ -182,34 +205,11 @@ export function formatBackfillReport(
   result: BackfillResult,
   location: string,
 ): string {
-  return result.dryRun
-    ? `[dry run] ${result.candidates} account(s) in ${location} would be marked email-confirmed.`
-    : `Marked ${result.updated} account(s) in ${location} as email-confirmed.`
-}
-
-/**
- * Best-effort variant used on the sign-in hot path.
- *
- * The email genuinely *is* verified at this point, so recording that
- * fact is correct — but it is bookkeeping, not part of the sign-in
- * contract. If the write fails (SQLite busy, disk error) the user
- * has still proven ownership of the address, so failing their
- * sign-in over it would be a strictly worse outcome than a stale
- * `email_verified: false` claim that the next sign-in re-attempts.
- * The error is logged at `warn` so it stays visible without tripping
- * error-level alerting.
- */
-export async function markEmailConfirmed(opts: {
-  db: EmailConfirmedDb
-  did: string
-  logger: Pick<Logger, 'warn'>
-}): Promise<void> {
-  try {
-    await setEmailConfirmedAt(opts.db, opts.did)
-  } catch (err) {
-    opts.logger.warn(
-      { err, did: opts.did },
-      'Failed to set emailConfirmedAt after OTP-verified account creation',
-    )
+  if (result.dryRun) {
+    return `[dry run] ${result.candidates} account(s) in ${location} would be marked email-confirmed.`
   }
+  const base = `Marked ${result.updated} account(s) in ${location} as email-confirmed.`
+  if (result.failed === 0) return base
+  const detail = result.failures.map((f) => `  ${f.did}: ${f.error}`).join('\n')
+  return `${base}\n${result.failed} account(s) could not be confirmed:\n${detail}`
 }
