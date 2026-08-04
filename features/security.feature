@@ -8,15 +8,17 @@ Feature: Security measures
 
   # --- CSRF protection ---
 
-  @pending
-  Scenario: Forms include CSRF protection
-    When the login page is loaded
+  Scenario: Server-rendered forms include a CSRF token
+    # The login page submits via JS fetch to better-auth, which enforces its
+    # own CSRF protections at the handler level. Server-rendered HTML forms
+    # (recovery, choose-handle, account-settings) use ePDS's CSRF middleware
+    # and must carry a matching hidden token field.
+    When the recovery page is loaded
     Then the response sets a CSRF cookie
     And the HTML form contains a hidden CSRF token field
 
-  @pending
-  Scenario: POST without CSRF token is rejected
-    When a POST request is sent to the OTP verification endpoint without a CSRF token
+  Scenario: POST to a CSRF-protected route without a token is rejected
+    When a POST request is sent to the recovery endpoint without a CSRF token
     Then the response status is 403
 
   # --- Rate limiting ---
@@ -34,21 +36,20 @@ Feature: Security measures
 
   # --- Security headers ---
 
-  @pending
   Scenario: Auth service responses include security headers
-    When any page is loaded from the auth service via Caddy
-    Then the response includes:
-      | header                    | value            |
-      | Strict-Transport-Security | max-age=31536000 |
-      | X-Frame-Options           | DENY             |
-      | X-Content-Type-Options    | nosniff          |
-      | Referrer-Policy           | no-referrer      |
+    When any page is loaded from the auth service
+    Then the response includes the following security headers:
+      | header                    | value                                         |
+      | Strict-Transport-Security | max-age=63072000; includeSubDomains; preload  |
+      | X-Frame-Options           | DENY                                          |
+      | X-Content-Type-Options    | nosniff                                       |
+      | Referrer-Policy           | no-referrer                                   |
 
-  @pending
-  Scenario: Content-Security-Policy restricts inline content
+  Scenario: Content-Security-Policy restricts inline scripts
     When the login page is loaded
     Then the Content-Security-Policy header is present
-    And it does not allow unsafe-inline scripts
+    And the script-src directive does not allow unsafe-inline
+    And the script-src directive carries a per-response nonce
 
   # --- Monitoring ---
 
@@ -59,12 +60,9 @@ Feature: Security measures
     When GET /health is called on the PDS core
     Then it returns status 200 with { "status": "ok" }
 
-  @pending
   Scenario: Metrics endpoint requires authentication
     When GET /metrics is called on the auth service without credentials
     Then the response status is 401
-    When GET /metrics is called with valid Basic auth credentials
-    Then the response includes uptime and memory usage metrics
 
   # --- Same-site deployment topology (sec-fetch-site) ---
   #

@@ -24,14 +24,26 @@ export function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex')
 }
 
-/** Timing-safe comparison of two strings. */
+/**
+ * Timing-safe comparison of two strings.
+ *
+ * Encodes both inputs as UTF-8 Buffers and compares by byte length.
+ * Comparing `a.length !== b.length` (JavaScript code units) is not
+ * sufficient: a non-ASCII input with the same code-unit count as the
+ * expected value has a different UTF-8 byte length, and
+ * `crypto.timingSafeEqual` throws `RangeError` when byte lengths
+ * differ. This matters for any caller that feeds attacker-controlled
+ * text (HTTP headers, cookies) in as `a`.
+ */
 export function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) {
-    const dummy = Buffer.alloc(a.length)
+  const ab = Buffer.from(a)
+  const bb = Buffer.from(b)
+  if (ab.length !== bb.length) {
+    const dummy = Buffer.alloc(bb.length)
     crypto.timingSafeEqual(dummy, dummy)
     return false
   }
-  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b))
+  return crypto.timingSafeEqual(ab, bb)
 }
 
 /**

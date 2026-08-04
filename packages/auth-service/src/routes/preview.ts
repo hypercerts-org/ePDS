@@ -175,6 +175,7 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
         currentService: 'auth',
         authPublicUrl,
         pdsPublicUrl,
+        cspNonce: res.locals.cspNonce as string,
       }),
     )
   })
@@ -218,6 +219,7 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
         initialStep: 'email',
         otpAlreadySent: false,
         csrfToken: fakeCsrfToken(),
+        cspNonce: res.locals.cspNonce as string,
         authBasePath: '/api/auth',
         pdsPublicUrl: ctx.config.pdsPublicUrl,
         termsOfServiceUrl: ctx.config.termsOfServiceUrl,
@@ -252,6 +254,7 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
         initialStep: 'otp',
         otpAlreadySent: true,
         csrfToken: fakeCsrfToken(),
+        cspNonce: res.locals.cspNonce as string,
         authBasePath: '/api/auth',
         pdsPublicUrl: ctx.config.pdsPublicUrl,
         termsOfServiceUrl: ctx.config.termsOfServiceUrl,
@@ -286,6 +289,7 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
         css,
         faviconUrl,
         faviconUrlDark,
+        res.locals.cspNonce as string,
       ),
     )
   })
@@ -297,6 +301,7 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
       renderRecoveryForm({
         requestUri: FAKE_REQUEST_URI,
         csrfToken: fakeCsrfToken(),
+        cspNonce: res.locals.cspNonce as string,
         error: queryString(req, 'error'),
         customCss: css,
         customFaviconUrl: faviconUrl,
@@ -321,6 +326,7 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
       renderRecoveryOtpForm({
         email: FAKE_EMAIL,
         csrfToken: fakeCsrfToken(),
+        cspNonce: res.locals.cspNonce as string,
         requestUri: FAKE_REQUEST_URI,
         otpLength: ctx.config.otpLength,
         otpCharset,

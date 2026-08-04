@@ -17,7 +17,7 @@
 import { Router, type Request, type Response } from 'express'
 import type { AuthServiceContext } from '../context.js'
 import { createLogger, escapeHtml, maskEmail } from '@certified-app/shared'
-import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
+import { buildOtpInputProps, renderOtpInputFilterScript } from '../otp-input.js'
 import { resolveClientBranding } from '../lib/client-metadata.js'
 import {
   renderOptionalStyleTag,
@@ -90,6 +90,7 @@ export function createRecoveryRouter(
       renderRecoveryForm({
         requestUri,
         csrfToken: res.locals.csrfToken,
+        cspNonce: res.locals.cspNonce as string,
         customCss,
         customFaviconUrl,
         customFaviconUrlDark,
@@ -111,6 +112,7 @@ export function createRecoveryRouter(
         renderRecoveryForm({
           requestUri: requestUri || '',
           csrfToken: res.locals.csrfToken,
+          cspNonce: res.locals.cspNonce as string,
           error: 'Email and request URI are required.',
           customCss,
           customFaviconUrl,
@@ -127,6 +129,7 @@ export function createRecoveryRouter(
         renderRecoveryForm({
           requestUri,
           csrfToken: res.locals.csrfToken,
+          cspNonce: res.locals.cspNonce as string,
           error: 'Please enter a valid email address.',
           customCss,
           customFaviconUrl,
@@ -183,6 +186,7 @@ export function createRecoveryRouter(
           renderRecoveryOtpForm({
             email,
             csrfToken: res.locals.csrfToken,
+            cspNonce: res.locals.cspNonce as string,
             requestUri,
             otpLength,
             otpCharset,
@@ -199,6 +203,7 @@ export function createRecoveryRouter(
           renderRecoveryOtpForm({
             email,
             csrfToken: res.locals.csrfToken,
+            cspNonce: res.locals.cspNonce as string,
             requestUri,
             error: 'Failed to send code. Please try again.',
             otpLength,
@@ -217,6 +222,7 @@ export function createRecoveryRouter(
         renderRecoveryOtpForm({
           email,
           csrfToken: res.locals.csrfToken,
+          cspNonce: res.locals.cspNonce as string,
           requestUri,
           otpLength,
           otpCharset,
@@ -279,6 +285,7 @@ export function createRecoveryRouter(
         renderRecoveryOtpForm({
           email,
           csrfToken: res.locals.csrfToken,
+          cspNonce: res.locals.cspNonce as string,
           requestUri,
           error: errMsg,
           otpLength,
@@ -299,6 +306,7 @@ export function createRecoveryRouter(
 export function renderRecoveryForm(opts: {
   requestUri: string
   csrfToken: string
+  cspNonce: string
   error?: string
   customCss?: string | null
   customFaviconUrl?: string | null
@@ -357,7 +365,7 @@ export function renderRecoveryForm(opts: {
     </div>
     ${POWERED_BY_HTML}
   </div>
-  <script>
+  <script nonce="${escapeHtml(opts.cspNonce)}">
     (function() {
       // PAR heartbeat for the email-input recovery page — same shape
       // as the OTP form and recovery OTP form. A user who lands on
@@ -391,6 +399,7 @@ export function renderRecoveryForm(opts: {
 export function renderRecoveryOtpForm(opts: {
   email: string
   csrfToken: string
+  cspNonce: string
   requestUri: string
   otpLength: number
   otpCharset: 'numeric' | 'alphanumeric'
@@ -412,7 +421,6 @@ export function renderRecoveryOtpForm(opts: {
     ? `/oauth/authorize?request_uri=${encodeURIComponent(requestUriForBack)}`
     : '/oauth/authorize'
   const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
-  const inputFilter = buildOtpInputFilter(opts.otpCharset)
   // Forward the heartbeat-disabled flag through Resend (POST
   // /auth/recover) so the re-rendered OTP form keeps it disabled.
   // Verify (POST /auth/recover/verify) doesn't re-render this form,
@@ -453,7 +461,6 @@ export function renderRecoveryOtpForm(opts: {
                  autocapitalize="${inputProps.autocapitalize}"
                  placeholder="${inputProps.placeholder}"
                  class="otp-input"
-                 oninput="this.value=this.value.replace(${inputFilter.toString()},'')${opts.otpCharset === 'alphanumeric' ? '.toUpperCase()' : ''}"
                  style="letter-spacing: ${Math.max(2, Math.round(32 / opts.otpLength))}px">
         </div>
         <button type="submit" class="btn-primary">Verify</button>
@@ -469,7 +476,8 @@ export function renderRecoveryOtpForm(opts: {
     </div>
     ${POWERED_BY_HTML}
   </div>
-  <script>
+  ${renderOtpInputFilterScript('code', opts.otpCharset, opts.cspNonce)}
+  <script nonce="${escapeHtml(opts.cspNonce)}">
     (function() {
       // PAR heartbeat — see packages/auth-service/src/routes/heartbeat.ts.
       // Mirrors the login-page OTP heartbeat. Stops on form submit /

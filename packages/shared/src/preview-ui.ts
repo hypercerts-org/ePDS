@@ -6,6 +6,8 @@
  * both services.
  */
 
+import { escapeHtml } from './html.js'
+
 /**
  * <label> + <input> markup for the persisted client_id field. The
  * surrounding page is expected to have CSS that styles label/input — we
@@ -354,6 +356,14 @@ export function renderPreviewIndexPage(opts: {
   currentService: 'auth' | 'pds'
   authPublicUrl: string
   pdsPublicUrl: string
+  /**
+   * CSP nonce to stamp on the inline <script>. Required when this preview
+   * index is served with a `script-src 'nonce-...'` CSP (e.g. auth-service);
+   * omit when it's served with a policy that permits inline scripts
+   * without a nonce (e.g. pds-core's `/preview` index, which doesn't set
+   * a CSP at all, or any page served with `script-src ... 'unsafe-inline'`).
+   */
+  cspNonce?: string
 }): string {
   const serviceName =
     opts.currentService === 'auth' ? 'auth-service' : 'pds-core'
@@ -382,7 +392,7 @@ export function renderPreviewIndexPage(opts: {
   <p>Alternatively, skip the field and append this query string to any of the links above:</p>
   <pre><code>?client_id=&lt;URL-of-your-client-metadata.json&gt;</code></pre>
   ${PREVIEW_CACHE_STATUS_HTML}
-  ${PREVIEW_CLIENT_ID_SCRIPT_HTML}
+  ${previewClientIdScriptHtml(opts.cspNonce)}
 </body>
 </html>`
 }
@@ -413,8 +423,7 @@ export const PREVIEW_CACHE_STATUS_HTML = `<section id="cache-status" class="cach
  * interpolated from user input — so it's safe to embed verbatim inside
  * a <script> tag.
  */
-export const PREVIEW_CLIENT_ID_SCRIPT_HTML = `<script>
-(function () {
+const PREVIEW_CLIENT_ID_SCRIPT_BODY = `(function () {
   var STORAGE_KEY = 'epds:preview:client_id';
   var input = document.getElementById('client-id-input');
   // Single shared link-rewriter so per-link controls and the
@@ -684,4 +693,26 @@ export const PREVIEW_CLIENT_ID_SCRIPT_HTML = `<script>
     setInterval(render, 1000);
   }
 })();
-</script>`
+`
+
+/**
+ * Inline <script> tag that wires the preview index page. If `cspNonce` is
+ * passed, the tag is stamped with `nonce="..."` so it passes a
+ * `script-src 'nonce-...'` CSP. Otherwise the tag is emitted bare, which
+ * only works for callers whose CSP permits this inline script without a
+ * nonce (e.g. a `script-src` that still includes `'unsafe-inline'`).
+ */
+export function previewClientIdScriptHtml(cspNonce?: string): string {
+  // escapeHtml defence-in-depth: callers currently pass a base64url
+  // crypto.randomBytes(16) nonce so nothing unsafe reaches this attribute,
+  // but escaping keeps the helper safe if that ever changes.
+  const nonceAttr = cspNonce ? ` nonce="${escapeHtml(cspNonce)}"` : ''
+  return `<script${nonceAttr}>\n${PREVIEW_CLIENT_ID_SCRIPT_BODY}</script>`
+}
+
+/**
+ * Back-compat: the no-nonce variant of the inline script tag. Callers on
+ * services that set a CSP with `script-src 'nonce-...'` must use
+ * {@link previewClientIdScriptHtml} instead, passing the request nonce.
+ */
+export const PREVIEW_CLIENT_ID_SCRIPT_HTML = previewClientIdScriptHtml()

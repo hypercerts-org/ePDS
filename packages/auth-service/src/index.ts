@@ -26,6 +26,7 @@ import { createRootRouter } from './routes/root.js'
 import { createTestHooksRouter } from './routes/test-hooks.js'
 import { resolveAuthPort } from './lib/resolve-port.js'
 import { createSecurityHeadersMiddleware } from './lib/security-headers.js'
+import { checkMetricsAuth } from './lib/metrics-auth.js'
 import {
   validateOtpCharset,
   validateOtpLength,
@@ -125,19 +126,16 @@ export function createAuthService(config: AuthServiceConfig): {
   app.use(createPreviewRouter(ctx))
   app.use(createPreviewEmailsRouter(ctx))
 
-  // Metrics endpoint (protect with admin auth in production)
+  // Metrics endpoint — HTTP Basic auth, deny-by-default. See
+  // packages/auth-service/src/lib/metrics-auth.ts for the rules.
   app.get('/metrics', (req, res) => {
-    const adminPassword = process.env.PDS_ADMIN_PASSWORD
-    if (adminPassword) {
-      const authHeader = req.headers.authorization
-      if (
-        !authHeader ||
-        authHeader !==
-          'Basic ' + Buffer.from('admin:' + adminPassword).toString('base64')
-      ) {
-        res.status(401).json({ error: 'Unauthorized' })
-        return
-      }
+    const auth = checkMetricsAuth(
+      req.headers.authorization,
+      process.env.PDS_ADMIN_PASSWORD,
+    )
+    if (!auth.ok) {
+      res.set(auth.headers).status(auth.status).json(auth.body)
+      return
     }
     const metrics = ctx.db.getMetrics()
     res.json({
