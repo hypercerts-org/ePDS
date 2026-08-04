@@ -650,26 +650,24 @@ describe('renderLoginPage inline Resend action on expired OTP', () => {
     expect(verify).toBeGreaterThan(slot)
   })
 
-  it('falls back to the plain showError on a merely-wrong code', () => {
+  it('offers an inline resend on any rejected code', () => {
     const html = renderDefault()
-    // A typo must NOT carry a resend CTA: the boxes are cleared and
-    // refocused, so retyping is the intended recovery. The final else
-    // — reached when the error is neither expired nor code-
-    // invalidating — stays on the plain path.
-    expect(html).toMatch(/\} else \{\s*showError\(result\.error\);\s*\}/)
+    // "Invalid OTP" is not reliably a typo — better-auth also throws it
+    // when no stored code exists at all, which is the terminal state
+    // after a lockout, after the code was consumed in another tab, and
+    // after expiry cleanup. Retyping cannot recover any of those, so
+    // the action must not be withheld from the plain-invalid branch.
+    expect(html).toMatch(
+      /else if \(!parLikelyDead\(\)\)[\s\S]*?showErrorWithAction\(\s*result\.error,\s*'Resend code'/,
+    )
   })
 
-  it('offers an inline resend when the stored code was invalidated', () => {
+  it('withholds the inline resend once the flow is dead', () => {
     const html = renderDefault()
-    // "Too many attempts" deletes the stored code server-side, so
-    // there is nothing left to retype and resending is the only route
-    // forward — unlike a typo, which the plain path above covers.
-    expect(html).toMatch(
-      /needsFreshCode\s*=\s*\/too many attempts\|invalidated\/i/,
-    )
-    expect(html).toMatch(
-      /else if \(needsFreshCode && !parLikelyDead\(\)\)[\s\S]*?showErrorWithAction\(\s*result\.error,\s*'Resend code'/,
-    )
+    // refreshResendVisibility() hides the standalone Resend button when
+    // the PAR is dead; an inline one would re-offer a withdrawn action.
+    // The bare else is that path — plain message, no CTA.
+    expect(html).toMatch(/\} else \{\s*showError\(result\.error\);\s*\}/)
   })
 })
 

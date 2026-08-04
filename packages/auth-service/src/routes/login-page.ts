@@ -1308,13 +1308,6 @@ export function renderLoginPage(opts: {
             // expired code") and the auth-service wording ("OTP
             // expired") plus generic "expir"/"too long" variants.
             var isExpired = /expir|too long/i.test(result.error);
-            // "Too many attempts" invalidates the stored code, so the
-            // user has nothing left to retype and a resend is the only
-            // route forward. Matched separately from isExpired because
-            // the wording shares no substring with it.
-            var needsFreshCode = /too many attempts|invalidated/i.test(
-              result.error,
-            );
             if (isExpired) {
               // Only offer "Send a new code" when the PAR is still
               // alive. If it isn't, a fresh OTP would issue but
@@ -1331,22 +1324,33 @@ export function renderLoginPage(opts: {
                   document.getElementById('btn-resend').click();
                 });
               }
-            } else if (needsFreshCode && !parLikelyDead()) {
-              // A rejected or invalidated code is the other case a
-              // fresh one actually fixes, so it gets the same inline
-              // shortcut as the expired path, for the same reason:
-              // the standalone Resend button sits below the form and
-              // is easy to miss.
+            } else if (!parLikelyDead()) {
+              // Every other verify failure gets the same inline
+              // shortcut, for the same reason as the expired path: the
+              // standalone Resend button sits below the form and is
+              // easy to miss.
               //
-              // 3d31876 originally kept every non-expired error on the
-              // plain path so a typo wouldn't carry a "Send a new
-              // code" CTA. That reasoning holds for a typo — the user
-              // should retype, and the boxes are already cleared and
-              // focused for exactly that — but not for "too many
-              // attempts", which deletes the stored code server-side
-              // (better-auth 1.4.18 email-otp/routes.mjs, per the note
-              // in better-auth.ts). After a lockout there is no code
-              // left to retype, so resending is the only way forward.
+              // 3d31876 originally kept non-expired errors on the plain
+              // path, reasoning that a typo should be retyped rather
+              // than resent. But "Invalid OTP" does not reliably mean
+              // a typo: better-auth throws it from two places
+              // (1.4.18 email-otp/routes.mjs) — the wrong-code
+              // comparison, and a missing stored code. The second
+              // covers several states where retyping cannot possibly
+              // work and a fresh code is the only recovery:
+              //
+              //   - after a lockout. TOO_MANY_ATTEMPTS deletes the
+              //     stored value, so it is reported exactly once and
+              //     every later submit falls through to "Invalid OTP".
+              //   - after the code was consumed elsewhere, e.g. the
+              //     user completed sign-in in another tab.
+              //   - after expiry cleanup deleted the value, so a later
+              //     submit reads "Invalid OTP" rather than "expired".
+              //
+              // Since the branch cannot distinguish those from a typo,
+              // withholding the action strands the users who need it
+              // most. Offering it costs a typo-ing user nothing: the
+              // boxes are cleared and focused for retyping either way.
               //
               // Gated on parLikelyDead() because
               // refreshResendVisibility() hides the standalone Resend
