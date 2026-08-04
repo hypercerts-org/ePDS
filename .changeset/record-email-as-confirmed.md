@@ -6,17 +6,8 @@ Apps you sign in to are now told that your email address is confirmed.
 
 **Affects:** End users, Client app developers, Operators
 
-**End users:** apps you sign in to no longer ask you to verify an address you have already confirmed with an emailed code.
+**End users:** apps no longer ask you to verify an address you have already confirmed with an emailed code.
 
-**Client app developers:** the `email_verified` claim is now `true` for accounts that signed in through the emailed-code flow, instead of always `false`. If your app gated any behaviour on `email_verified` being true, that gate will now open for those accounts.
+**Client app developers:** the `email_verified` claim is now `true` for accounts that signed in through the emailed-code flow, instead of always `false`.
 
-**Operators:** deploy the auth service and the PDS together. The signed handover between them carries a new required field, so a sign-in served by one old and one new instance is rejected with `Invalid callback signature` until both are updated. Sign-in recovers on its own once the rollout completes; no data is affected.
-
-New accounts are recorded as confirmed at sign-up, and existing accounts are repaired the next time their owner signs in — so most accounts need no action. Use the backfill for accounts whose owners have not signed in since upgrading:
-
-- `pnpm --filter @certified-app/pds-core backfill:email-confirmed --dry-run` reports how many accounts would change.
-- Dropping `--dry-run` performs the update. It is idempotent, so re-running is safe.
-- A trailing argument scopes the run to addresses containing it, case-insensitively — `... backfill:email-confirmed @gmail.com` or `... backfill:email-confirmed my.account@yahoo.com` — so you can work through a deployment in batches or fix a single account. With no argument every account is considered.
-- Run it with the same environment as the server, so it targets that deployment's account database.
-- Accounts that cannot be confirmed are listed by DID at the end and the command exits non-zero, so a scripted run does not report success after partial failure.
-- It is deliberately not automatic: it marks every account that has an email address but no confirmation timestamp, so if you provisioned any accounts outside the normal sign-in flow, their addresses would be marked confirmed without having been verified. Check the dry-run count before committing.
+**Operators:** deploy the auth service and the PDS together — the signed handover between them carries a new required field, and a mixed pair rejects sign-in until both are updated. Accounts predating this release are repaired on their owner's next sign-in; to fix the rest, see "Backfilling Email Confirmation" in `docs/deployment.md`.

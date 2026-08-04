@@ -246,3 +246,49 @@ For test or development environments, you can disable the invite code
 requirement entirely by setting `PDS_INVITE_REQUIRED=false` on the pds-core
 service. This allows anyone who can reach the PDS to create accounts, so it
 is **not recommended for production**.
+
+## Backfilling Email Confirmation
+
+Accounts created before email confirmation was recorded at sign-up report
+`email_verified: false` to relying parties. New accounts are recorded as
+confirmed automatically, and existing accounts are repaired the next time
+their owner signs in, so this is only needed for accounts whose owners have
+not signed in since the upgrade.
+
+Preview first:
+
+```bash
+pnpm --filter @certified-app/pds-core backfill:email-confirmed --dry-run
+```
+
+Then run it for real:
+
+```bash
+pnpm --filter @certified-app/pds-core backfill:email-confirmed
+```
+
+Run it with the same environment as the PDS service, so it targets that
+deployment's account database. It is idempotent — already-confirmed accounts
+are skipped, so re-running is safe.
+
+A trailing argument scopes the run to addresses containing it
+(case-insensitive), which lets you work through a large deployment in batches
+or repair a single account:
+
+```bash
+pnpm --filter @certified-app/pds-core backfill:email-confirmed @gmail.com
+pnpm --filter @certified-app/pds-core backfill:email-confirmed my.account@yahoo.com
+```
+
+With no argument, every account is considered.
+
+Accounts that cannot be confirmed are listed by DID at the end and the command
+exits non-zero, so a scripted run does not report success after a partial
+failure.
+
+**This is deliberately not automatic.** It marks every account that has an
+email address but no confirmation timestamp. ePDS does not block upstream's
+`com.atproto.server.createAccount` XRPC route, so if you provisioned any
+accounts outside the normal sign-in flow, their addresses would be marked
+confirmed without having been verified. Check the dry-run count before
+committing.
