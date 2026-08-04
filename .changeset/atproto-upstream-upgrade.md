@@ -6,7 +6,7 @@ Signing in and managing your account now run on the latest AT Protocol server, w
 
 **Affects:** End users, Operators
 
-**End users:** the account and sign-in screens now come from a newer version of the underlying AT Protocol software, bringing email verification, changing your handle, and deactivating or deleting your account through the account-management interface. The passwordless email-code sign-in you already use is unchanged.
+**End users:** the account and sign-in screens now come from a newer version of the underlying AT Protocol software, which adds changing your handle and deactivating or deleting your account through the account-management interface. The passwordless email-code sign-in and email verification you already use through ePDS are unchanged.
 
 **Operators:**
 

@@ -12,7 +12,9 @@ describe('canLookUpAccountByHandle', () => {
   })
 
   it('accepts a valid DID', () => {
-    expect(canLookUpAccountByHandle('did:plc:abc123')).toBe(true)
+    expect(canLookUpAccountByHandle('did:plc:7iza6de2dwap2sbkpav7c6c6')).toBe(
+      true,
+    )
   })
 
   it('rejects a syntactically invalid identifier', () => {
@@ -36,7 +38,7 @@ describe('canCheckHandle', () => {
   it('rejects a DID (this endpoint only accepts handles)', () => {
     // A DID is not a HandleString, so availability-check treats it as invalid
     // — which the endpoint reports as "taken", never "free".
-    expect(canCheckHandle('did:plc:abc123')).toBe(false)
+    expect(canCheckHandle('did:plc:7iza6de2dwap2sbkpav7c6c6')).toBe(false)
   })
 
   it('rejects a syntactically invalid handle', () => {
