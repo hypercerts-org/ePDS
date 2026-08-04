@@ -10,7 +10,8 @@
   "scripts": {
     "build": "tsc --build",
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "backfill:email-confirmed": "tsx src/backfill-email-confirmed.ts"
   },
   "dependencies": {
     "@atproto/crypto": "^0.4.5",
