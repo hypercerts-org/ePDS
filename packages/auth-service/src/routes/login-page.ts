@@ -565,7 +565,7 @@ export function renderLoginPage(opts: {
   // between the two slots on step transitions; both transitions call
   // clearError() first, so it is always empty when it moves.
   const flashRegionHtml =
-    '<div id="error-msg" class="flash-msg" style="display:none;" role="status" aria-live="polite"></div>'
+    '<div id="error-msg" class="flash-msg hidden" role="status" aria-live="polite"></div>'
 
   // Social login buttons — redirect to better-auth provider endpoints
   const socialButtonsHtml = hasSocialProviders
@@ -641,6 +641,7 @@ export function renderLoginPage(opts: {
     .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: var(--muted-foreground); font-size: 13px; }
     .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #ececec; }
     .flash-msg { padding: 12px; border-radius: 10px; margin: 12px 0; font-size: 14px; text-align: center; }
+    .flash-msg.hidden { display: none; }
     .flash-msg.error { color: #dc3545; background: #fdf0f0; }
     .flash-msg.success { color: #28a745; background: #f0fff4; }
     /* Inline action button rendered next to an OTP-expired error so
@@ -1040,7 +1041,7 @@ export function renderLoginPage(opts: {
       function setFlash(kind, buildContent) {
         errorEl.classList.remove('error', 'success');
         errorEl.classList.add(kind);
-        errorEl.style.display = 'block';
+        errorEl.classList.remove('hidden');
 
         var frag = document.createDocumentFragment();
         buildContent(frag);
@@ -1116,11 +1117,11 @@ export function renderLoginPage(opts: {
 
       function clearError() {
         // Empty the region before hiding it. Clearing after the
-        // display:none would mutate a region that is already out of
+        // region is hidden would mutate one that is already out of
         // the accessibility tree, which some assistive tech reports
         // as a stale announcement.
         errorEl.replaceChildren();
-        errorEl.style.display = 'none';
+        errorEl.classList.add('hidden');
         errorEl.classList.remove('error', 'success');
       }
 
@@ -1404,7 +1405,7 @@ export function renderLoginPage(opts: {
           // sending a new OTP invalidates every earlier one, and a user
           // who needed to resend is the user whose mail may be in spam.
           showSuccess(
-            'Use the new code; earlier ones no longer work. ' +
+            'Resent! Make sure to use the new code; earlier ones no longer work. ' +
               'It may be in your spam folder.',
           );
         }
