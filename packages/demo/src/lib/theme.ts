@@ -124,8 +124,11 @@ function buildInjectedCss(
     `.field input { background: ${page.inputBg}; border-color: ${page.inputBorder}; color: ${page.text}; }`,
     `.field input:focus { border-color: ${page.focusBorder}; }`,
     `.field input::placeholder { color: ${page.textHint}; }`,
-    `.otp-box { color: ${page.text}; }`,
-    `.otp-box.active { border-color: ${page.focusBorder} !important; }`,
+    // Deliberately use the broad selectors found in trusted production
+    // clients so the bundled demo continuously exercises OTP projection.
+    `input { background: ${page.inputBg}; border-color: ${page.inputBorder}; color: ${page.text}; }`,
+    `input::placeholder { color: ${page.textHint}; }`,
+    `input:focus { border-color: ${page.focusBorder} !important; }`,
     `.btn-primary { background: ${page.primary}; color: ${page.primaryText}; }`,
     `.btn-primary:hover { background: ${page.primaryHover}; }`,
     // Standalone actions under Verify (.btn-secondary buttons and the

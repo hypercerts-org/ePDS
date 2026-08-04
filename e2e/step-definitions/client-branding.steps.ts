@@ -110,6 +110,142 @@ Then(
 )
 
 Then(
+  'legacy OTP selectors style the visual code slots',
+  async function (this: EpdsWorld) {
+    await waitForLoginPage(this)
+    const page = getPage(this)
+    const input = page.locator('#code')
+    await expect(input).toBeVisible()
+    await input.focus()
+    await page.waitForFunction(() => {
+      const slot = document.querySelector<HTMLElement>('.otp-box.active')
+      if (!slot) return false
+
+      const probe = document.createElement('span')
+      probe.style.color = 'var(--focus-border)'
+      document.body.appendChild(probe)
+      const expectedFocus = getComputedStyle(probe).color
+      probe.remove()
+      return getComputedStyle(slot).borderColor === expectedFocus
+    })
+
+    const result = await page.evaluate(() => {
+      const slot = document.querySelector<HTMLElement>('.otp-box.active')
+      const character = slot?.querySelector<HTMLElement>(
+        '.otp-character.placeholder',
+      )
+      const idleSlot = document.querySelector<HTMLElement>(
+        '.otp-box:not(.active)',
+      )
+      const emailInput = document.querySelector<HTMLInputElement>('#email')
+      const heading = document.querySelector<HTMLElement>('#heading')
+      if (!slot || !character || !idleSlot || !emailInput || !heading) {
+        return null
+      }
+
+      const probe = document.createElement('span')
+      probe.style.color = 'var(--focus-border)'
+      document.body.appendChild(probe)
+      const expectedFocus = getComputedStyle(probe).color
+      probe.remove()
+
+      const css = Array.from(document.querySelectorAll('style'))
+        .map((style) => style.textContent)
+        .join('\n')
+
+      return {
+        hasInputAlias: css.includes(':where(#otp-boxes)>div:where(.otp-box)'),
+        hasFocusAlias: css.includes(
+          ':where(#otp-boxes)>div:where(.otp-box).active',
+        ),
+        hasPlaceholderAlias: css.includes(
+          ':where(#otp-boxes)>div:where(.otp-box)>span:where(.otp-character.placeholder)',
+        ),
+        slotColor: getComputedStyle(slot).color,
+        headingColor: getComputedStyle(heading).color,
+        slotBackground: getComputedStyle(idleSlot).backgroundColor,
+        expectedInputBackground: getComputedStyle(emailInput).backgroundColor,
+        slotBorderColor: getComputedStyle(idleSlot).borderColor,
+        expectedInputBorderColor: getComputedStyle(emailInput).borderColor,
+        placeholderColor: getComputedStyle(character).color,
+        expectedPlaceholderColor: getComputedStyle(emailInput, '::placeholder')
+          .color,
+        activeBorderColor: getComputedStyle(slot).borderColor,
+        expectedFocus,
+      }
+    })
+
+    expect(result).not.toBeNull()
+    expect(result).toMatchObject({
+      hasInputAlias: true,
+      hasFocusAlias: true,
+      hasPlaceholderAlias: true,
+    })
+    expect(result?.slotColor).toBe(result?.headingColor)
+    expect(result?.slotBackground).toBe(result?.expectedInputBackground)
+    expect(result?.slotBorderColor).toBe(result?.expectedInputBorderColor)
+    expect(result?.placeholderColor).toBe(result?.expectedPlaceholderColor)
+    expect(result?.activeBorderColor).toBe(result?.expectedFocus)
+  },
+)
+
+Then(
+  'the real OTP input remains protected and hit-testable',
+  async function (this: EpdsWorld) {
+    await waitForLoginPage(this)
+    const page = getPage(this)
+    const input = page.locator('#code')
+    await expect(input).toBeVisible()
+    await expect(input).toBeEnabled()
+    await input.fill('12')
+
+    const result = await input.evaluate((element) => {
+      const otpInput = element as HTMLInputElement
+      const style = getComputedStyle(otpInput)
+      const slots = Array.from(
+        document.querySelectorAll<HTMLElement>('.otp-box'),
+      )
+
+      return {
+        display: style.display,
+        visibility: style.visibility,
+        opacity: style.opacity,
+        pointerEvents: style.pointerEvents,
+        touchAction: style.touchAction,
+        userSelect: style.userSelect,
+        backgroundColor: style.backgroundColor,
+        borderWidth: style.borderWidth,
+        hitTestedAcrossSlots: slots.every((slot) => {
+          const rect = slot.getBoundingClientRect()
+          return (
+            document.elementFromPoint(
+              rect.left + rect.width / 2,
+              rect.top + rect.height / 2,
+            ) === otpInput
+          )
+        }),
+        renderedCharacters: slots
+          .slice(0, 2)
+          .map((slot) => slot.textContent.trim()),
+      }
+    })
+
+    expect(result).toMatchObject({
+      display: 'block',
+      visibility: 'visible',
+      opacity: '1',
+      pointerEvents: 'auto',
+      touchAction: 'auto',
+      userSelect: 'text',
+      backgroundColor: 'rgba(0, 0, 0, 0)',
+      borderWidth: '0px',
+      hitTestedAcrossSlots: true,
+      renderedCharacters: ['1', '2'],
+    })
+  },
+)
+
+Then(
   'the login page body uses the default background color',
   async function (this: EpdsWorld) {
     await waitForLoginPage(this)

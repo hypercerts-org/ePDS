@@ -562,6 +562,102 @@ describe('renderLoginPage sign-in error copy', () => {
   })
 })
 
+describe('renderLoginPage OTP branding compatibility', () => {
+  it('renders client metadata without custom CSS', () => {
+    const logoUri = 'https://client.example/logo.png'
+    const html = renderDefault({
+      branding: {
+        client_name: 'Example App',
+        brand_color: '#111111',
+        logo_uri: logoUri,
+      },
+      initialStep: 'otp',
+      otpAlreadySent: true,
+      loginHint: 'user@example.com',
+      termsOfServiceUrl: 'https://client.example/terms',
+      privacyPolicyUrl: 'https://client.example/privacy',
+      legalEntityName: 'Example Org',
+    })
+
+    expect(html).toContain('<title>Sign in to Example App</title>')
+    expect(html).toContain(`src="${logoUri}" alt="Example App"`)
+    expect(html).toContain('--focus-border: #111111')
+    expect(html).toContain('<h1 id="heading">Enter your code</h1>')
+    expect(html).toContain('Code already sent to us***@example.com')
+    expect(html).toContain(
+      'style="display:none;">By signing in, you agree to Example Org\'s',
+    )
+  })
+
+  it('rejects unsafe client brand colors before CSS interpolation', () => {
+    const html = renderDefault({
+      branding: {
+        brand_color: 'red; background: url(https://example.com/tracker)',
+      },
+    })
+
+    expect(html).toContain('--focus-border: #1A130F')
+    expect(html).not.toContain('tracker')
+  })
+
+  it('renders malformed client CSS unchanged without blocking login', () => {
+    const malformedCss = '.otp-box:focus { color: gold;'
+    const html = renderDefault({ customCss: malformedCss })
+
+    expect(html).toContain(`<style>${malformedCss}</style>`)
+    expect(html).toContain('data-epds-otp-invariants')
+    expect(html).toContain('id="form-verify-otp"')
+  })
+
+  it('aliases legacy focus styling to the active visual slot', () => {
+    const html = renderDefault({
+      customCss: '.otp-box:focus { border-color: rgb(1, 2, 3) !important; }',
+    })
+
+    expect(html).toMatch(
+      /\.otp-box:focus\s*,\s*\.otp-box\.active\s*\{\s*border-color: rgb\(1, 2, 3\) !important;/,
+    )
+  })
+
+  it('protects the real input after client branding is applied', () => {
+    const customCss =
+      'input { display: none !important; background: white !important; }'
+    const html = renderDefault({ customCss })
+    const clientCssIndex = html.indexOf(customCss)
+    const invariantCssIndex = html.indexOf('data-epds-otp-invariants')
+
+    expect(clientCssIndex).toBeGreaterThan(0)
+    expect(invariantCssIndex).toBeGreaterThan(clientCssIndex)
+    expect(html.slice(invariantCssIndex)).toContain(
+      '#form-verify-otp #otp-boxes > #code.otp-input-overlay',
+    )
+    expect(html.slice(invariantCssIndex)).toContain(
+      'pointer-events: auto !important',
+    )
+    expect(html.slice(invariantCssIndex)).toContain(
+      'background: transparent !important',
+    )
+  })
+
+  it('protects long-press paste and wins over important client layers', () => {
+    const customCss =
+      '@layer branding { input { display: none !important; touch-action: none !important; } }'
+    const html = renderDefault({ customCss })
+    const layerDeclarationIndex = html.indexOf('@layer epds-otp-invariants;')
+    const clientCssIndex = html.indexOf('@layer branding')
+    const invariantCssIndex = html.indexOf('data-epds-otp-invariants')
+    const invariantCss = html.slice(invariantCssIndex)
+
+    expect(layerDeclarationIndex).toBeGreaterThan(0)
+    expect(layerDeclarationIndex).toBeLessThan(clientCssIndex)
+    expect(invariantCssIndex).toBeGreaterThan(clientCssIndex)
+    expect(invariantCss).toContain('@layer epds-otp-invariants')
+    expect(invariantCss).toContain('-webkit-touch-callout: default !important')
+    expect(invariantCss).toContain('-webkit-user-select: text !important')
+    expect(invariantCss).toContain('touch-action: auto !important')
+  })
+})
+
 describe('renderLoginPage OTP accessibility', () => {
   it('announces asynchronous status and error messages', () => {
     const html = renderDefault()

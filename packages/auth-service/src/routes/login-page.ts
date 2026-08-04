@@ -49,6 +49,10 @@ import {
   resolveOtpSelection,
 } from '../otp-input.js'
 import {
+  adaptOtpBrandingCss,
+  OTP_INPUT_INVARIANT_CSS,
+} from '../lib/otp-branding-compat.js'
+import {
   resolveLoginHint,
   fetchParLoginHint,
 } from '../lib/resolve-login-hint.js'
@@ -519,6 +523,21 @@ export function renderLoginPage(opts: {
     : `<img src="/static/certified-brandmark.svg" alt="Certified" class="client-logo">`
 
   const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
+  const otpBranding = adaptOtpBrandingCss(opts.customCss)
+  if (otpBranding.status === 'adapted') {
+    logger.debug(
+      { clientId: opts.clientId, rewrites: otpBranding.rewrites },
+      'Applied OTP branding projections',
+    )
+  } else if (otpBranding.status === 'fallback') {
+    logger.warn(
+      {
+        clientId: opts.clientId,
+        failureKind: otpBranding.failure.kind,
+      },
+      'Unable to apply OTP branding projections; using the original client CSS. Check branding.css in /preview/login-otp',
+    )
+  }
   // The browser uses the exact pure normalizer covered by otp-input.test.ts.
   // It is self-contained, so serializing its source avoids maintaining a
   // second client-only implementation inside this server-rendered page.
@@ -625,6 +644,7 @@ export function renderLoginPage(opts: {
   ${renderFaviconTag(opts.customFaviconUrl, opts.customFaviconUrlDark)}
   <title>Sign in to ${escapeHtml(appName)}</title>
   <style>
+    @layer epds-otp-invariants;
     :root { --muted-foreground: #666; --input-bg: #ffffff; --input-border: #e5e5e5; --page-bg: #E8E8E8; --card-bg: #F8F8F8; --card-border: #E5E5E5; --btn-secondary-border: #e5e5e5; --focus-border: ${brandColor}; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
@@ -647,9 +667,6 @@ export function renderLoginPage(opts: {
     .otp-character.placeholder { color: #d4d4d4; }
     .otp-fake-caret { display: none; position: absolute; width: 1px; height: 28px; background: currentColor; animation: otp-caret-blink 1.2s ease-out infinite; }
     .otp-box.active.empty .otp-fake-caret { display: block; }
-    .otp-input-overlay { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 1; color: transparent; -webkit-text-fill-color: transparent; caret-color: transparent; background: transparent; border: 0; outline: 0; box-shadow: none; font-family: monospace; font-size: 56px; line-height: 1; letter-spacing: -0.5em; }
-    .otp-input-overlay::selection { color: transparent; background: transparent; }
-    .otp-input-overlay:disabled { cursor: not-allowed; }
     @keyframes otp-caret-blink { 0%, 70%, 100% { opacity: 1; } 20%, 50% { opacity: 0; } }
     @media (prefers-reduced-motion: reduce) { .otp-fake-caret { animation: none; } }
     .otp-actions { display: flex; gap: 32px; justify-content: center; margin-top: 12px; }
@@ -706,7 +723,8 @@ export function renderLoginPage(opts: {
     .recovery-link { display: var(--recovery-link-display, block); margin-top: 16px; color: var(--muted-foreground); font-size: 13px; text-decoration: none; text-align: center; }
     .recovery-link:hover { color: #1A130F; }
     .recovery-link:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; border-radius: 4px; }
-  </style>${renderOptionalStyleTag(opts.customCss)}
+  </style>${renderOptionalStyleTag(otpBranding.css)}
+  <style data-epds-otp-invariants>${OTP_INPUT_INVARIANT_CSS}</style>
 </head>
 <body>
   <div class="page-wrap">

@@ -101,6 +101,33 @@ describe('OTP input value normalization', () => {
   })
 })
 
+describe('client-serialized OTP helpers', () => {
+  it('remain self-contained outside their module scope', () => {
+    const isolate = <Args extends unknown[], Result>(
+      fn: (...args: Args) => Result,
+    ): ((...args: Args) => Result) => {
+      // The renderer also uses toString(); global evaluation proves these
+      // helpers do not close over module bindings.
+      // eslint-disable-next-line @typescript-eslint/no-implied-eval
+      return new Function(`return (${fn.toString()})`)() as (
+        ...args: Args
+      ) => Result
+    }
+
+    expect(isolate(normalizeOtpValue)('12 34 56', 6, 'numeric')).toBe('123456')
+    expect(isolate(resolveOtpClickSelection)(3, 1)).toEqual({
+      start: 1,
+      end: 2,
+      direction: 'forward',
+    })
+    expect(isolate(resolveOtpSelection)(4, 6, 3, 3, 4, 4)).toEqual({
+      start: 3,
+      end: 4,
+      direction: 'backward',
+    })
+  })
+})
+
 describe('Recovery flow: OTP input props', () => {
   it('numeric charset produces digit-only pattern and zero placeholder', () => {
     const props = buildOtpInputProps(8, 'numeric')
