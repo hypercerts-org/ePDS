@@ -121,18 +121,53 @@ them to the `/auth` router, not the merged app root.
 ### 5. CSP middleware convergence
 
 Both set CSP per-route (auth via `security-headers.ts`, pds-core by rewriting
-upstream's CSP). These already coexist per-response, so no origin change is
-needed — but confirm the auth CSP middleware only fires on `/auth/*` once
-co-mounted, and does not leak `unsafe-inline` onto PDS routes.
+upstream's CSP). They coexist today only because they run in separate
+processes; on one Express app they write the **same** response header, and
+`setHeader` overwrites rather than merges — so the last middleware to run
+silently wins.
+
+"Confirm they coexist" is therefore not enough. Assign ownership explicitly:
+
+- Mount the auth CSP middleware **path-scoped** to `/auth/*`, not app-wide, so
+  ordering cannot decide the policy for PDS routes.
+- Treat CSP as **single-writer per request**: exactly one middleware sets the
+  header on any given path. If both must contribute, compose the value in one
+  place instead of letting two `setHeader` calls race.
+- **Assert the final header, not the intent.** Add tests that issue a real
+  request to a representative `/auth/*` path and a representative PDS path and
+  assert on the exact `Content-Security-Policy` received, including that
+  `unsafe-inline` does not appear on PDS routes. A test that only checks the
+  middleware in isolation would pass while the mounted app serves the wrong
+  policy.
 
 ### 6. Shared context / DB handles
 
 auth-service builds `AuthServiceContext` (its own `db`, `emailSender`); pds-core
 holds `pds.ctx`. Merged, decide whether they share one SQLite handle or keep
-separate connections to the same files. The migration plan already notes
-`account.sqlite` is the single source of truth for email→DID; in-process, the
-direct-lookup replacements for `/_internal/account-by-email` read it through
-`pds.ctx.accountManager` rather than a second connection.
+separate connections to the same files.
+
+**Separate handles stay separate transaction boundaries.** One process does not
+make a write across the two stores atomic: the auth DB and `account.sqlite`
+remain distinct databases, so a crash between them can consume auth-flow state
+without the PDS account being created or confirmed, or leave a flow row intact
+after the account exists and invite an unsafe retry. Today the HTTP callback
+masks this — a failed request is visibly a failed request. In-process the two
+writes look like one function call and the boundary becomes easy to forget.
+Before replacing the callback, pin down:
+
+- **Commit order**, chosen so the survivable failure is the one that happens:
+  create/confirm the PDS account first, consume the auth-flow row last, so a
+  crash leaves a replayable flow rather than a consumed one with no account.
+- **Idempotency keys**, so a replay of the same flow converges on the same
+  account instead of minting a second one — this is the same one-time,
+  session-bound guarantee the HMAC path enforces today, and it must survive the
+  move.
+- **Recovery tests** that inject a failure between the two writes and assert the
+  system converges: no orphaned flow rows, no duplicate accounts, no
+  half-confirmed state. The migration plan already notes
+  `account.sqlite` is the single source of truth for email→DID; in-process, the
+  direct-lookup replacements for `/_internal/account-by-email` read it through
+  `pds.ctx.accountManager` rather than a second connection.
 
 ## Replacing the HMAC callback in-process
 
@@ -269,9 +304,21 @@ come first. This process-merge adds:
    signed HTTP route stays live and verified here — it is not yet removed.
 5. **Compatibility gate — delete only once legacy callers are drained.** After
    confirming no old auth-service instance still POSTs the callback, delete
-   `EPDS_CALLBACK_SECRET`, the callback signature middleware, the HTTP
-   `/oauth/epds-callback` route, the `/_internal/*` HTTP endpoints, and
-   auth-service's standalone server. Retire the second process.
+   `EPDS_CALLBACK_SECRET`, the callback signature middleware, and the HTTP
+   `/oauth/epds-callback` route.
+
+   **Gate `/_internal/*` removal separately, per endpoint.** Draining callback
+   callers says nothing about the other internal consumers: `getDidByEmail`
+   (`/_internal/account-by-email`), `pingParRequest` (`/_internal/ping-request`)
+   and handle-availability lookups each have their own callers and their own
+   drain window. Inventory every endpoint, migrate each caller to the
+   in-process function, confirm no traffic remains on that specific route, and
+   only then delete it. Removing them wholesale alongside the callback would
+   break any caller that had not yet been migrated — and because these are
+   internal routes, the failure surfaces as a runtime error in a sign-in, not
+   at build time.
+
+   Retire the second process once every route above is drained and deleted.
 
 Each step is independently shippable and reversible until step 5.
 

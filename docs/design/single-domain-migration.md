@@ -54,6 +54,30 @@ separation must instead be provided by the cookie attributes:
   host-only as the baseline; add either `__Host-` (at `Path=/`) or `Path=/auth`
   scoping, not both.
 
+**In-flight sessions do not survive the host change.** These cookies are
+host-only by design, so a cookie set at `auth.<host>` is never sent to
+`<host>` — RFC 6265bis host-only semantics. The transition redirects in step 4
+carry the path and query, and therefore the request parameters, but they carry
+**no cookies**: `epds_csrf`, `epds_auth_flow`, and the Better Auth session all
+vanish across the hop. A user mid-sign-in at cutover lands on the new origin
+with the right URL and no state.
+
+Pick one of these explicitly before cutting over — the migration is not
+complete without it:
+
+- **Controlled drain (recommended).** Stop issuing new flows on the subdomain,
+  wait out the auth-flow TTL (OTP `expiresIn: 600`, so ~10 minutes), then flip.
+  In-flight users restart sign-in; nobody sees a broken state because there are
+  no live flows left. Cheapest, and the TTL is short enough to make it
+  practical.
+- **Server-side handoff.** Redirect through a one-time, short-TTL token that the
+  new origin exchanges for the session server-side. Preserves in-flight flows at
+  the cost of a new exchange endpoint — which is itself a credential-bearing
+  redirect and needs the same scrutiny as the HMAC callback.
+
+Whichever is chosen, the restart path must be graceful: a user arriving without
+the expected cookies must get the "start sign-in again" flow, not an error.
+
 ## Two levels of "merge" — keep them distinct
 
 This matters for both benefits and risks, so fix the terms up front:
@@ -197,13 +221,32 @@ deployments keep working during transition (config-gated, not a hard cutover).
 1. **Config plumbing.** Add `AUTH_PATH_PREFIX`; derive auth origin from it;
    keep `AUTH_HOSTNAME` as a legacy override. No behaviour change yet.
 2. **Caddy path routing.** Add a single-origin Caddyfile variant that routes
-   `/auth/*`, `/oauth/authorize`, `/account/*` to auth-service and the rest to
-   the PDS. Stand it up in a test/preview env.
+   **only `/auth/*`** to auth-service and everything else to the PDS. Routing
+   `/oauth/authorize` or `/account/*` at the public root would shadow the PDS's
+   own endpoints — see "Path shadowing" above; the auth equivalents are reached
+   as `/auth/oauth/authorize` and `/auth/account/*`. Either strip the `/auth`
+   prefix before forwarding (so auth-service keeps its current internal route
+   paths) or register `/auth`-prefixed routes in auth-service; pick one
+   explicitly, because the two choices are not interchangeable at the
+   redirect-target level (step 4). Stand it up in a test/preview env.
 3. **Delete the cross-origin workarounds** (items 5, 14, 15 above) _behind the
    single-origin config path_ so subdomain deployments are unaffected until they
    flip.
-4. **Transition redirects.** Serve `auth.<host>/*` → `<host>/auth/*` for the
-   metadata-TTL + email-link-TTL window.
+4. **Transition redirects.** Serve path-specific redirects for the
+   metadata-TTL + email-link-TTL window, preserving the full path and query
+   string on each:
+
+   | Legacy                        | Target                        |
+   | ----------------------------- | ----------------------------- |
+   | `auth.<host>/oauth/authorize` | `<host>/auth/oauth/authorize` |
+   | `auth.<host>/account/*`       | `<host>/auth/account/*`       |
+   | `auth.<host>/auth/*`          | `<host>/auth/*`               |
+
+   A blanket `auth.<host>/* → <host>/auth/*` rule is wrong: existing links
+   already carry an `/auth` segment (`EPDS_LINK_BASE_URL` is
+   `https://auth.pds.example/auth/verify`), so it would produce
+   `/auth/auth/verify` and break every verification email in flight.
+
 5. **Cut over** `authorization_endpoint` and `EPDS_LINK_BASE_URL` to the new
    path-based URLs.
 6. **Retire** the `auth.<host>` DNS record, TLS cert, and the legacy
