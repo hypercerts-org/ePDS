@@ -234,6 +234,10 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
   router.get('/preview/login-otp', async (req: Request, res: Response) => {
     const { clientId, metadata, css, faviconUrl, faviconUrlDark } =
       await getBranding(req)
+    const otpCharset = resolvePreviewOtpCharset(
+      queryString(req, 'otp_charset'),
+      ctx.config.otpCharset,
+    )
     sendHtml(
       res,
       renderLoginPage({
@@ -254,7 +258,7 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
         privacyPolicyUrl: ctx.config.privacyPolicyUrl,
         legalEntityName: ctx.config.legalEntityName,
         otpLength: ctx.config.otpLength,
-        otpCharset: ctx.config.otpCharset,
+        otpCharset,
         // No real OAuth flow behind a preview, so no PAR to keep alive.
         heartbeatEnabled: false,
       }),
