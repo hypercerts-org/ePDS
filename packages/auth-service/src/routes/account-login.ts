@@ -17,7 +17,7 @@ import { Router, type Request, type Response } from 'express'
 import { escapeHtml, maskEmail, createLogger } from '@certified-app/shared'
 import { fromNodeHeaders } from 'better-auth/node'
 import type { AuthServiceContext } from '../context.js'
-import { buildOtpInputProps } from '../otp-input.js'
+import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
 import type { BetterAuthInstance } from '../better-auth.js'
 import { POWERED_BY_CSS, POWERED_BY_HTML } from '../lib/page-helpers.js'
 import {
@@ -185,6 +185,7 @@ function renderOtpForm(opts: {
 }): string {
   const maskedEmail = maskEmail(opts.email)
   const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
+  const inputFilter = buildOtpInputFilter(opts.otpCharset)
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -216,7 +217,7 @@ function renderOtpForm(opts: {
                  autocapitalize="${inputProps.autocapitalize}"
                  placeholder="${inputProps.placeholder}"
                  class="otp-input"
-                 oninput="this.value=this.value.replace(${opts.otpCharset === 'alphanumeric' ? '/[^A-Za-z0-9]/g' : '/[^0-9]/g'},'')${opts.otpCharset === 'alphanumeric' ? '.toUpperCase()' : ''}"
+                 oninput="this.value=this.value.replace(${inputFilter.toString()},'')${opts.otpCharset === 'alphanumeric' ? '.toUpperCase()' : ''}"
                  style="letter-spacing: ${Math.max(2, Math.round(32 / opts.otpLength))}px">
         </div>
         <button type="submit" class="btn-primary">Verify</button>

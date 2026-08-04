@@ -42,7 +42,7 @@ import {
   type HandleMode,
 } from '@certified-app/shared'
 import { socialProviders } from '../better-auth.js'
-import { buildOtpInputProps } from '../otp-input.js'
+import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
 import {
   resolveLoginHint,
   fetchParLoginHint,
@@ -514,6 +514,7 @@ export function renderLoginPage(opts: {
     : `<img src="/static/certified-brandmark.svg" alt="Certified" class="client-logo">`
 
   const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
+  const inputFilter = buildOtpInputFilter(opts.otpCharset)
 
   // ATProto/Bluesky handle login button.
   //
@@ -763,6 +764,8 @@ export function renderLoginPage(opts: {
       var termsEl = document.getElementById('terms');
       var otpBoxes = Array.prototype.slice.call(document.querySelectorAll('.otp-box'));
       var hiddenCode = document.getElementById('code');
+      var otpLength = ${opts.otpLength};
+      var otpCharset = ${JSON.stringify(opts.otpCharset)};
 
       // PAR heartbeat — slides the upstream request_uri inactivity
       // timer (atproto's AUTHORIZATION_INACTIVITY_TIMEOUT, 5 min) so
@@ -970,6 +973,19 @@ export function renderLoginPage(opts: {
         return false;
       }
 
+      // Drop characters the configured code alphabet can't contain, so a
+      // code copied out of prose (punctuation, line breaks, a stray letter
+      // in a digits-only code) still lands in the boxes as a valid code
+      // instead of silently failing verification. Alphanumeric codes are
+      // generated uppercase, and the browser only auto-capitalises on soft
+      // keyboards, so normalise here too — otherwise a desktop user typing
+      // lowercase submits a code the server will reject.
+      var otpCharFilter = ${inputFilter.toString()};
+      function filterOtpChars(s) {
+        var cleaned = s.replace(otpCharFilter, '');
+        return otpCharset === 'alphanumeric' ? cleaned.toUpperCase() : cleaned;
+      }
+
       function updateHiddenCode() {
         var v = '';
         for (var i = 0; i < otpBoxes.length; i++) v += otpBoxes[i].value;
@@ -984,7 +1000,7 @@ export function renderLoginPage(opts: {
       otpBoxes.forEach(function(box, idx) {
         box.addEventListener('input', function() {
           // keep only the last typed char (handles paste into a single box)
-          var v = box.value.replace(/\\s/g, '');
+          var v = filterOtpChars(box.value);
           if (v.length > 1) v = v.slice(-1);
           box.value = v;
           updateHiddenCode();
@@ -1008,7 +1024,7 @@ export function renderLoginPage(opts: {
         box.addEventListener('paste', function(e) {
           e.preventDefault();
           var data = (e.clipboardData || window.clipboardData).getData('text') || '';
-          var cleaned = data.replace(/\\s/g, '').slice(0, otpBoxes.length - idx);
+          var cleaned = filterOtpChars(data).slice(0, otpBoxes.length - idx);
           for (var i = 0; i < cleaned.length; i++) otpBoxes[idx + i].value = cleaned[i];
           updateHiddenCode();
           var nextIdx = Math.min(idx + cleaned.length, otpBoxes.length - 1);
@@ -1161,8 +1177,6 @@ export function renderLoginPage(opts: {
         });
       }
 
-      var otpLength = ${opts.otpLength};
-      var otpCharset = ${JSON.stringify(opts.otpCharset)};
       function showOtpStep(email) {
         currentEmail = email;
         otpEmailInput.value = email;

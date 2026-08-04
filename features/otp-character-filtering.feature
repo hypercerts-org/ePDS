@@ -1,6 +1,6 @@
-Feature: Server-rendered OTP character filtering
-  Account-login and recovery forms must apply the configured OTP character
-  policy while the user types, matching the segmented sign-in form.
+Feature: OTP character filtering
+  Every OTP form — the segmented sign-in grid, account-login, and recovery —
+  must apply the configured OTP character policy while the user types.
 
   Background:
     Given the ePDS test environment is running
@@ -11,6 +11,6 @@ Feature: Server-rendered OTP character filtering
     Then the recovery OTP input contains "<expected>"
 
     Examples:
-      | charset     | typed | expected |
-      | numeric     | a1-!  | 1        |
+      | charset      | typed | expected |
+      | numeric      | a1-!  | 1        |
       | alphanumeric | a1-!  | A1       |
