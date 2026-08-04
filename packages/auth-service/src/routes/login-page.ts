@@ -1113,6 +1113,29 @@ export function renderLoginPage(opts: {
        * handler runs the supplied callback. When actionLabel is
        * absent, behaves like showError.
        */
+      /**
+       * Rewrite better-auth's verification errors as end-user copy.
+       *
+       * better-auth returns developer-facing strings — "Invalid OTP" is
+       * an unexplained acronym with no article, and none of them say
+       * what to do next. The rendered text is the one thing a user
+       * actually reads when sign-in fails, so it is worth owning.
+       *
+       * Anything unrecognised passes through verbatim rather than
+       * collapsing into a generic apology: an unexpected failure that
+       * still names itself can be diagnosed from a screenshot, and one
+       * that says "Something went wrong" cannot.
+       */
+      function otpErrorText(raw) {
+        switch (raw) {
+          case 'Invalid OTP': return "That code didn't work.";
+          case 'OTP expired': return 'That code has expired.';
+          case 'Too many attempts':
+            return 'Too many tries — that code is no longer usable.';
+          default: return raw;
+        }
+      }
+
       function showErrorWithAction(msg, actionLabel, onClick) {
         if (!actionLabel || typeof onClick !== 'function') {
           showError(msg);
@@ -1120,7 +1143,13 @@ export function renderLoginPage(opts: {
         }
         setFlash('error', function(frag) {
           appendMessage(frag, msg);
-          frag.appendChild(document.createTextNode(' '));
+          // Separate the sentence from the action. Mapped copy already
+          // ends in a full stop, but a passed-through better-auth string
+          // may not, so supply one rather than letting the two run
+          // together as "Invalid OTP Send a new code".
+          frag.appendChild(
+            document.createTextNode(/[.!?]$/.test(msg) ? ' ' : '. '),
+          );
           var btn = document.createElement('button');
           btn.type = 'button';
           btn.className = 'flash-action';
@@ -1259,7 +1288,12 @@ export function renderLoginPage(opts: {
           });
           if (!res.ok) {
             var data = await res.json().catch(function() { return {}; });
-            return { error: data.message || data.error || 'Invalid code' };
+            var raw = data.message || data.error || 'Invalid code';
+            // Keep the raw reason alongside the display text: callers
+            // branch on it (see isExpired below), and branching on the
+            // rewritten copy would couple control flow to wording, so
+            // an innocuous copy edit could silently change behaviour.
+            return { error: otpErrorText(raw), rawError: raw };
           }
           // Success: redirect to /auth/complete to complete the AT Protocol flow
           window.location.href = '/auth/complete';
@@ -1339,7 +1373,10 @@ export function renderLoginPage(opts: {
             // match catches the better-auth wording ("Invalid or
             // expired code") and the auth-service wording ("OTP
             // expired") plus generic "expir"/"too long" variants.
-            var isExpired = /expir|too long/i.test(result.error);
+            // Test the raw better-auth reason, not the rewritten copy:
+            // otpErrorText() owns the wording, and matching against it
+            // would mean a copy edit could silently reroute the branch.
+            var isExpired = /expir|too long/i.test(result.rawError || result.error);
             if (isExpired) {
               // Only offer "Send a new code" when the PAR is still
               // alive. If it isn't, a fresh OTP would issue but

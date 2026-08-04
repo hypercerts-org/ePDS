@@ -524,6 +524,43 @@ function renderDefault(overrides: Partial<LoginPageOpts> = {}): string {
   })
 }
 
+describe('renderLoginPage sign-in error copy', () => {
+  it.each([
+    ['Invalid OTP', "That code didn't work."],
+    ['OTP expired', 'That code has expired.'],
+    ['Too many attempts', 'Too many tries — that code is no longer usable.'],
+  ])('rewrites better-auth %s as end-user copy', (raw, display) => {
+    const html = renderDefault()
+    expect(html).toContain(`case '${raw}':`)
+    expect(html).toContain(display)
+  })
+
+  it('passes an unrecognised error through verbatim', () => {
+    // A failure that names itself can be diagnosed from a screenshot;
+    // one collapsed into a generic apology cannot.
+    const html = renderDefault()
+    expect(html).toMatch(/default:\s*return raw;/)
+  })
+
+  it('keys the expired branch off the raw reason, not the display copy', () => {
+    // otpErrorText() owns the wording. If the branch matched the
+    // rewritten string instead, editing that copy could silently
+    // reroute which recovery action the user is offered.
+    const html = renderDefault()
+    expect(html).toContain('test(result.rawError || result.error)')
+    expect(html).toContain('rawError: raw')
+    expect(html).not.toMatch(
+      /isExpired = \/expir\|too long\/i\.test\(result\.error\)/,
+    )
+  })
+
+  it('separates the message from its inline action', () => {
+    // Without this the banner reads "Invalid OTP Send a new code".
+    const html = renderDefault()
+    expect(html).toMatch(/\/\[\.!\?\]\$\/\.test\(msg\) \? ' ' : '\. '/)
+  })
+})
+
 describe('renderLoginPage OTP verify-form double-submit latch (regression)', () => {
   it('declares the verifying flag at IIFE scope so input/paste/submit handlers share it', () => {
     const html = renderDefault()
