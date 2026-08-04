@@ -26,6 +26,16 @@ adds a distinct set of wins that single-origin alone cannot deliver:
   only the cross-service _authenticity_ check; the one-time, session-bound
   issuance gating must be preserved in the direct path (see "Preserving
   one-time issuance" below).
+- **Authentication facts stop being re-serialised.** The HMAC boundary carries
+  _authenticity_ (this redirect is genuine) but not _content_ — anything
+  pds-core needs to know about **how** the user authenticated has to be encoded
+  into the signed payload as an explicit field, or else inferred. Inference is
+  the dangerous default: it is invisible, it looks correct for as long as only
+  one sign-in flow exists, and it silently becomes wrong the day a second one
+  is added. In one process there is nothing to serialise — the code that
+  verified the user calls the code that records the result, and the fact cannot
+  drift from its use. See "Auth facts across the boundary" below for the worked
+  example that motivated this bullet.
 - **The internal HTTP lookups disappear.** `/_internal/account-by-email` (which
   replaced the old unauthenticated `/_magic/check-email`) and the
   `/_internal/ping-request` keepalive become
@@ -158,6 +168,73 @@ callback. In-process there is no forgeable wire boundary, but the review must
 confirm no other caller (including a partially-migrated deployment) can still
 reach the code-issuance path unauthenticated.
 
+## Auth facts across the boundary
+
+A worked example of the "authentication facts stop being re-serialised" bullet,
+from HYPER-219 (PR #234). It is the clearest evidence so far of a cost that is
+_structural_, not incidental — no amount of care in either service removes it.
+
+**The task.** Every ePDS account is created after the user verifies an emailed
+one-time code, so the address genuinely is verified. But the PDS `account`
+table's `emailConfirmedAt` stayed null, so `email_verified` was false in every
+OIDC claim and upstream's email-change verification gate never engaged.
+
+**In one process** this is a single call at the point of proof: where
+better-auth confirms the code, call `accountManager.confirmEmail(...)`. The
+invariant — _record confirmation only where control of the address was
+proved_ — is enforced by control flow. There is no way to express the bug.
+
+**Across two processes** the code that knows the fact (auth-service, holding
+the better-auth session) cannot reach the API that records it (pds-core, sole
+owner of `account.sqlite`; auth-service does not even depend on `@atproto/pds`).
+So the fact has to travel. The first implementation instead let pds-core
+_infer_ it: a valid signed callback had only ever followed an OTP, so arrival
+was treated as proof. That inference is correct today and silently wrong the
+moment a second sign-in flow exists — a passkey flow would legitimately send a
+signed callback carrying `email` merely to locate the account, having proved
+nothing about that address, and pds-core would mark it confirmed. The failure
+is in the worst direction: asserting `email_verified: true` to relying parties
+on no evidence, and arming the email-change gate on an unproven address.
+
+**What the boundary cost to make safe:**
+
+- a new required `email_verified` field on the shared `CallbackParams` type;
+- a change to the positional HMAC payload in both `signCallback` and
+  `verifyCallback`, so the claim is tamper-proof rather than a query param
+  anyone holding the URL could flip from `0` to `1`;
+- wiring it through **both** callback producers in auth-service
+  (`/auth/complete` and `/auth/choose-handle`);
+- a consumer check in pds-core that confirms only on an explicit `'1'`;
+- tests pinning tamper-resistance and fail-closed behaviour.
+
+Two details are worth carrying into any future boundary work:
+
+- **Make such fields required, not sentinel-defaulted.** `handle` and
+  `client_id` use an empty-string sentinel so absent means "not set". Applying
+  that to an auth fact would mean a future flow that forgets it gets
+  "unverified" silently. Because the payload is positional, a **required**
+  field means an omitting caller signs a different payload and is rejected at
+  the trust boundary — the failure is loud, and cannot be a false claim of
+  verification.
+- **Rebinding the subject invalidates the fact.** The recovery path swaps
+  `email` from the verified backup address to the account's primary address.
+  The session's "verified" flag refers to the address the user actually proved,
+  so it must be reset to `false` when the subject changes. In-process this
+  hazard is far easier to see, because the fact and its use sit together.
+
+**The general shape.** Each authentication fact pds-core needs is a field that
+must be added to the payload, signed, produced by every producer, consumed
+correctly, and tested — and the cost recurs per fact. `email_verified` answers
+only "was control of this address proved?". A future `auth_method`
+(`otp` / `passkey` / …), or step-up/assurance data, is another full round of
+the same work. In one process these are ordinary function arguments, or simply
+not needed because the caller already holds the session.
+
+This does not by itself justify the merge — the integration hazards above are
+real and the rollout is not free. It does mean the boundary's cost is not
+one-off: it is a recurring tax on every future authentication mechanism, paid
+in exactly the area where silent errors are most damaging.
+
 ## npm version clash — now in play
 
 Unlike single-origin, one process forces **one resolution** of every shared or
@@ -205,3 +282,15 @@ value at a fraction of the risk. Treat the process merge as a **follow-on**,
 gated on the peer-dependency audit (step 1) and the callback-extraction refactor
 (step 2), both of which are worth doing on their own merits regardless of whether
 the final process collapse happens.
+
+One update since this was first written: the boundary's cost is now known to
+_recur_, not just to sit as a fixed overhead. "Auth facts across the boundary"
+records a live example (HYPER-219 / PR #234) where a fact known to auth-service
+had to be re-serialised into the signed payload before pds-core could act on it
+safely, and where the natural implementation inferred the fact instead — correct
+for today's single sign-in flow, silently wrong for the next one. Every future
+authentication mechanism (passkeys, step-up, assurance levels) pays that tax
+again. This does not change the phasing recommended above, but it does raise the
+standing cost of _not_ merging, and it is a reason to keep the
+callback-extraction refactor (step 2) moving even if the final collapse stays
+deferred.
