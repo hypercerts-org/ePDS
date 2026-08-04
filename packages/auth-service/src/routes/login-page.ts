@@ -725,7 +725,7 @@ export function renderLoginPage(opts: {
         <button type="submit" class="btn-primary">Verify</button>
       </form>
       <div class="otp-actions">
-        <button type="button" class="btn-secondary" id="btn-resend">Resend code</button>
+        <button type="button" class="btn-secondary" id="btn-resend">Send a new code</button>
         <button type="button" class="btn-secondary" id="btn-back">Use different email</button>
       </div>
       <a href="/auth/recover?request_uri=${encodeURIComponent(opts.pdsPublicUrl + '/placeholder')}"
@@ -1358,7 +1358,7 @@ export function renderLoginPage(opts: {
               // would re-offer an action the page has deliberately
               // withdrawn. The aborted-flow notice carries its own
               // restart action, so nothing is lost by staying quiet.
-              showErrorWithAction(result.error, 'Resend code', function() {
+              showErrorWithAction(result.error, 'Send a new code', function() {
                 document.getElementById('btn-resend').click();
               });
             } else {
@@ -1396,7 +1396,7 @@ export function renderLoginPage(opts: {
         if (await abortIfFlowDead()) return;
         var result = await sendOtp(currentEmail);
         this.disabled = false;
-        this.textContent = 'Resend code';
+        this.textContent = 'Send a new code';
         if (result.error) {
           showError(result.error);
         } else {
@@ -1409,7 +1409,7 @@ export function renderLoginPage(opts: {
           // sending a new OTP invalidates every earlier one, and a user
           // who needed to resend is the user whose mail may be in spam.
           showSuccess(
-            'Resent! Make sure to use the new code; earlier ones no longer work. ' +
+            'Sent! Make sure to use the new code; earlier ones no longer work. ' +
               'It may be in your spam folder.',
           );
         }

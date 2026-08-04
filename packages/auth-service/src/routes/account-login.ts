@@ -223,7 +223,7 @@ function renderOtpForm(opts: {
       <form method="POST" action="/account/send-otp" style="margin-top: 12px;">
         <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
         <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
-        <button type="submit" class="btn-secondary">Resend code</button>
+        <button type="submit" class="btn-secondary">Send a new code</button>
       </form>
     </div>
     ${POWERED_BY_HTML}

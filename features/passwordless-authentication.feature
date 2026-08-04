@@ -364,7 +364,7 @@ Feature: Passwordless authentication via email OTP
     And the login page shows an OTP verification form
     When the PAR request_uri has expired before the bridge fires
     And the OTP form re-checks PAR liveness
-    Then the Resend code button is no longer offered
+    Then the Send a new code button is no longer offered
     And a Start over button is offered instead
 
   # The demo OAuth client stores its OAuth state (state value, code
