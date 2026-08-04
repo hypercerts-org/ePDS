@@ -99,12 +99,11 @@ When(
   },
 )
 
-Then('the response status is {int}', function (this: EpdsWorld, code: number) {
-  const { status } = getCapturedResponse(this)
-  if (status !== code) {
-    throw new Error(`Expected status ${code}, got ${status}`)
-  }
-})
+// NOTE: "the response status is {int}" is deliberately NOT defined here.
+// favicon.steps.ts already owns that phrasing against `world.lastHttpStatus`,
+// and defining it twice makes every use ambiguous. setCapturedResponse()
+// mirrors the status onto lastHttpStatus so the shared step covers these
+// scenarios too.
 
 // ---------------------------------------------------------------------------
 // Security headers scenario
