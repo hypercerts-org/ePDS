@@ -8,6 +8,13 @@
  *   pnpm --filter @certified-app/pds-core backfill:email-confirmed --dry-run
  *   pnpm --filter @certified-app/pds-core backfill:email-confirmed
  *
+ * A trailing argument scopes the run to addresses containing it
+ * (case-insensitive), so an operator can work through a deployment in
+ * batches or fix up a single account:
+ *
+ *   pnpm --filter @certified-app/pds-core backfill:email-confirmed --dry-run @gmail.com
+ *   pnpm --filter @certified-app/pds-core backfill:email-confirmed my.account@yahoo.com
+ *
  * Not wired into startup on purpose — see the rationale on
  * `backfillEmailConfirmedAt`.
  *
@@ -29,11 +36,13 @@ import {
   backfillEmailConfirmedAt,
   formatBackfillReport,
   parseDryRun,
+  parseEmailFilter,
   type BackfillCandidate,
 } from './lib/email-confirmed.js'
 
 async function main(): Promise<void> {
   const dryRun = parseDryRun(process.argv)
+  const emailFilter = parseEmailFilter(process.argv)
 
   const env = readEnv()
   const cfg = envToCfg(env)
@@ -49,10 +58,11 @@ async function main(): Promise<void> {
     const result = await backfillEmailConfirmedAt({
       accountManager: pds.ctx.accountManager,
       accounts,
+      emailFilter,
       dryRun,
     })
     process.stdout.write(
-      formatBackfillReport(result, cfg.db.accountDbLoc) + '\n',
+      formatBackfillReport(result, cfg.db.accountDbLoc, emailFilter) + '\n',
     )
     // Surface partial failure to the shell so a scripted run does not
     // report success when some accounts could not be confirmed.

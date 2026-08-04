@@ -74,20 +74,26 @@ export async function confirmAccountEmail(
  * contract. If it fails (SQLite busy, disk error) the user has still
  * proven ownership of the address, so failing their sign-in over it
  * would be a strictly worse outcome than a stale
- * `email_verified: false` claim. The error is logged at `warn` so it
- * stays visible without tripping error-level alerting, and the next
- * sign-in retries — callers skip already-confirmed accounts, not
- * already-*seen* ones, so a failure here is self-healing.
+ * `email_verified: false` claim. The next sign-in retries — callers
+ * skip already-confirmed accounts, not already-*seen* ones, so a
+ * failure here is self-healing.
+ *
+ * Logged at `error`, not `warn`: swallowing the exception keeps the
+ * user signed in, but the account is left claiming an unverified
+ * address to every relying party until some later sign-in happens to
+ * succeed — and the operator has no other signal that it happened.
+ * Self-healing is not the same as harmless, so this should reach
+ * error-level alerting rather than sit quietly in the logs.
  */
 export async function markEmailConfirmed(opts: {
   accountManager: EmailConfirmingAccountManager
   did: string
-  logger: Pick<Logger, 'warn'>
+  logger: Pick<Logger, 'error'>
 }): Promise<void> {
   try {
     await confirmAccountEmail(opts.accountManager, opts.did)
   } catch (err) {
-    opts.logger.warn(
+    opts.logger.error(
       { err, did: opts.did },
       'Failed to record email confirmation after OTP-verified sign-in',
     )
@@ -110,6 +116,34 @@ export function needsEmailConfirmation(
   // reports `email_verified` as undefined rather than false for those.
   if (!account.email) return false
   return !account.emailConfirmedAt
+}
+
+/**
+ * Case-insensitive substring match on the address, so an operator can
+ * scope a backfill run to a domain (`@gmail.com`) or a single account
+ * (`my.account@yahoo.com`) instead of the whole table.
+ *
+ * An empty or absent filter matches everything — "no filter given"
+ * must mean "all accounts", never "none", or a mistyped invocation
+ * would silently do nothing and look like a clean run.
+ */
+export function matchesEmailFilter(
+  email: string | null | undefined,
+  filter?: string,
+): boolean {
+  if (!filter) return true
+  if (!email) return false
+  return email.toLowerCase().includes(filter.toLowerCase())
+}
+
+/**
+ * The first non-flag argument, treated as the address filter.
+ * Returns undefined when the operator passed only flags.
+ */
+export function parseEmailFilter(argv: readonly string[]): string | undefined {
+  // argv[0] is the node binary and argv[1] the script path; anything
+  // further that is not a flag is the filter.
+  return argv.slice(2).find((a) => !a.startsWith('-'))
 }
 
 export interface BackfillResult {
@@ -151,10 +185,19 @@ export async function backfillEmailConfirmedAt(opts: {
   accountManager: EmailConfirmingAccountManager
   /** Every account to consider, typically the full account list. */
   accounts: readonly BackfillCandidate[]
+  /**
+   * Optional case-insensitive substring match on the address, so a run
+   * can be scoped to a domain or a single account. Absent means all.
+   */
+  emailFilter?: string
   dryRun?: boolean
 }): Promise<BackfillResult> {
   const dryRun = opts.dryRun ?? false
-  const candidates = opts.accounts.filter((a) => needsEmailConfirmation(a))
+  const candidates = opts.accounts.filter(
+    (a) =>
+      needsEmailConfirmation(a) &&
+      matchesEmailFilter(a.email, opts.emailFilter),
+  )
 
   if (dryRun || candidates.length === 0) {
     return {
@@ -204,11 +247,17 @@ export function parseDryRun(argv: readonly string[]): boolean {
 export function formatBackfillReport(
   result: BackfillResult,
   location: string,
+  emailFilter?: string,
 ): string {
+  // Name the filter in the output: a scoped run and an
+  // everything-matched run otherwise look identical, and an operator
+  // reading "0 account(s)" needs to know whether that means "none left
+  // to do" or "your filter matched nothing".
+  const scope = emailFilter ? `${location} matching "${emailFilter}"` : location
   if (result.dryRun) {
-    return `[dry run] ${result.candidates} account(s) in ${location} would be marked email-confirmed.`
+    return `[dry run] ${result.candidates} account(s) in ${scope} would be marked email-confirmed.`
   }
-  const base = `Marked ${result.updated} account(s) in ${location} as email-confirmed.`
+  const base = `Marked ${result.updated} account(s) in ${scope} as email-confirmed.`
   if (result.failed === 0) return base
   const detail = result.failures.map((f) => `  ${f.did}: ${f.error}`).join('\n')
   return `${base}\n${result.failed} account(s) could not be confirmed:\n${detail}`

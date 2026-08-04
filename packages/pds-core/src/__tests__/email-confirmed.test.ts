@@ -5,8 +5,10 @@ import {
   confirmAccountEmail,
   formatBackfillReport,
   markEmailConfirmed,
+  matchesEmailFilter,
   needsEmailConfirmation,
   parseDryRun,
+  parseEmailFilter,
   type EmailConfirmingAccountManager,
 } from '../lib/email-confirmed.js'
 
@@ -83,17 +85,17 @@ describe('confirmAccountEmail', () => {
 describe('markEmailConfirmed', () => {
   it('confirms the account and stays silent on success', async () => {
     const { accountManager, calls } = makeAccountManager()
-    const logger = { warn: vi.fn() }
+    const logger = { error: vi.fn() }
 
     await markEmailConfirmed({ accountManager, did: DID, logger })
 
     expect(calls.redeemed).toEqual([{ did: DID, token: 'TOKEN-1' }])
-    expect(logger.warn).not.toHaveBeenCalled()
+    expect(logger.error).not.toHaveBeenCalled()
   })
 
-  it('swallows failures so sign-in is never blocked, logging at warn', async () => {
+  it('swallows failures so sign-in is never blocked, logging at error', async () => {
     const { accountManager } = makeAccountManager({ failOn: 'confirmEmail' })
-    const logger = { warn: vi.fn() }
+    const logger = { error: vi.fn() }
 
     // Must resolve, not reject — the user has already proven ownership
     // of the address, so bookkeeping failure must not fail their sign-in.
@@ -101,8 +103,8 @@ describe('markEmailConfirmed', () => {
       markEmailConfirmed({ accountManager, did: DID, logger }),
     ).resolves.toBeUndefined()
 
-    expect(logger.warn).toHaveBeenCalledTimes(1)
-    const [context] = logger.warn.mock.calls[0]
+    expect(logger.error).toHaveBeenCalledTimes(1)
+    const [context] = logger.error.mock.calls[0]
     expect(context).toMatchObject({ did: DID })
     expect((context as { err: Error }).err.message).toBe('token rejected')
   })
@@ -168,6 +170,22 @@ describe('backfillEmailConfirmedAt', () => {
     ])
   })
 
+  it('confirms only accounts matching the email filter', async () => {
+    const { accountManager, calls } = makeAccountManager()
+
+    const result = await backfillEmailConfirmedAt({
+      accountManager,
+      accounts: [
+        { did: 'did:plc:aaa', email: 'a@gmail.com', emailConfirmedAt: null },
+        { did: 'did:plc:bbb', email: 'b@yahoo.com', emailConfirmedAt: null },
+      ],
+      emailFilter: '@gmail.com',
+    })
+
+    expect(result).toMatchObject({ candidates: 1, updated: 1, failed: 0 })
+    expect(calls.redeemed.map((r) => r.did)).toEqual(['did:plc:aaa'])
+  })
+
   it('reports candidates without writing when dryRun is set', async () => {
     const { accountManager, calls } = makeAccountManager()
 
@@ -225,6 +243,56 @@ describe('backfillEmailConfirmedAt', () => {
   })
 })
 
+describe('matchesEmailFilter', () => {
+  it('matches everything when no filter is given', () => {
+    // "no filter" must mean all accounts, never none — otherwise a
+    // mistyped invocation would do nothing and look like a clean run.
+    expect(matchesEmailFilter('a@x.test', undefined)).toBe(true)
+    expect(matchesEmailFilter('a@x.test', '')).toBe(true)
+  })
+
+  it('matches on a domain substring, case-insensitively', () => {
+    expect(matchesEmailFilter('someone@gmail.com', '@gmail.com')).toBe(true)
+    expect(matchesEmailFilter('Someone@GMAIL.com', '@gmail.com')).toBe(true)
+    expect(matchesEmailFilter('someone@yahoo.com', '@gmail.com')).toBe(false)
+  })
+
+  it('matches a single full address', () => {
+    expect(
+      matchesEmailFilter('my.account@yahoo.com', 'my.account@yahoo.com'),
+    ).toBe(true)
+    expect(
+      matchesEmailFilter('other.account@yahoo.com', 'my.account@yahoo.com'),
+    ).toBe(false)
+  })
+
+  it('never matches an account with no address once a filter is set', () => {
+    expect(matchesEmailFilter('', '@gmail.com')).toBe(false)
+    expect(matchesEmailFilter(null, '@gmail.com')).toBe(false)
+  })
+})
+
+describe('parseEmailFilter', () => {
+  it('is undefined when only flags are passed', () => {
+    expect(parseEmailFilter(['node', 'backfill.ts'])).toBeUndefined()
+    expect(
+      parseEmailFilter(['node', 'backfill.ts', '--dry-run']),
+    ).toBeUndefined()
+  })
+
+  it('takes the first non-flag argument, in any position', () => {
+    expect(parseEmailFilter(['node', 'backfill.ts', '@gmail.com'])).toBe(
+      '@gmail.com',
+    )
+    expect(
+      parseEmailFilter(['node', 'backfill.ts', '--dry-run', '@gmail.com']),
+    ).toBe('@gmail.com')
+    expect(
+      parseEmailFilter(['node', 'backfill.ts', '@gmail.com', '--dry-run']),
+    ).toBe('@gmail.com')
+  })
+})
+
 describe('parseDryRun', () => {
   it('is off unless --dry-run is passed', () => {
     expect(parseDryRun(['node', 'backfill.ts'])).toBe(false)
@@ -268,6 +336,21 @@ describe('formatBackfillReport', () => {
     expect(
       formatBackfillReport({ ...base, candidates: 0, updated: 0 }, LOCATION),
     ).toContain('0 account(s)')
+  })
+
+  it('names the filter so a scoped run is distinguishable from a full one', () => {
+    // "0 account(s)" is ambiguous otherwise: nothing left to do, or a
+    // filter that matched nothing?
+    expect(
+      formatBackfillReport(
+        { ...base, candidates: 0, updated: 0, dryRun: true },
+        LOCATION,
+        '@gmail.com',
+      ),
+    ).toContain('matching "@gmail.com"')
+    expect(
+      formatBackfillReport({ ...base, candidates: 2, updated: 2 }, LOCATION),
+    ).not.toContain('matching')
   })
 
   it('names the accounts that failed so the operator can chase them', () => {
