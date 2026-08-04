@@ -229,6 +229,26 @@ async function main() {
     const handleParam = req.query.handle as string | undefined
     const clientIdParam = req.query.client_id as string | undefined
     const handleModeParam = req.query.epds_handle_mode as string | undefined
+
+    // Reject a missing or malformed email_verified before signature
+    // verification. The signature check would catch it anyway — the
+    // field is inside the HMAC — but it would surface as "Invalid
+    // callback signature", which sends an operator hunting for a
+    // secret mismatch during what is actually a mixed-version rollout
+    // (an auth-service too old to send the field). Say what is
+    // actually wrong instead.
+    if (emailVerifiedStr !== '0' && emailVerifiedStr !== '1') {
+      logger.warn(
+        { emailVerified: emailVerifiedStr },
+        'epds-callback missing or invalid email_verified — auth-service too old, or a hand-built callback',
+      )
+      res.status(400).json({
+        error:
+          'Missing or invalid email_verified parameter (expected "0" or "1")',
+      })
+      return
+    }
+
     const signatureValid = verifyCallback(
       {
         request_uri: requestUri,
