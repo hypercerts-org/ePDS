@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   backfillEmailConfirmedAt,
+  formatBackfillReport,
   markEmailConfirmed,
+  parseDryRun,
   setEmailConfirmedAt,
 } from '../lib/email-confirmed.js'
 
@@ -222,5 +224,53 @@ describe('backfillEmailConfirmedAt', () => {
 
     expect(result).toEqual({ candidates: 0, updated: 0, dryRun: false })
     expect(inspect().updateExecuted).toBe(0)
+  })
+})
+
+describe('parseDryRun', () => {
+  it('is off unless --dry-run is passed', () => {
+    expect(parseDryRun(['node', 'backfill.ts'])).toBe(false)
+    // A near-miss must not be treated as the flag: writing when the
+    // operator meant to preview is the one unrecoverable mistake here.
+    expect(parseDryRun(['node', 'backfill.ts', '--dry'])).toBe(false)
+    expect(parseDryRun(['node', 'backfill.ts', 'dry-run'])).toBe(false)
+  })
+
+  it('is on when --dry-run is passed, in any position', () => {
+    expect(parseDryRun(['node', 'backfill.ts', '--dry-run'])).toBe(true)
+    expect(parseDryRun(['--dry-run', 'node', 'backfill.ts'])).toBe(true)
+  })
+})
+
+describe('formatBackfillReport', () => {
+  const LOCATION = '/data/account.sqlite'
+
+  it('reports the candidate count and names the db on a dry run', () => {
+    const line = formatBackfillReport(
+      { candidates: 3, updated: 0, dryRun: true },
+      LOCATION,
+    )
+
+    expect(line).toBe(
+      `[dry run] 3 account(s) in ${LOCATION} would be marked email-confirmed.`,
+    )
+  })
+
+  it('reports what was actually written on a real run', () => {
+    const line = formatBackfillReport(
+      { candidates: 3, updated: 3, dryRun: false },
+      LOCATION,
+    )
+
+    expect(line).toBe(`Marked 3 account(s) in ${LOCATION} as email-confirmed.`)
+  })
+
+  it('makes a no-op run unambiguous rather than silent', () => {
+    expect(
+      formatBackfillReport(
+        { candidates: 0, updated: 0, dryRun: false },
+        LOCATION,
+      ),
+    ).toContain('0 account(s)')
   })
 })

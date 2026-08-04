@@ -153,6 +153,25 @@ export async function backfillEmailConfirmedAt(opts: {
   return { candidates, updated: candidates, dryRun }
 }
 
+/** True when the operator asked to preview rather than write. */
+export function parseDryRun(argv: readonly string[]): boolean {
+  return argv.includes('--dry-run')
+}
+
+/**
+ * The line the backfill script prints on completion. Split out from
+ * the script so the wording is covered by tests — the script itself
+ * is an entry point and never imported by one.
+ */
+export function formatBackfillReport(
+  result: BackfillResult,
+  location: string,
+): string {
+  return result.dryRun
+    ? `[dry run] ${result.candidates} account(s) in ${location} would be marked email-confirmed.`
+    : `Marked ${result.updated} account(s) in ${location} as email-confirmed.`
+}
+
 /**
  * Best-effort variant used on the sign-in hot path.
  *

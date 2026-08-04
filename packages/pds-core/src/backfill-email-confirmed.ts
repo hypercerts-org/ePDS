@@ -20,10 +20,14 @@
  * is never called, so nothing is served.
  */
 import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
-import { backfillEmailConfirmedAt } from './lib/email-confirmed.js'
+import {
+  backfillEmailConfirmedAt,
+  formatBackfillReport,
+  parseDryRun,
+} from './lib/email-confirmed.js'
 
 async function main(): Promise<void> {
-  const dryRun = process.argv.includes('--dry-run')
+  const dryRun = parseDryRun(process.argv)
 
   const env = readEnv()
   const cfg = envToCfg(env)
@@ -35,16 +39,9 @@ async function main(): Promise<void> {
       db: pds.ctx.accountManager.db,
       dryRun,
     })
-    const where = cfg.db.accountDbLoc
-    if (result.dryRun) {
-      process.stdout.write(
-        `[dry run] ${result.candidates} account(s) in ${where} would be marked email-confirmed.\n`,
-      )
-    } else {
-      process.stdout.write(
-        `Marked ${result.updated} account(s) in ${where} as email-confirmed.\n`,
-      )
-    }
+    process.stdout.write(
+      formatBackfillReport(result, cfg.db.accountDbLoc) + '\n',
+    )
   } finally {
     await pds.destroy()
   }
