@@ -827,3 +827,64 @@ describe('renderLoginPage flow-aborted notice + reactive abort gates', () => {
     expect(verifyIdx).toBeGreaterThan(gateIdx)
   })
 })
+
+// The segmented OTP grid used to strip whitespace only, so a code copied
+// with surrounding punctuation, or a letter typed into a digits-only code,
+// reached the server verbatim and failed verification. It also never
+// upper-cased, while alphanumeric codes are generated as A-Z0-9 and the
+// other two OTP forms upper-case on the way in — so a desktop user typing
+// lowercase (where `autocapitalize` does nothing) submitted a code the
+// server would always reject. These pin the shared charset filter.
+describe('renderLoginPage OTP grid charset filter', () => {
+  it('emits the numeric filter from the shared helper', () => {
+    const html = renderDefault({ otpCharset: 'numeric' })
+    expect(html).toContain(`var otpCharFilter = ${/\D/g.toString()};`)
+  })
+
+  it('emits the alphanumeric filter from the shared helper', () => {
+    const html = renderDefault({ otpCharset: 'alphanumeric' })
+    expect(html).toContain(`var otpCharFilter = ${/[^A-Za-z0-9]/g.toString()};`)
+  })
+
+  it('upper-cases only under the alphanumeric policy', () => {
+    expect(renderDefault({ otpCharset: 'alphanumeric' })).toContain(
+      "otpCharset === 'alphanumeric' ? cleaned.toUpperCase() : cleaned",
+    )
+  })
+
+  it('routes the input handler through the filter, not a whitespace-only strip', () => {
+    const html = renderDefault()
+    expect(html).toContain('var v = filterOtpChars(box.value);')
+    // The old whitespace-only strip is a strict subset of every charset
+    // filter; leaving one behind would mean a handler was missed.
+    expect(html).not.toMatch(/replace\(\/\\s\/g, ''\)/)
+  })
+
+  it('routes the paste handler through the filter before slicing to the free boxes', () => {
+    const html = renderDefault()
+    expect(html).toContain(
+      'var cleaned = filterOtpChars(data).slice(0, otpBoxes.length - idx);',
+    )
+  })
+
+  it('defines the filter before the box handlers that call it', () => {
+    const html = renderDefault()
+    const defIdx = html.indexOf('function filterOtpChars(s)')
+    const inputIdx = html.indexOf('var v = filterOtpChars(box.value);')
+    const pasteIdx = html.indexOf('var cleaned = filterOtpChars(data)')
+    expect(defIdx).toBeGreaterThan(0)
+    expect(inputIdx).toBeGreaterThan(defIdx)
+    expect(pasteIdx).toBeGreaterThan(defIdx)
+  })
+
+  it('declares otpCharset once, above the filter that reads it', () => {
+    const html = renderDefault()
+    expect(html.match(/var otpCharset =/g)).toHaveLength(1)
+    expect(html.match(/var otpLength =/g)).toHaveLength(1)
+    // filterOtpChars is only ever called from event handlers, but keeping
+    // the declaration above it removes any reliance on var hoisting.
+    expect(html.indexOf('var otpCharset =')).toBeLessThan(
+      html.indexOf('function filterOtpChars(s)'),
+    )
+  })
+})
