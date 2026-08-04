@@ -500,7 +500,9 @@ describe('renderLoginPage handle login button', () => {
 // tests pin its structure so accidental refactors (removing the guard,
 // moving it after the fetch, resetting the flag unconditionally on
 // success) fail loudly.
-function renderDefault(): string {
+type LoginPageOpts = Parameters<typeof renderLoginPage>[0]
+
+function renderDefault(overrides: Partial<LoginPageOpts> = {}): string {
   return renderLoginPage({
     flowId: 'flow-1',
     clientId: 'https://example.com/client-metadata.json',
@@ -518,6 +520,7 @@ function renderDefault(): string {
     otpLength: 6,
     otpCharset: 'numeric',
     heartbeatEnabled: false,
+    ...overrides,
   })
 }
 
@@ -618,13 +621,54 @@ describe('renderLoginPage inline Resend action on expired OTP', () => {
     expect(html).toContain("document.getElementById('btn-resend').click()")
   })
 
-  it('falls back to the plain showError on non-expired errors', () => {
+  it('renders exactly one flash region, inside the active step', () => {
+    // One element, so there is only ever one aria-live region for a
+    // screen reader to track; it is reparented between the two slots
+    // on step transitions rather than duplicated.
+    const emailStep = renderDefault()
+    expect(emailStep.match(/id="error-msg"/g)).toHaveLength(1)
+    expect(emailStep).toMatch(/flash-slot-email"><div id="error-msg"/)
+
+    const otpStep = renderDefault({
+      loginHint: 'a@b.com',
+      initialStep: 'otp',
+      otpAlreadySent: true,
+    })
+    expect(otpStep.match(/id="error-msg"/g)).toHaveLength(1)
+    expect(otpStep).toMatch(/flash-slot-otp"><div id="error-msg"/)
+  })
+
+  it('places the OTP flash slot between the boxes and Verify', () => {
     const html = renderDefault()
-    // The non-expired branch must NOT route through
-    // showErrorWithAction (otherwise an "Invalid code" message
-    // would carry an inappropriate "Send a new code" link).
+    // Position is the point of the slot: a rejected code must read at
+    // the input the user just filled, not above the subtitle.
+    const boxes = html.indexOf('id="otp-boxes"')
+    const slot = html.indexOf('id="flash-slot-otp"')
+    const verify = html.indexOf('>Verify<')
+    expect(boxes).toBeGreaterThan(-1)
+    expect(slot).toBeGreaterThan(boxes)
+    expect(verify).toBeGreaterThan(slot)
+  })
+
+  it('falls back to the plain showError on a merely-wrong code', () => {
+    const html = renderDefault()
+    // A typo must NOT carry a resend CTA: the boxes are cleared and
+    // refocused, so retyping is the intended recovery. The final else
+    // — reached when the error is neither expired nor code-
+    // invalidating — stays on the plain path.
+    expect(html).toMatch(/\} else \{\s*showError\(result\.error\);\s*\}/)
+  })
+
+  it('offers an inline resend when the stored code was invalidated', () => {
+    const html = renderDefault()
+    // "Too many attempts" deletes the stored code server-side, so
+    // there is nothing left to retype and resending is the only route
+    // forward — unlike a typo, which the plain path above covers.
     expect(html).toMatch(
-      /if \(isExpired\) \{[\s\S]*?\} else \{[\s\S]*?showError\(result\.error\);\s*\}/,
+      /needsFreshCode\s*=\s*\/too many attempts\|invalidated\/i/,
+    )
+    expect(html).toMatch(
+      /else if \(needsFreshCode && !parLikelyDead\(\)\)[\s\S]*?showErrorWithAction\(\s*result\.error,\s*'Resend code'/,
     )
   })
 })

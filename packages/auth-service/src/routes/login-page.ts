@@ -559,6 +559,14 @@ export function renderLoginPage(opts: {
   const hasGithub = 'github' in socialProviders
   const hasSocialProviders = hasGoogle || hasGithub
 
+  // The flash region is a single element shared by both steps, so there
+  // is only ever one live region for assistive tech to track. It is
+  // server-rendered into whichever step is initially visible and moved
+  // between the two slots on step transitions; both transitions call
+  // clearError() first, so it is always empty when it moves.
+  const flashRegionHtml =
+    '<div id="error-msg" class="flash-msg" style="display:none;" role="status" aria-live="polite"></div>'
+
   // Social login buttons — redirect to better-auth provider endpoints
   const socialButtonsHtml = hasSocialProviders
     ? `
@@ -662,8 +670,6 @@ export function renderLoginPage(opts: {
     ${logoHtml}
     <h1 id="heading">${opts.initialStep === 'otp' ? 'Enter your code' : 'Sign in'}</h1>
 
-    <div id="error-msg" class="flash-msg" style="display:none;" role="status" aria-live="polite"></div>
-
     ${socialButtonsHtml}
 
     <!-- Step 1: Email entry (calls better-auth sendOtp) -->
@@ -677,6 +683,11 @@ export function renderLoginPage(opts: {
                  value="${escapeHtml(opts.loginHint)}">
         </div>
         ${renderEmailTypoGuardMarkup()}
+        <!-- Flash slot: the shared #error-msg region is moved in here
+             while the email step is active, so a send failure reads
+             directly under the field that caused it rather than above
+             the heading. -->
+        <div id="flash-slot-email">${opts.initialStep === 'otp' ? '' : flashRegionHtml}</div>
         <button type="submit" class="btn-primary">Continue</button>
       </form>
       ${handleLoginButtonHtml}
@@ -704,6 +715,12 @@ export function renderLoginPage(opts: {
             )
             .join('\n          ')}
         </div>
+        <!-- Flash slot: see #flash-slot-email. Sitting between the
+             boxes and Verify puts a rejected-code message at the point
+             of failure — where the user's attention already is after
+             typing — instead of above the subtitle, and places the
+             inline Resend action next to it. -->
+        <div id="flash-slot-otp">${opts.initialStep === 'otp' ? flashRegionHtml : ''}</div>
         <button type="submit" class="btn-primary">Verify</button>
       </form>
       <div class="otp-actions">
@@ -1078,6 +1095,25 @@ export function renderLoginPage(opts: {
         });
       }
 
+      /**
+       * Reparent the single flash region into the active step's slot,
+       * so a message always renders at the point of failure — under
+       * the email field on the email step, between the code boxes and
+       * Verify on the OTP step.
+       *
+       * Callers must clearError() first: moving a *populated* live
+       * region across parents can re-announce or drop the message
+       * depending on the screen reader. Both step transitions already
+       * clear before switching, so the region is empty whenever it
+       * moves here.
+       */
+      function moveFlashTo(slotId) {
+        var slot = document.getElementById(slotId);
+        if (slot && errorEl && errorEl.parentNode !== slot) {
+          slot.appendChild(errorEl);
+        }
+      }
+
       function clearError() {
         // Empty the region before hiding it. Clearing after the
         // display:none would mutate a region that is already out of
@@ -1138,6 +1174,7 @@ export function renderLoginPage(opts: {
         clearOtpBoxes();
         if (otpBoxes.length) otpBoxes[0].focus();
         clearError();
+        moveFlashTo('flash-slot-otp');
         startHeartbeat();
         refreshResendVisibility();
       }
@@ -1148,6 +1185,7 @@ export function renderLoginPage(opts: {
         headingEl.textContent = 'Sign in';
         if (termsEl) termsEl.style.display = 'block';
         clearError();
+        moveFlashTo('flash-slot-email');
         stopHeartbeat();
         // Reset the email field — the user clicked "Use different
         // email" precisely to escape the previous value, so leaving
@@ -1269,6 +1307,13 @@ export function renderLoginPage(opts: {
             // expired code") and the auth-service wording ("OTP
             // expired") plus generic "expir"/"too long" variants.
             var isExpired = /expir|too long/i.test(result.error);
+            // "Too many attempts" invalidates the stored code, so the
+            // user has nothing left to retype and a resend is the only
+            // route forward. Matched separately from isExpired because
+            // the wording shares no substring with it.
+            var needsFreshCode = /too many attempts|invalidated/i.test(
+              result.error,
+            );
             if (isExpired) {
               // Only offer "Send a new code" when the PAR is still
               // alive. If it isn't, a fresh OTP would issue but
@@ -1285,6 +1330,32 @@ export function renderLoginPage(opts: {
                   document.getElementById('btn-resend').click();
                 });
               }
+            } else if (needsFreshCode && !parLikelyDead()) {
+              // A rejected or invalidated code is the other case a
+              // fresh one actually fixes, so it gets the same inline
+              // shortcut as the expired path, for the same reason:
+              // the standalone Resend button sits below the form and
+              // is easy to miss.
+              //
+              // 3d31876 originally kept every non-expired error on the
+              // plain path so a typo wouldn't carry a "Send a new
+              // code" CTA. That reasoning holds for a typo — the user
+              // should retype, and the boxes are already cleared and
+              // focused for exactly that — but not for "too many
+              // attempts", which deletes the stored code server-side
+              // (better-auth 1.4.18 email-otp/routes.mjs, per the note
+              // in better-auth.ts). After a lockout there is no code
+              // left to retype, so resending is the only way forward.
+              //
+              // Gated on parLikelyDead() because
+              // refreshResendVisibility() hides the standalone Resend
+              // button in that state; surfacing an inline one anyway
+              // would re-offer an action the page has deliberately
+              // withdrawn. The aborted-flow notice carries its own
+              // restart action, so nothing is lost by staying quiet.
+              showErrorWithAction(result.error, 'Resend code', function() {
+                document.getElementById('btn-resend').click();
+              });
             } else {
               showError(result.error);
             }
