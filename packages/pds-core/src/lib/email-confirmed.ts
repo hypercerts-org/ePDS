@@ -92,7 +92,11 @@ export interface BackfillDb {
 export interface BackfillResult {
   /** Rows matching the backfill criteria before the update ran. */
   candidates: number
-  /** Rows actually updated; 0 when `dryRun` is set. */
+  /**
+   * Rows the UPDATE actually touched, as reported by the database;
+   * 0 when `dryRun` is set. May be lower than `candidates` if
+   * something stamped a row between the two statements.
+   */
   updated: number
   /** True when no write was attempted. */
   dryRun: boolean
@@ -142,15 +146,26 @@ export async function backfillEmailConfirmedAt(opts: {
     return { candidates, updated: 0, dryRun }
   }
 
-  await opts.db.db
+  // Report what the UPDATE actually touched rather than reusing the
+  // SELECT's count. The two are separate statements, so a sign-in
+  // that stamps one of these rows in between would make `candidates`
+  // an overstatement — and this number is the operator's only
+  // evidence of what the script did.
+  const result = await opts.db.db
     .updateTable('account')
     .set({ emailConfirmedAt })
     .where('emailConfirmedAt', 'is', null)
     .where('email', 'is not', null)
     .where('email', '!=', '')
-    .execute()
+    .executeTakeFirst()
 
-  return { candidates, updated: candidates, dryRun }
+  return {
+    candidates,
+    // numUpdatedRows is a bigint; row counts here are far below
+    // Number.MAX_SAFE_INTEGER, so the narrowing is safe.
+    updated: Number(result?.numUpdatedRows ?? 0),
+    dryRun,
+  }
 }
 
 /** True when the operator asked to preview rather than write. */

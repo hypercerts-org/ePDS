@@ -117,23 +117,33 @@ describe('markEmailConfirmed', () => {
 
 /** Records the backfill's SELECT/UPDATE filters so the tests can
  *  assert the criteria, not just the row count. */
-function makeBackfillDb(opts: { candidates: string[] }) {
+function makeBackfillDb(opts: {
+  candidates: string[]
+  /** Rows the UPDATE reports touching; defaults to candidates.length
+   *  so the common case needs no wiring. */
+  numUpdatedRows?: number
+}) {
   const selectWheres: [string, string, unknown][] = []
   const updateWheres: [string, string, unknown][] = []
   let updateValues: { emailConfirmedAt: string } | undefined
   let updateExecuted = 0
 
+  // Mirrors the real Kysely surface: SELECTs are read with execute(),
+  // UPDATEs with executeTakeFirst() returning an UpdateResult whose
+  // numUpdatedRows is a bigint.
   const chain = (
     sink: [string, string, unknown][],
     onExecute: () => Promise<unknown>,
+    onExecuteTakeFirst?: () => Promise<unknown>,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- self-referential fluent fake
   ): any => ({
-    select: () => chain(sink, onExecute),
+    select: () => chain(sink, onExecute, onExecuteTakeFirst),
     where: (column: string, op: string, value: unknown) => {
       sink.push([column, op, value])
-      return chain(sink, onExecute)
+      return chain(sink, onExecute, onExecuteTakeFirst)
     },
     execute: onExecute,
+    executeTakeFirst: onExecuteTakeFirst,
   })
 
   const db = {
@@ -149,10 +159,19 @@ function makeBackfillDb(opts: { candidates: string[] }) {
         return {
           set: (values: { emailConfirmedAt: string }) => {
             updateValues = values
-            return chain(updateWheres, () => {
-              updateExecuted++
-              return Promise.resolve(undefined)
-            })
+            return chain(
+              updateWheres,
+              () =>
+                Promise.reject(new Error('UPDATE must use executeTakeFirst')),
+              () => {
+                updateExecuted++
+                return Promise.resolve({
+                  numUpdatedRows: BigInt(
+                    opts.numUpdatedRows ?? opts.candidates.length,
+                  ),
+                })
+              },
+            )
           },
         }
       },
@@ -224,6 +243,21 @@ describe('backfillEmailConfirmedAt', () => {
 
     expect(result).toEqual({ candidates: 0, updated: 0, dryRun: false })
     expect(inspect().updateExecuted).toBe(0)
+  })
+
+  it('reports the rows the UPDATE touched, not the rows the SELECT saw', async () => {
+    // The SELECT and UPDATE are separate statements: a sign-in that
+    // stamps one of these rows in between leaves the UPDATE touching
+    // fewer rows than were counted. Report the database's number, so
+    // the operator is not told more accounts changed than really did.
+    const { db } = makeBackfillDb({
+      candidates: ['did:plc:aaa', 'did:plc:bbb', 'did:plc:ccc'],
+      numUpdatedRows: 2,
+    })
+
+    const result = await backfillEmailConfirmedAt({ db })
+
+    expect(result).toEqual({ candidates: 3, updated: 2, dryRun: false })
   })
 })
 
