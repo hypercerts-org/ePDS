@@ -179,6 +179,25 @@ Every non-trivial changeset **must** contain, in this order:
    will recognise (env var names, field names, function names) —
    the plain-language rule only applies to the summary line above.
 
+   **Capitalize the first word after the bold audience label.**
+   The `**Audience:**` label is a lead-in, but the text following
+   it is a full sentence and must start with a capital letter — the
+   colon does not make the following word mid-sentence. This applies
+   even when the first word is an identifier that is lowercase in
+   code: capitalize the surrounding prose, or reword so the
+   identifier isn't sentence-initial (e.g. start with "The
+   `email_verified` claim …", not "`email_verified` is now …").
+
+   - ✅ **End users:** Apps no longer ask you to verify an address you have already confirmed.
+   - ✅ **Client app developers:** The `email_verified` claim is now `true` …
+   - ✅ **Operators:** Deploy the auth service and the PDS together …
+   - ❌ **End users:** apps no longer ask you to verify … (lowercase "apps")
+   - ❌ **Operators:** deploy the auth service … (lowercase "deploy")
+
+   The same capitalization rule applies to each bullet when a
+   section is laid out as a bullet list (see below): every bullet
+   is a sentence and starts capitalized.
+
    Each paragraph in the changeset body must be **unwrapped**: one
    paragraph per physical line. Do not manually hard-wrap prose at
    72 or 80 columns inside the changeset file. Wrapped source lines
@@ -381,7 +400,7 @@ Longer sign-in codes, optionally mixing letters and numbers.
 
 **End users:** OTP codes may now be longer than 6 digits and may include uppercase letters if the operator has opted into the `alphanumeric` charset. Codes of length 8 or more are displayed with a space in the middle (e.g. `1234 5678`) for readability; copy-paste still yields the flat code.
 
-**Operators:** two new environment variables on the auth service — `OTP_LENGTH` (integer, range 4–12, default 8) and `OTP_CHARSET` (`numeric` (default) or `alphanumeric`). Values outside the range cause the service to fail on startup. The OTP input form fields adapt automatically; no template changes required.
+**Operators:** Two new environment variables on the auth service — `OTP_LENGTH` (integer, range 4–12, default 8) and `OTP_CHARSET` (`numeric` (default) or `alphanumeric`). Values outside the range cause the service to fail on startup. The OTP input form fields adapt automatically; no template changes required.
 ```
 
 A denser change with several distinct points per audience is
@@ -402,12 +421,12 @@ A second app sign-in in your browser now skips the email code step.
 - You either land on the "approve this app" screen or on a chooser where you confirm which identity to reuse.
 - A "Use a different account" link on the chooser takes you back to the email form.
 
-**Client app developers:** no client-side changes required.
+**Client app developers:** No client-side changes required.
 
 - When a previous sign-in's cookies are present, the user lands on the account chooser to confirm which identity to reuse.
 - To force the email code form instead, set the standard OIDC `prompt` parameter to `login` on the authorization request your OAuth library sends.
 
-**Operators:** no new required configuration.
+**Operators:** No new required configuration.
 
 - ePDS auto-detects whether the auth service shares a parent domain with the PDS (`AUTH_HOSTNAME` ends with `.<PDS_HOSTNAME>`) and broadens the device-session cookies to that parent. On unrelated hostnames the feature self-disables.
 ```
