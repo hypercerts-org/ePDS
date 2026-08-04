@@ -658,7 +658,7 @@ describe('renderLoginPage inline Resend action on expired OTP', () => {
     // after expiry cleanup. Retyping cannot recover any of those, so
     // the action must not be withheld from the plain-invalid branch.
     expect(html).toMatch(
-      /else if \(!parLikelyDead\(\)\)[\s\S]*?showErrorWithAction\(\s*result\.error,\s*'Resend code'/,
+      /else if \(!parLikelyDead\(\)\)[\s\S]*?showErrorWithAction\(\s*result\.error,\s*'Send a new code'/,
     )
   })
 

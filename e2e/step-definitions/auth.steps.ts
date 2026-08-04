@@ -901,7 +901,7 @@ When('the OTP form re-checks PAR liveness', async function (this: EpdsWorld) {
 })
 
 Then(
-  'the Resend code button is no longer offered',
+  'the Send a new code button is no longer offered',
   async function (this: EpdsWorld) {
     const page = getPage(this)
     await expect(page.locator('#btn-resend')).toBeHidden({ timeout: 5_000 })

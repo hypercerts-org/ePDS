@@ -462,7 +462,7 @@ export function renderRecoveryOtpForm(opts: {
         <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
         <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
         ${noHeartbeatField}
-        <button type="submit" class="btn-secondary">Resend code</button>
+        <button type="submit" class="btn-secondary">Send a new code</button>
       </form>
       <a href="${backHref}" class="btn-secondary">Back to sign in</a>
     </div>
