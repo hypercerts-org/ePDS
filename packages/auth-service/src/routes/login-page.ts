@@ -1384,7 +1384,7 @@ export function renderLoginPage(opts: {
         }
       });
 
-      // Resend code
+      // Send a new code (the element id predates the relabel)
       document.getElementById('btn-resend').addEventListener('click', async function() {
         clearError();
         this.disabled = true;
