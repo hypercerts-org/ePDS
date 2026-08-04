@@ -59,6 +59,20 @@ marked `[shared]` in the per-package `.env.example` files.
 | `EPDS_INVITE_CODE`                          | Pre-generated invite code for account creation (see [deployment.md](deployment.md#invite-codes))                                                      |
 | `PDS_INVITE_REQUIRED`                       | Whether invite codes are required for account creation (default `true`)                                                                               |
 
+### TEE signer & wallet (optional)
+
+All off by default. See [design/tee-signer.md](design/tee-signer.md) for the
+architecture, threat model, and the repo-flow / wallet-flow separation.
+
+| Variable                          | Description                                                                                                                                                                                                                                                                         |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EPDS_SIGNER_URL`                 | Base URL of the TEE signer service (e.g. `http://signer.internal:3010`). Unset = the entire TEE integration is off.                                                                                                                                                                 |
+| `EPDS_SIGNER_SECRET`              | Shared secret for pds-core → signer calls (`x-internal-secret`). Must match the signer's `SIGNER_INTERNAL_SECRET`. Required when `EPDS_SIGNER_URL` is set.                                                                                                                          |
+| `EPDS_SIGNER_REQUIRE_ATTESTATION` | When `1`, pds-core refuses to start unless the signer presents a hardware attestation quote (dstack). Set this in any real/split-host deployment; leave off only in local dev.                                                                                                      |
+| `EPDS_TEE_REPO_SIGNING`           | When `1`, TEE-adopted accounts sign repo commits inside the enclave and `POST /_internal/tee/adopt` is exposed (internal-secret gated). Non-adopted accounts are unaffected.                                                                                                        |
+| `EPDS_TEE_ADOPT_ON_SIGNUP`        | When `1` (and repo signing is on), newly created accounts are adopted into TEE signing right after signup (fire-and-forget).                                                                                                                                                        |
+| `EPDS_WALLET_ENABLED`             | When `1`, mounts the additive wallet routes on both surfaces — REST `/wallet/*` and XRPC `/xrpc/app.gainforest.wallet.*` (enroll, create, getWallet/info, sign, export, recover). Wallet keys live as 2-of-3 Shamir shares — fully separate from the repo flow; see the design doc. |
+
 ### Trusted clients and consent skip
 
 | Variable                        | Description                                                                                                                                                                                                                                                                                  |
@@ -281,6 +295,24 @@ Optional:
 | `EPDS_CLIENT_THEME` | Named theme preset for the demo's own pages. When set, the demo renders with the preset's colour scheme and serves matching `branding.css` in its client metadata. Unset = default light theme. |
 | `EPDS_CLIENT_NAME`  | Display name shown in the demo UI header (default `ePDS Demo`).                                                                                                                                 |
 | `PLC_DIRECTORY_URL` | PLC directory for DID-to-handle resolution (default `https://plc.directory`).                                                                                                                   |
+
+## Signer
+
+> All variables in this section are set on the **signer** service only
+> (`packages/signer`). The signer runs on confidential-compute hardware in
+> production — see [design/tee-signer.md](design/tee-signer.md#where-things-run).
+> Full reference: [`packages/signer/.env.example`](../packages/signer/.env.example).
+
+| Variable                      | Description                                                                                                                    |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `SIGNER_PORT`                 | Port the signer listens on (default `3010`). Internal network only — never expose publicly.                                    |
+| `SIGNER_DATA_DIR`             | Directory for the signer's sqlite store (default `./data/signer`).                                                             |
+| `SIGNER_INTERNAL_SECRET`      | Shared secret for PDS → signer calls. Must match pds-core's `EPDS_SIGNER_SECRET`. Required.                                    |
+| `SIGNER_ROOT_SEED_HEX`        | 32-byte root seed as 64 hex chars. Takes priority over the seed file.                                                          |
+| `SIGNER_ROOT_SEED_FILE`       | Path to a 32-byte binary / 64-hex-char seed file (default `$SIGNER_DATA_DIR/root-seed`).                                       |
+| `SIGNER_ALLOW_DEV_SEED`       | When `1`, a missing seed file is generated on startup. **Dev only** — in production the TEE KMS provisions the seed.           |
+| `SIGNER_WALLET_FRESHNESS_SEC` | Wallet envelope `iat` freshness window in seconds (default `120`).                                                             |
+| `SIGNER_DSTACK_SOCK`          | dstack guest-agent socket path for attestation quotes (default `/var/run/dstack.sock`). Absent socket = dev mode (unattested). |
 
 ## Docker / Caddy
 

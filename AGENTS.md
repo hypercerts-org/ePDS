@@ -6,11 +6,12 @@ AI agent instructions for the ePDS repository.
 
 Pnpm monorepo with three packages:
 
-| Package                       | Path                     | Description                                      |
-| ----------------------------- | ------------------------ | ------------------------------------------------ |
-| `@certified-app/shared`       | `packages/shared/`       | SQLite DB, crypto utils, logger, types           |
-| `@certified-app/auth-service` | `packages/auth-service/` | Login UI, OTP, social login, account settings    |
-| `@certified-app/pds-core`     | `packages/pds-core/`     | Wraps `@atproto/pds` with epds-callback endpoint |
+| Package                       | Path                     | Description                                             |
+| ----------------------------- | ------------------------ | ------------------------------------------------------- |
+| `@certified-app/shared`       | `packages/shared/`       | SQLite DB, crypto utils, logger, types                  |
+| `@certified-app/auth-service` | `packages/auth-service/` | Login UI, OTP, social login, account settings           |
+| `@certified-app/pds-core`     | `packages/pds-core/`     | Wraps `@atproto/pds` with epds-callback endpoint        |
+| `@certified-app/signer`       | `packages/signer/`       | TEE signer — repo-key derivation + 2-of-3 wallet shares |
 
 ## Build / Dev Commands
 
@@ -21,6 +22,7 @@ pnpm typecheck             # type-check without emitting
 pnpm dev                   # run all packages in dev/watch mode
 pnpm dev:auth              # auth-service only (tsx watch)
 pnpm dev:pds               # pds-core only (tsx watch)
+pnpm dev:signer            # TEE signer only (tsx watch, dev mode)
 pnpm dev:demo              # demo frontend only (Next.js, port 3002)
 pnpm format                # format all files with Prettier
 pnpm format:check          # check formatting (CI)
@@ -217,6 +219,11 @@ Service-to-image mapping (use this to decide what to rebuild):
 Container names: `epds-core` (PDS, port 3000), `epds-auth` (auth service, port 3001),
 and `epds-demo` (demo frontend, port 3002).
 
+The TEE signer (`packages/signer`) is **deliberately not part of the Docker
+stack or Railway deployment** — in production it runs on confidential-compute
+hardware (dstack in a CVM); see `docs/design/tee-signer.md`. In dev, run it
+with `pnpm dev:signer`.
+
 ## Railway
 
 ePDS deploys to Railway. When checking the live config, follow these rules
@@ -374,6 +381,49 @@ import { AuthServiceContext } from './context.js'
   (`numeric` or `alphanumeric`, default `numeric`, via `OTP_CHARSET`), single-use,
   managed by better-auth. Expiry is hardcoded at 600 s with 5 allowed attempts.
 - Internal service-to-service calls use `x-internal-secret` header.
+
+## TEE Signer & Embedded Wallets
+
+Optional, all off by default. Read
+[`docs/design/tee-signer.md`](docs/design/tee-signer.md) before touching
+anything under `packages/signer/` or `packages/pds-core/src/tee/`.
+Invariants that must never be violated:
+
+- **The two flows stay separate.** Repo signing (`atproto/signing`,
+  `POST /v1/sign/repo`, PDS-trusted) and wallet operations
+  (`/v1/wallet/*`, user-envelope-authorized) share only the transport.
+  Never let one path reach the other's keys or routes.
+- **Wallet keys are never derived from the root seed.** Each wallet is
+  independent 128-bit entropy under a Privy-style 2-of-3 Shamir split
+  (`packages/signer/src/wallet.ts`): server share (encrypted at rest
+  under a root-seed-derived KEK), device share and recovery share
+  (user-held). The repo signing key IS root-derived — that asymmetry
+  is deliberate (disposable vs. non-disposable keys).
+- **Never persist a user share.** Device/recovery shares leave the
+  signer only as JWEs encrypted to the user's request key; shares sent
+  to the enclave arrive as JWEs encrypted to the enclave's published
+  encryption key. The PDS relays ciphertext only. No single party may
+  ever hold ≥ 2 shares.
+- **Pregenerated wallets are enclave-custodial until claimed — and
+  must stay receive-only.** `POST /_internal/wallet/pregenerate`
+  persists a wallet's WHOLE entropy (KEK-encrypted, defer-split) so
+  any DID — even one on another PDS — can receive assets before its
+  first login. The signer must never sign/export/recover for a DID
+  that has only a pregen record; claiming (first `/wallet/create`
+  after enrollment) must split 2-of-3 and delete the whole-entropy
+  blob atomically.
+- **A PDS-forwarded OAuth token is never authorization for wallet
+  signing or export.** Only a user-signed envelope (sign/export) or
+  possession of a reconstructing share (recover) is.
+- **Wallet Lexicon namespace: `app.gainforest.wallet.*`.** The wallet
+  surface is exposed both as REST (`/wallet/*`) and XRPC
+  (`/xrpc/app.gainforest.wallet.<method>`) — see
+  `packages/pds-core/src/tee/wallet-router.ts` for the method table.
+  Any new wallet XRPC method, Lexicon schema, or sidecar record type
+  must live under `app.gainforest.*` — do not invent other namespaces.
+- The signer runs on confidential-compute hardware in production
+  (dstack in a CVM) — never Railway or the Docker stack (see Docker
+  section above). `pnpm dev:signer` for local work.
 
 ## Task Tracking
 

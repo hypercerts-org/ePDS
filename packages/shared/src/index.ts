@@ -80,3 +80,20 @@ export type { PostHookResult } from './test-utils/post-hook.js'
 export { ERROR_CSS, renderError } from './render-error.js'
 export type { RenderErrorOptions } from './render-error.js'
 export { resolveStartOverHref, sanitiseHttpUrl } from './start-over-href.js'
+export { SignerClient, SignerClientError } from './signer-client.js'
+export type {
+  SignerKeyPurpose,
+  SignerKeyInfo,
+  SignerAttestation,
+  SignerClientOptions,
+  WalletSignEnvelope,
+  WalletSignResult,
+  WalletEncryptionJwk,
+  WalletChainInfo,
+  WalletPublicInfo,
+  WalletPregenInfo,
+  WalletPregenerateResult,
+  WalletCreateResult,
+  WalletInfoResult,
+  WalletRecoverResult,
+} from './signer-client.js'

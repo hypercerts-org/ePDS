@@ -18,6 +18,7 @@
     "dev:pds": "pnpm --filter @certified-app/pds-core dev",
     "dev:auth": "pnpm --filter @certified-app/auth-service dev",
     "dev:demo": "pnpm --filter @certified-app/demo dev",
+    "dev:signer": "pnpm --filter @certified-app/signer dev",
     "start": "pnpm --recursive --parallel start",
     "typecheck": "tsc --build tsconfig.json",
     "test": "vitest run",
