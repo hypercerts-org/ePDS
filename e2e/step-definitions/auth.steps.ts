@@ -611,7 +611,7 @@ Then(
 )
 
 Then(
-  'the verification form shows an {string} error',
+  /^the verification form shows (?:an|the) "([^"]*)" error$/,
   async function (this: EpdsWorld, expected: string) {
     const page = getPage(this)
     await expect(page.locator('#error-msg')).toBeVisible({ timeout: 10_000 })
