@@ -514,7 +514,11 @@ const CSS = `
   .btn-primary { width: 100%; padding: 12px; background: #0f1828; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; }
   .btn-primary:hover { background: #1a2a40; }
   .btn-primary:focus-visible { outline: 2px solid #0f1828; outline-offset: 2px; }
-  .btn-secondary { display: inline-block; margin-top: 12px; color: #0f1828; background: none; border: none; font-size: 14px; cursor: pointer; text-decoration: underline; border-radius: 4px; }
+  /* Standalone action in its own row — see the link-affordance convention
+     documented in login-page.ts. No underline, darkens on hover. "Resend
+     code" here and on the sign-in page must not render differently. */
+  .btn-secondary { display: inline-block; margin-top: 12px; color: #0f1828; background: none; border: none; font-size: 14px; cursor: pointer; text-decoration: none; border-radius: 4px; }
+  .btn-secondary:hover { color: #000; }
   .btn-secondary:focus-visible { outline: 2px solid #0f1828; outline-offset: 2px; }
   .error { color: #dc3545; background: #fdf0f0; padding: 12px; border-radius: 8px; margin: 12px 0; }
 `

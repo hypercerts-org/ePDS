@@ -633,7 +633,14 @@ export function renderLoginPage(opts: {
     .btn-primary:hover { opacity: 0.9; }
     .btn-primary:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; }
     .btn-primary:disabled { opacity: 0.7; cursor: not-allowed; }
-    .btn-secondary { display: inline-block; color: #6b6b6b; background: none; border: none; font-size: 14px; font-weight: 500; cursor: pointer; padding: 4px 0; border-radius: 4px; }
+    /* Link-affordance convention (see also .flash-action / .terms-link):
+       STANDALONE actions sit in their own row, where position and spacing
+       already read as actionable, so they carry no underline. IN-SENTENCE
+       actions are surrounded by prose and need an underline to be
+       identifiable at all. Both darken to #1A130F on hover; no rule ever
+       toggles an underline on or off, because an affordance that appears
+       or vanishes under the cursor is disorienting. */
+    .btn-secondary { display: inline-block; color: var(--muted-foreground); background: none; border: none; font-size: 14px; font-weight: 500; cursor: pointer; padding: 4px 0; border-radius: 4px; text-decoration: none; }
     .btn-secondary:hover { color: #1A130F; }
     .btn-secondary:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; }
     .btn-social { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 13px 20px; border: 1px solid var(--btn-secondary-border); border-radius: 9999px; font-size: 15px; font-weight: 500; cursor: pointer; text-decoration: none; background: white; color: #333; margin-bottom: 8px; transition: background 0.15s; }
@@ -648,22 +655,33 @@ export function renderLoginPage(opts: {
     /* Inline action button rendered next to an OTP-expired error so
        the user doesn't have to hunt for the separate Resend button.
        Styled as a link rather than a button to make it visually
-       continuous with the message text. */
+       continuous with the message text. IN-SENTENCE action: it inherits
+       the surrounding error colour, so the underline is its only marker
+       of being clickable and must survive hover. */
     .flash-action { background: none; border: none; padding: 0; font: inherit; color: inherit; text-decoration: underline; cursor: pointer; }
-    .flash-action:hover { text-decoration: none; }
+    .flash-action:hover { color: #1A130F; }
+    .flash-action:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; border-radius: 4px; }
     .step-otp { display: none; }
     .step-otp.active { display: block; }
     .step-email.hidden { display: none; }
     .terms { margin-top: 24px; color: var(--muted-foreground); font-size: 13px; font-weight: 400; line-height: 1.5; text-align: center; }
+    /* IN-SENTENCE action: sits inside the terms sentence and inherits its
+       colour, so the underline is its only marker and must survive hover. */
     .terms-link { color: inherit; text-decoration: underline; cursor: pointer; }
+    .terms-link:hover { color: #1A130F; }
+    .terms-link:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; border-radius: 4px; }
     .powered-by { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 16px; color: var(--muted-foreground); font-size: 13px; text-decoration: none; cursor: pointer; }
     .powered-by:hover, .powered-by:focus, .powered-by:visited { color: var(--muted-foreground); text-decoration: none; }
     .powered-by .certified-mark { height: 14px; width: auto; display: block; }
     /* Recovery-via-backup-email link. Shown by default; trusted clients
        hide it by setting --recovery-link-display: none in their injected
-       branding.css. */
-    .recovery-link { display: var(--recovery-link-display, block); margin-top: 16px; color: var(--muted-foreground); font-size: 13px; text-decoration: underline; text-align: center; }
+       branding.css. STANDALONE action: it shares the action cluster
+       under Verify with the .btn-secondary buttons, and the anchor-vs-
+       button split behind the old underline was never legible to a
+       user — those buttons are deliberately styled to look like links. */
+    .recovery-link { display: var(--recovery-link-display, block); margin-top: 16px; color: var(--muted-foreground); font-size: 13px; text-decoration: none; text-align: center; }
     .recovery-link:hover { color: #1A130F; }
+    .recovery-link:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; border-radius: 4px; }
   </style>${renderOptionalStyleTag(opts.customCss)}
 </head>
 <body>

@@ -128,7 +128,11 @@ function buildInjectedCss(
     `.otp-box:focus { border-color: ${page.focusBorder} !important; }`,
     `.btn-primary { background: ${page.primary}; color: ${page.primaryText}; }`,
     `.btn-primary:hover { background: ${page.primaryHover}; }`,
-    `.btn-secondary { color: ${page.textMuted}; }`,
+    // Standalone actions under Verify (.btn-secondary buttons and the
+    // .recovery-link anchor) are one visual class, so they must theme
+    // identically — see the link-affordance convention in login-page.ts.
+    `.btn-secondary, .recovery-link { color: ${page.textMuted}; }`,
+    `.btn-secondary:hover, .recovery-link:hover { color: ${page.text}; }`,
     `.btn-social { background: ${page.inputBg}; border-color: ${page.inputBorder}; color: ${page.text}; }`,
     `.btn-atproto { background: ${page.inputBg} !important; border-color: ${page.inputBorder} !important; color: ${page.text} !important; }`,
     `.btn-social:hover { background: ${page.inputBorder}; }`,
@@ -136,8 +140,6 @@ function buildInjectedCss(
     `.divider::before, .divider::after { background: ${page.inputBorder}; }`,
     `.error { background: ${page.errorBg}; color: ${page.errorText}; }`,
     `.flash-msg.error { background: ${page.errorBg}; color: ${page.errorText}; }`,
-    `.recovery-link { color: ${page.textHint}; }`,
-    `.recovery-link:hover { color: ${page.textMuted}; }`,
     `.handle-row { border-color: ${page.inputBorder}; }`,
     `.handle-suffix { color: ${page.textHint}; background: ${page.inputBg}; border-color: ${page.inputBorder}; }`,
     '.status.available { color: #4ade80; }',
