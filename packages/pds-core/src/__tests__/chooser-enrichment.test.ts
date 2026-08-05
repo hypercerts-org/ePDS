@@ -1927,10 +1927,32 @@ describe('createChooserEnrichmentMiddleware handle-mode meta (HYPER-268 Layer 4)
       expect.objectContaining({
         err: expect.any(Error),
         queryMode: undefined,
-        requestUri: undefined,
+        // This flow carried client_id, not request_uri.
+        hasRequestUri: false,
       }),
       'chooser-enrichment: failed to resolve handle mode from OAuth request context',
     )
+  })
+
+  // request_uri is a short-lived bearer reference to the PAR entry, so a
+  // log line carrying its value is replayable by anyone reading the logs.
+  it('logs request_uri presence but never its value', async () => {
+    const requestUri = 'urn:ietf:params:oauth:request_uri:secret-par-handle'
+    const debug = vi.fn()
+    await captureWrittenHtml(
+      {
+        logger: { debug },
+        resolveClientMetadata: () => Promise.resolve({}),
+        resolveClientIdFromRequestUri: () =>
+          Promise.reject(new Error('network error')),
+      },
+      { request_uri: requestUri },
+    )
+    expect(debug).toHaveBeenCalledWith(
+      expect.objectContaining({ hasRequestUri: true }),
+      'chooser-enrichment: failed to resolve handle mode from OAuth request context',
+    )
+    expect(JSON.stringify(debug.mock.calls)).not.toContain(requestUri)
   })
 })
 

@@ -930,8 +930,14 @@ export function createChooserEnrichmentMiddleware(
           if (typeof raw === 'string') metaMode = raw
         }
       } catch (err) {
+        // Presence only: request_uri is a short-lived bearer reference to
+        // the PAR entry, so logging its value makes it replayable.
         logger?.debug(
-          { err, requestUri: query.request_uri, queryMode },
+          {
+            err,
+            hasRequestUri: typeof query.request_uri === 'string',
+            queryMode,
+          },
           'chooser-enrichment: failed to resolve handle mode from OAuth request context',
         )
         // Failed request_uri or metadata lookups leave metaMode
