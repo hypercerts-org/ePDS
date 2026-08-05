@@ -46,7 +46,7 @@ function makeRes() {
 }
 
 describe('csrfProtection middleware', () => {
-  const middleware = csrfProtection('test-secret')
+  const middleware = csrfProtection()
 
   describe('GET requests', () => {
     it('sets a CSRF cookie when none exists', () => {
