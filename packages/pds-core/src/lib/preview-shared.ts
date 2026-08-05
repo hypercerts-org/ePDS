@@ -11,7 +11,8 @@
  * The CSP, hydration format, and asset-URL prefix are documented further
  * in {@link ./preview-consent.ts}.
  */
-import type { ClientMetadata } from '@certified-app/shared'
+import type { ClientMetadata, HandleMode } from '@certified-app/shared'
+import { resolveHandleMode, VALID_HANDLE_MODES } from '@certified-app/shared'
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import serialize from 'serialize-javascript'
@@ -191,6 +192,30 @@ export function readClientIdQuery(req: RequestLike): string {
   return typeof raw === 'string' && raw
     ? raw
     : PREVIEW_FIXTURE_DEFAULT_CLIENT_ID
+}
+
+/**
+ * Resolve handle-mode the same way the real chooserEnrichment middleware
+ * does: query > client metadata > env default. Same override name
+ * (`epds_handle_mode`) so the preview dropdowns exercise the production
+ * resolver path verbatim. Shared by both preview routes so they cannot
+ * drift apart in how they interpret an unknown metadata value.
+ */
+export function resolveQueryHandleMode(
+  req: RequestLike,
+  metadata: ClientMetadata,
+): HandleMode {
+  const queryMode =
+    typeof req.query.epds_handle_mode === 'string'
+      ? req.query.epds_handle_mode
+      : undefined
+  const rawMetaMode = metadata.epds_handle_mode
+  const metaMode =
+    typeof rawMetaMode === 'string' &&
+    (VALID_HANDLE_MODES as readonly string[]).includes(rawMetaMode)
+      ? rawMetaMode
+      : undefined
+  return resolveHandleMode(queryMode, metaMode)
 }
 
 /**
