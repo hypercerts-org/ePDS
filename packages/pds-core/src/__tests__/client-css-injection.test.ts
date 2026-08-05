@@ -263,6 +263,37 @@ describe('createClientCssInjectionMiddleware', () => {
     expect(next).toHaveBeenCalledOnce()
   })
 
+  // request_uri is a short-lived bearer reference to the PAR entry, so a
+  // log line carrying its value is replayable by anyone reading the logs.
+  it('logs request_uri presence but never its value when PAR resolution fails', async () => {
+    const requestUri = 'urn:ietf:params:oauth:request_uri:secret-par-handle'
+    const logger = mockLogger()
+    const middleware = createClientCssInjectionMiddleware({
+      trustedClients: [trustedClient],
+      resolveClientMetadata: vi.fn(),
+      getClientCss: vi.fn(),
+      resolveClientIdFromRequestUri: vi
+        .fn()
+        .mockRejectedValue(new Error('boom')),
+      logger,
+    })
+    const req = {
+      method: 'GET',
+      path: '/oauth/authorize',
+      query: { request_uri: requestUri },
+    }
+    const { res } = createResponseDouble()
+    const next = vi.fn()
+
+    await middleware(req, res, next)
+
+    expect(logger.error).toHaveBeenCalledOnce()
+    const [context] = logger.error.mock.calls[0]
+    expect(context).toMatchObject({ hasRequestUri: true })
+    expect(JSON.stringify(context)).not.toContain(requestUri)
+    expect(next).toHaveBeenCalledOnce()
+  })
+
   // ─── Regression: ERR_HTTP_HEADERS_SENT crash ─────────────────────────
   //
   // @atproto/oauth-provider flushes response headers before calling

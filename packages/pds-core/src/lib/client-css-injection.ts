@@ -168,8 +168,10 @@ export function createClientCssInjectionMiddleware({
         resolveClientIdFromRequestUri,
       )
     } catch (err) {
+      // Log presence, not the value: request_uri is a short-lived bearer
+      // reference to the PAR entry, so a log line carrying it is replayable.
       logger.error(
-        { err, requestUri: query.request_uri },
+        { err, hasRequestUri: typeof query.request_uri === 'string' },
         'CSS middleware: failed to resolve client_id from request_uri',
       )
     }
