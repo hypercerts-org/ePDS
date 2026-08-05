@@ -708,10 +708,12 @@ export function renderLoginPage(opts: {
              directly under the field that caused it rather than above
              the heading. -->
         <div id="flash-slot-email">${opts.initialStep === 'otp' ? '' : flashRegionHtml}</div>
-        <button type="submit" class="btn-primary">Continue</button>
+        <button type="submit" class="btn-primary" disabled>Continue</button>
       </form>
       ${handleLoginButtonHtml}
     </div>
+
+    <noscript><div class="flash-msg error">JavaScript is required to sign in with email.</div></noscript>
 
     <!-- Step 2: OTP entry (calls better-auth verifyOtp) -->
     <div id="step-otp" class="step-otp${opts.initialStep === 'otp' ? ' active' : ''}">
@@ -775,6 +777,7 @@ export function renderLoginPage(opts: {
       var otpSubtitle = document.getElementById('otp-subtitle');
       var otpEmailInput = document.getElementById('otp-email');
       var atprotoBtn = document.querySelector('.btn-atproto');
+      var sendOtpForm = document.getElementById('form-send-otp');
       var emailInput = document.getElementById('email');
       var emailLabel = document.querySelector('label[for="email"]');
       var sendOtpBtn = document.querySelector('#form-send-otp button[type=submit]');
@@ -1304,7 +1307,7 @@ export function renderLoginPage(opts: {
       }
 
       // Form: send OTP (email mode) or hand off to client (handle mode)
-      document.getElementById('form-send-otp').addEventListener('submit', async function(e) {
+      sendOtpForm.addEventListener('submit', async function(e) {
         e.preventDefault();
         clearError();
         var raw = emailInput.value.trim();
@@ -1489,6 +1492,10 @@ export function renderLoginPage(opts: {
         showEmailStep();
         clearOtpBoxes();
       });
+
+      // Enable only after the submit handler is installed. This avoids a race mostly
+      // seen in fast e2e runs where the button is clicked before JS is ready.
+      sendOtpBtn.disabled = false;
 
       // Pillar 1: If login_hint was provided, the OTP step is already visible
       // server-side — no DOM transition needed.

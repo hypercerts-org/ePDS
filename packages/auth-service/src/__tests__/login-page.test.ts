@@ -561,6 +561,59 @@ describe('renderLoginPage sign-in error copy', () => {
   })
 })
 
+describe('renderLoginPage email form readiness gate', () => {
+  it('renders the email OTP form without a readiness dataset marker', () => {
+    const html = renderDefault()
+    expect(html).toContain('<form id="form-send-otp">')
+    expect(html).not.toContain('data-epds-login-ready')
+    expect(html).not.toContain('epdsLoginReady')
+  })
+
+  it('renders the email submit button disabled with the existing label', () => {
+    const html = renderDefault()
+    expect(html).toMatch(
+      /<button type="submit" class="btn-primary" disabled>Continue<\/button>/,
+    )
+  })
+
+  it('enables the button after handler setup', () => {
+    const html = renderDefault()
+    // The submit binding is the handler the button actually depends on,
+    // so assert against it directly — anchoring only on the last click
+    // handler would still pass if the submit binding moved below the
+    // enable. The click check stays as a second assertion so the enable
+    // is also pinned as the last thing handler setup does.
+    const submitHandlerIdx = html.indexOf(
+      "sendOtpForm.addEventListener('submit'",
+    )
+    const lastClickHandlerIdx = html.lastIndexOf("addEventListener('click'")
+    const enableIdx = html.indexOf('sendOtpBtn.disabled = false;')
+
+    expect(submitHandlerIdx).toBeGreaterThan(0)
+    expect(lastClickHandlerIdx).toBeGreaterThan(0)
+    expect(enableIdx).toBeGreaterThan(submitHandlerIdx)
+    expect(enableIdx).toBeGreaterThan(lastClickHandlerIdx)
+  })
+
+  it('does not use a blind timer for readiness', () => {
+    const html = renderDefault()
+    // Scoped to the gap between the submit binding and the enable,
+    // rather than the whole page: the page legitimately uses setInterval
+    // elsewhere for the PAR heartbeat. What matters is that the enable is
+    // driven by handler setup completing, not by a timer.
+    const submitHandlerIdx = html.indexOf(
+      "sendOtpForm.addEventListener('submit'",
+    )
+    const enableIdx = html.indexOf('sendOtpBtn.disabled = false;')
+
+    expect(submitHandlerIdx).toBeGreaterThan(0)
+    expect(enableIdx).toBeGreaterThan(submitHandlerIdx)
+    expect(html.slice(submitHandlerIdx, enableIdx)).not.toMatch(
+      /set(?:Timeout|Interval)\s*\(/,
+    )
+  })
+})
+
 describe('renderLoginPage OTP verify-form double-submit latch (regression)', () => {
   it('declares the verifying flag at IIFE scope so input/paste/submit handlers share it', () => {
     const html = renderDefault()
