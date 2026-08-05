@@ -33,6 +33,15 @@ describe('requireEnv', () => {
     )
   })
 
+  // Whitespace-only is effectively empty for a secret: it would boot with an
+  // unusable value rather than failing loudly, so trim before checking.
+  it('throws when the variable is set but whitespace-only', () => {
+    setEnv({ EPDS_CALLBACK_SECRET: '   ' })
+    expect(() => requireEnv('EPDS_CALLBACK_SECRET')).toThrow(
+      'Missing required environment variable: EPDS_CALLBACK_SECRET',
+    )
+  })
+
   it('names the offending variable and how to generate one', () => {
     setEnv({ EPDS_CALLBACK_SECRET: undefined })
     expect(() => requireEnv('EPDS_CALLBACK_SECRET')).toThrow(

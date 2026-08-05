@@ -1,6 +1,6 @@
 /**
  * Read an environment variable that has no safe default, throwing if it is
- * missing or empty.
+ * missing, empty, or whitespace-only.
  *
  * Secrets must never fall back to a hardcoded development value: a
  * deployment that forgot to set one would boot successfully while signing
@@ -9,7 +9,7 @@
  * actionable message rather than running in a silently insecure state.
  */
 export function requireEnv(name: string): string {
-  const value = process.env[name]
+  const value = process.env[name]?.trim()
   if (!value) {
     throw new Error(
       `Missing required environment variable: ${name}. ` +
