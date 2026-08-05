@@ -2,9 +2,14 @@ import { createHash } from 'node:crypto'
 
 import type { ClientMetadata } from '@certified-app/shared'
 import { DEFAULT_BRANDING_CSS } from './default-branding.js'
+import {
+  resolveOAuthClientIdFromQuery,
+  type ResolveClientIdFromRequestUri,
+} from './oauth-request-context.js'
 
 type LoggerLike = {
   info: (obj: object, msg: string) => void
+  error: (obj: object, msg: string) => void
   warn: (obj: object, msg: string) => void
   debug: (obj: object, msg: string) => void
 }
@@ -18,9 +23,7 @@ type ClientCssInjectionDeps = {
     trustedClients: string[],
   ) => string | null
   /** Resolve client_id from a PAR request_uri (optional). */
-  resolveClientIdFromRequestUri?: (
-    requestUri: string,
-  ) => Promise<string | undefined>
+  resolveClientIdFromRequestUri?: ResolveClientIdFromRequestUri
   logger: LoggerLike
 }
 
@@ -158,25 +161,17 @@ export function createClientCssInjectionMiddleware({
       return
     }
 
-    // Resolve client_id: it may be on the query string directly, or
-    // inside a PAR request_uri that needs to be looked up via the
-    // oauth-provider's request manager. PAR-based flows (the common
-    // case in ePDS) only carry request_uri on the query string.
-    let clientId =
-      typeof query.client_id === 'string' ? query.client_id : undefined
-    if (!clientId && resolveClientIdFromRequestUri) {
-      const requestUri =
-        typeof query.request_uri === 'string' ? query.request_uri : undefined
-      if (requestUri) {
-        try {
-          clientId = await resolveClientIdFromRequestUri(requestUri)
-        } catch (err) {
-          logger.warn(
-            { err, hasRequestUri: true },
-            'CSS middleware: failed to resolve client_id from request_uri',
-          )
-        }
-      }
+    let clientId: string | undefined
+    try {
+      clientId = await resolveOAuthClientIdFromQuery(
+        query,
+        resolveClientIdFromRequestUri,
+      )
+    } catch (err) {
+      logger.error(
+        { err, requestUri: query.request_uri },
+        'CSS middleware: failed to resolve client_id from request_uri',
+      )
     }
 
     // Resolve trusted-client css if applicable. Untrusted/unknown
