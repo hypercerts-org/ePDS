@@ -30,6 +30,17 @@ const INJECTED_CSS_SIGNATURE = 'body { background: #1a1208'
 // retint it.
 const DEFAULT_LOGIN_BG_RGB = 'rgb(232, 232, 232)' // #E8E8E8
 
+// Stable computed signatures for the trusted demo's default amber theme.
+// These are intentionally independent of other elements on the rendered page
+// so a regression affecting both source inputs and projected slots still fails.
+const TRUSTED_OTP_STYLE = {
+  slotColor: 'rgb(254, 243, 199)', // #fef3c7
+  slotBackground: 'rgb(26, 18, 8)', // #1a1208
+  slotBorderColor: 'rgb(74, 53, 32)', // #4a3520
+  placeholderColor: 'rgb(185, 139, 85)', // #b98b55
+  activeBorderColor: 'rgb(245, 158, 11)', // #f59e0b
+} as const
+
 async function waitForLoginPage(world: EpdsWorld): Promise<void> {
   const page = getPage(world)
   // Wait for auth-service-specific element — #step-otp only exists on
@@ -106,6 +117,117 @@ Then(
     await waitForLoginPage(this)
     const html = await getPage(this).content()
     expect(html).not.toContain(INJECTED_CSS_SIGNATURE)
+  },
+)
+
+Then(
+  'legacy OTP selectors style the visual code slots',
+  async function (this: EpdsWorld) {
+    await waitForLoginPage(this)
+    const page = getPage(this)
+    const input = page.locator('#code')
+    await expect(input).toBeVisible()
+    await input.focus()
+    await page.waitForFunction((expectedBorder) => {
+      const slot = document.querySelector<HTMLElement>('.otp-box.active')
+      return slot
+        ? getComputedStyle(slot).borderColor === expectedBorder
+        : false
+    }, TRUSTED_OTP_STYLE.activeBorderColor)
+
+    const result = await page.evaluate(() => {
+      const slot = document.querySelector<HTMLElement>('.otp-box.active')
+      const character = slot?.querySelector<HTMLElement>(
+        '.otp-character.placeholder',
+      )
+      const idleSlot = document.querySelector<HTMLElement>(
+        '.otp-box:not(.active)',
+      )
+      if (!slot || !character || !idleSlot) return null
+
+      const css = Array.from(document.querySelectorAll('style'))
+        .map((style) => style.textContent)
+        .join('\n')
+
+      return {
+        hasInputAlias: css.includes(':where(#otp-boxes)>div:where(.otp-box)'),
+        hasFocusAlias: css.includes(
+          ':where(#otp-boxes)>div:where(.otp-box).active',
+        ),
+        hasPlaceholderAlias: css.includes(
+          ':where(#otp-boxes)>div:where(.otp-box)>span:where(.otp-character.placeholder)',
+        ),
+        slotColor: getComputedStyle(slot).color,
+        slotBackground: getComputedStyle(idleSlot).backgroundColor,
+        slotBorderColor: getComputedStyle(idleSlot).borderColor,
+        placeholderColor: getComputedStyle(character).color,
+        activeBorderColor: getComputedStyle(slot).borderColor,
+      }
+    })
+
+    expect(result).not.toBeNull()
+    expect(result).toMatchObject({
+      hasInputAlias: true,
+      hasFocusAlias: true,
+      hasPlaceholderAlias: true,
+      ...TRUSTED_OTP_STYLE,
+    })
+  },
+)
+
+Then(
+  'the real OTP input remains protected and hit-testable',
+  async function (this: EpdsWorld) {
+    await waitForLoginPage(this)
+    const page = getPage(this)
+    const input = page.locator('#code')
+    await expect(input).toBeVisible()
+    await expect(input).toBeEnabled()
+    await input.fill('12')
+
+    const result = await input.evaluate((element) => {
+      const otpInput = element as HTMLInputElement
+      const style = getComputedStyle(otpInput)
+      const slots = Array.from(
+        document.querySelectorAll<HTMLElement>('.otp-box'),
+      )
+
+      return {
+        display: style.display,
+        visibility: style.visibility,
+        opacity: style.opacity,
+        pointerEvents: style.pointerEvents,
+        touchAction: style.touchAction,
+        userSelect: style.userSelect,
+        backgroundColor: style.backgroundColor,
+        borderWidth: style.borderWidth,
+        hitTestedAcrossSlots: slots.every((slot) => {
+          const rect = slot.getBoundingClientRect()
+          return (
+            document.elementFromPoint(
+              rect.left + rect.width / 2,
+              rect.top + rect.height / 2,
+            ) === otpInput
+          )
+        }),
+        renderedCharacters: slots
+          .slice(0, 2)
+          .map((slot) => slot.textContent.trim()),
+      }
+    })
+
+    expect(result).toMatchObject({
+      display: 'block',
+      visibility: 'visible',
+      opacity: '1',
+      pointerEvents: 'auto',
+      touchAction: 'auto',
+      userSelect: 'text',
+      backgroundColor: 'rgba(0, 0, 0, 0)',
+      borderWidth: '0px',
+      hitTestedAcrossSlots: true,
+      renderedCharacters: ['1', '2'],
+    })
   },
 )
 

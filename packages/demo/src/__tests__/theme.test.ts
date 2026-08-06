@@ -39,6 +39,15 @@ describe('getTheme', () => {
     expect(theme?.injectedCss).toContain(
       '.account-info { background: #2d1a4f; color: #c4b5fd; }',
     )
+    expect(theme?.injectedCss).toContain(
+      '} input { background: #1a1033 !important; border-color: #3d2a5c !important; color: #e8e0f0 !important; }',
+    )
+    expect(theme?.injectedCss).toContain(
+      'input::placeholder { color: #7c6894 !important; }',
+    )
+    expect(theme?.injectedCss).toContain(
+      'input:focus { border-color: #8b5cf6 !important; }',
+    )
   })
 
   it('returns the amber page theme', () => {

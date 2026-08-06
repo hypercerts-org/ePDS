@@ -89,6 +89,11 @@ this area's main gap: `login-page.ts`, `consent.ts`, `recovery.ts`, `account-log
   signCallback round-trip).
 - Pure helper functions within routes (e.g., handle validation in
   `choose-handle.ts`) could be extracted and tested.
+- OTP branding compatibility is extracted into `otp-branding-compat.ts` and
+  unit-tested across broad input, focus, placeholder, `.otp-box`, and
+  `[data-slot]` selectors, including malformed-CSS fallback and rejection of
+  mechanical declarations. Client-branding e2e coverage checks computed styles
+  and hit testing; mobile autofill still requires physical-device coverage.
 
 **Recommended strategy:**
 

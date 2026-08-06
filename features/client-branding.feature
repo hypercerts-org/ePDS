@@ -13,6 +13,11 @@ Feature: Client branding — CSS injection and custom email templates
     When the trusted demo client initiates an OAuth login
     Then the login page HTML contains the trusted client's custom CSS
 
+  Scenario: Legacy OTP branding remains functional with the single input
+    When the trusted demo client initiates an OAuth login
+    Then legacy OTP selectors style the visual code slots
+    And the real OTP input remains protected and hit-testable
+
   @untrusted-client
   Scenario: Trusted and untrusted demo clients render visibly differently
     When the trusted demo client initiates an OAuth login

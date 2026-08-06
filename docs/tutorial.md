@@ -408,6 +408,8 @@ so retinting the whole card is one declaration:
 }
 ```
 
+The sign-in code control exposes `.otp-box` for each visual position, `.otp-box.active` for the selected position, and `.otp-character.placeholder` for empty positions. To preserve common visual rules written for the old inputs, ePDS projects direct `input` selectors and their `:focus`, `:focus-visible`, and `::placeholder` states onto those elements. The same projections support `input.otp-box` and `input[data-slot]`, while `.otp-box:focus`, `.otp-box:focus-visible`, and `.otp-box::placeholder` remain compatible. Mechanical declarations such as `display` and `touch-action`, more complex DOM-coupled selectors, and malformed stylesheets are not projected. Treat `.otp-input-overlay` as an internal interaction element; ePDS protects it from broad `input` rules so client branding cannot cover or disable the visual slots. Browser automation should fill the single `#code` input rather than individual `.otp-box` elements.
+
 The upstream consent + chooser pages served by pds-core ship with
 default Certified-style styling out of the box; trusted-client
 `branding.css` is layered on top of it via cascade order, so any rules

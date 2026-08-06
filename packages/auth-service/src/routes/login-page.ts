@@ -42,7 +42,16 @@ import {
   type HandleMode,
 } from '@certified-app/shared'
 import { socialProviders } from '../better-auth.js'
-import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
+import {
+  buildOtpInputProps,
+  normalizeOtpValue,
+  resolveOtpClickSelection,
+  resolveOtpSelection,
+} from '../otp-input.js'
+import {
+  adaptOtpBrandingCss,
+  OTP_INPUT_INVARIANT_CSS,
+} from '../lib/otp-branding-compat.js'
 import {
   resolveLoginHint,
   fetchParLoginHint,
@@ -514,7 +523,35 @@ export function renderLoginPage(opts: {
     : `<img src="/static/certified-brandmark.svg" alt="Certified" class="client-logo">`
 
   const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
-  const inputFilter = buildOtpInputFilter(opts.otpCharset)
+  const otpBranding = adaptOtpBrandingCss(opts.customCss)
+  if (otpBranding.status === 'adapted') {
+    logger.debug(
+      { clientId: opts.clientId, rewrites: otpBranding.rewrites },
+      'Applied OTP branding projections',
+    )
+  } else if (otpBranding.status === 'fallback') {
+    logger.warn(
+      {
+        clientId: opts.clientId,
+        failureKind: otpBranding.failure.kind,
+      },
+      'Unable to apply OTP branding projections; using the original client CSS. Check branding.css in /preview/login-otp',
+    )
+    logger.debug(
+      {
+        err: otpBranding.failure.cause,
+        clientId: opts.clientId,
+        failureKind: otpBranding.failure.kind,
+      },
+      'OTP branding projection failure details',
+    )
+  }
+  // The browser uses the exact pure normalizer covered by otp-input.test.ts.
+  // It is self-contained, so serializing its source avoids maintaining a
+  // second client-only implementation inside this server-rendered page.
+  const normalizeOtpValueSource = normalizeOtpValue.toString()
+  const resolveOtpClickSelectionSource = resolveOtpClickSelection.toString()
+  const resolveOtpSelectionSource = resolveOtpSelection.toString()
 
   // ATProto/Bluesky handle login button.
   //
@@ -565,8 +602,12 @@ export function renderLoginPage(opts: {
   // server-rendered into whichever step is initially visible and moved
   // between the two slots on step transitions; both transitions call
   // clearError() first, so it is always empty when it moves.
+  //
+  // aria-atomic keeps a message and its inline action announcing as one
+  // utterance: setFlash() swaps the region's children wholesale, and
+  // without it a screen reader may read only the changed subtree.
   const flashRegionHtml =
-    '<div id="error-msg" class="flash-msg hidden" role="status" aria-live="polite"></div>'
+    '<div id="error-msg" class="flash-msg hidden" role="status" aria-live="polite" aria-atomic="true"></div>'
 
   // Social login buttons — redirect to better-auth provider endpoints
   const socialButtonsHtml = hasSocialProviders
@@ -611,8 +652,10 @@ export function renderLoginPage(opts: {
   ${renderFaviconTag(opts.customFaviconUrl, opts.customFaviconUrlDark)}
   <title>Sign in to ${escapeHtml(appName)}</title>
   <style>
+    @layer epds-otp-invariants;
     :root { --muted-foreground: #666; --input-bg: #ffffff; --input-border: #e5e5e5; --page-bg: #E8E8E8; --card-bg: #F8F8F8; --card-border: #E5E5E5; --btn-secondary-border: #e5e5e5; --focus-border: ${brandColor}; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--page-bg); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; color: #1A130F; }
     .page-wrap { display: flex; flex-direction: column; align-items: stretch; max-width: 497px; width: 100%; }
     .container { background: var(--card-bg); padding: 64px 48px 40px; width: 100%; text-align: center; border-radius: 20px; border: 1px solid var(--card-border); box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
@@ -624,10 +667,16 @@ export function renderLoginPage(opts: {
     .field input { width: 100%; padding: 14px 20px; border: 1px solid var(--input-border); border-radius: 8px; font-size: 16px; outline: none; background: var(--input-bg); transition: border-color 0.15s; }
     .field input:focus { border-color: var(--focus-border); }
     ${EMAIL_TYPO_GUARD_CSS}
-    .otp-boxes { display: flex; gap: 10px; justify-content: center; margin-bottom: 24px; }
-    .otp-box { width: 48px; height: 56px; padding: 0; text-align: center; font-size: 24px; font-family: 'SF Mono', Menlo, Consolas, monospace; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: #1A130F; outline: none; transition: border-color 0.15s; }
-    .otp-box::placeholder { color: #d4d4d4; }
-    .otp-box:focus { border-color: var(--focus-border); }
+    /* One real input spans the visual slots. Keeping opacity at 1 while the
+       text and caret are transparent preserves iOS long-press paste. */
+    .otp-boxes { position: relative; display: flex; gap: 10px; justify-content: center; margin-bottom: 24px; cursor: text; }
+    .otp-box { position: relative; display: flex; align-items: center; justify-content: center; width: 48px; height: 56px; padding: 0; text-align: center; font-size: 24px; font-family: 'SF Mono', Menlo, Consolas, monospace; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: #1A130F; outline: none; transition: border-color 0.15s; }
+    .otp-box.active { border-color: var(--focus-border); outline: 2px solid var(--focus-border); outline-offset: 2px; }
+    .otp-character.placeholder { color: #d4d4d4; }
+    .otp-fake-caret { display: none; position: absolute; width: 1px; height: 28px; background: currentColor; animation: otp-caret-blink 1.2s ease-out infinite; }
+    .otp-box.active.empty .otp-fake-caret { display: block; }
+    @keyframes otp-caret-blink { 0%, 70%, 100% { opacity: 1; } 20%, 50% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { .otp-fake-caret { animation: none; } }
     .otp-actions { display: flex; gap: 32px; justify-content: center; margin-top: 12px; }
     .btn-primary { width: 100%; padding: 15px; background: ${brandColor}; color: white; border: none; border-radius: 9999px; font-size: 15px; font-weight: 500; cursor: pointer; transition: opacity 0.15s; }
     .btn-primary:hover { opacity: 0.9; }
@@ -682,7 +731,8 @@ export function renderLoginPage(opts: {
     .recovery-link { display: var(--recovery-link-display, block); margin-top: 16px; color: var(--muted-foreground); font-size: 13px; text-decoration: none; text-align: center; }
     .recovery-link:hover { color: #1A130F; }
     .recovery-link:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; border-radius: 4px; }
-  </style>${renderOptionalStyleTag(opts.customCss)}
+  </style>${renderOptionalStyleTag(otpBranding.css)}
+  <style data-epds-otp-invariants>${OTP_INPUT_INVARIANT_CSS}</style>
 </head>
 <body>
   <div class="page-wrap">
@@ -720,20 +770,22 @@ export function renderLoginPage(opts: {
           ? `Code already sent to ${escapeHtml(opts.loginHint.replace(/(.{2})[^@]*(@.*)/, '$1***$2'))}`
           : ''
       }</p>
+      <span id="otp-auto-submit" class="sr-only">The code submits automatically when all ${opts.otpLength} ${opts.otpCharset === 'alphanumeric' ? 'characters' : 'digits'} are entered.</span>
       <form id="form-verify-otp">
         <input type="hidden" id="otp-email" name="email" value="${escapeHtml(opts.loginHint)}">
-        <input type="hidden" id="code" name="code">
         <div class="otp-boxes" id="otp-boxes">
           ${Array.from({ length: opts.otpLength })
             .map(
               (_, i) =>
-                `<input type="text" class="otp-box" data-slot="${i}" maxlength="1"
-                   inputmode="${inputProps.inputmode}" autocapitalize="${inputProps.autocapitalize}"
-                   ${i === 0 ? 'autocomplete="one-time-code"' : 'autocomplete="off"'}
-                   placeholder="${opts.otpCharset === 'alphanumeric' ? 'A' : '0'}"
-                   aria-label="${opts.otpCharset === 'alphanumeric' ? 'Character' : 'Digit'} ${i + 1}">`,
+                `<div class="otp-box empty" data-slot="${i}" aria-hidden="true"><span class="otp-character placeholder">${opts.otpCharset === 'alphanumeric' ? 'A' : '0'}</span><span class="otp-fake-caret"></span></div>`,
             )
             .join('\n          ')}
+          <input type="text" class="otp-input-overlay" id="code" name="code"
+                 maxlength="${opts.otpLength}" inputmode="${inputProps.inputmode}"
+                 autocapitalize="${inputProps.autocapitalize}" spellcheck="false"
+                 autocomplete="one-time-code" pattern="${inputProps.pattern}"
+                 aria-label="${opts.otpLength}-${opts.otpCharset === 'alphanumeric' ? 'character' : 'digit'} verification code"
+                 aria-describedby="otp-subtitle otp-auto-submit">
         </div>
         <!-- Flash slot: see #flash-slot-email. Sitting between the
              boxes and Verify puts a rejected-code message at the point
@@ -781,9 +833,12 @@ export function renderLoginPage(opts: {
       var headingEl = document.getElementById('heading');
       var termsEl = document.getElementById('terms');
       var otpBoxes = Array.prototype.slice.call(document.querySelectorAll('.otp-box'));
-      var hiddenCode = document.getElementById('code');
+      var otpInput = document.getElementById('code');
       var otpLength = ${opts.otpLength};
       var otpCharset = ${JSON.stringify(opts.otpCharset)};
+      var normalizeOtpValue = (${normalizeOtpValueSource});
+      var resolveOtpClickSelection = (${resolveOtpClickSelectionSource});
+      var resolveOtpSelection = (${resolveOtpSelectionSource});
 
       // PAR heartbeat — slides the upstream request_uri inactivity
       // timer (atproto's AUTHORIZATION_INACTIVITY_TIMEOUT, 5 min) so
@@ -881,7 +936,7 @@ export function renderLoginPage(opts: {
         flowAborted = true;
         // Disable every form control on the OTP step so nothing the
         // user does on the form has any effect from here on.
-        for (var i = 0; i < otpBoxes.length; i++) otpBoxes[i].disabled = true;
+        otpInput.disabled = true;
         var resendBtn = document.getElementById('btn-resend');
         if (resendBtn) resendBtn.disabled = true;
         var backBtn = document.getElementById('btn-back');
@@ -991,68 +1046,148 @@ export function renderLoginPage(opts: {
         return false;
       }
 
-      // Drop characters the configured code alphabet can't contain, so a
-      // code copied out of prose (punctuation, line breaks, a stray letter
-      // in a digits-only code) still lands in the boxes as a valid code
-      // instead of silently failing verification. Alphanumeric codes are
-      // generated uppercase, and the browser only auto-capitalises on soft
-      // keyboards, so normalise here too — otherwise a desktop user typing
-      // lowercase submits a code the server will reject.
-      var otpCharFilter = ${inputFilter.toString()};
-      function filterOtpChars(s) {
-        var cleaned = s.replace(otpCharFilter, '');
-        return otpCharset === 'alphanumeric' ? cleaned.toUpperCase() : cleaned;
-      }
+      var previousOtpSelection = [otpInput.selectionStart, otpInput.selectionEnd];
 
-      function updateHiddenCode() {
-        var v = '';
-        for (var i = 0; i < otpBoxes.length; i++) v += otpBoxes[i].value;
-        hiddenCode.value = v;
+      /** Render the single input's value and selection into visual slots. */
+      function renderOtpSlots() {
+        var value = otpInput.value;
+        var selectionStart = otpInput.selectionStart === null ? value.length : otpInput.selectionStart;
+        var activeSlot = Math.min(selectionStart, otpBoxes.length - 1);
+        var focused = document.activeElement === otpInput;
+
+        otpBoxes.forEach(function(box, index) {
+          var character = box.querySelector('.otp-character');
+          var valueAtSlot = value[index] || '';
+          character.textContent = valueAtSlot || (otpCharset === 'alphanumeric' ? 'A' : '0');
+          character.classList.toggle('placeholder', !valueAtSlot);
+          box.classList.toggle('empty', !valueAtSlot);
+          box.classList.toggle('active', focused && index === activeSlot);
+        });
       }
 
       function clearOtpBoxes() {
-        for (var i = 0; i < otpBoxes.length; i++) otpBoxes[i].value = '';
-        hiddenCode.value = '';
+        otpInput.value = '';
+        previousOtpSelection = [0, 0];
+        renderOtpSlots();
       }
 
-      otpBoxes.forEach(function(box, idx) {
-        box.addEventListener('input', function() {
-          // keep only the last typed char (handles paste into a single box)
-          var v = filterOtpChars(box.value);
-          if (v.length > 1) v = v.slice(-1);
-          box.value = v;
-          updateHiddenCode();
-          if (box.value && idx < otpBoxes.length - 1) otpBoxes[idx + 1].focus();
-          if (hiddenCode.value.length === otpBoxes.length) {
-            document.getElementById('form-verify-otp').requestSubmit();
-          }
-        });
-        box.addEventListener('keydown', function(e) {
-          if (e.key === 'Backspace' && !box.value && idx > 0) {
-            otpBoxes[idx - 1].focus();
-            otpBoxes[idx - 1].value = '';
-            updateHiddenCode();
-            e.preventDefault();
-          } else if (e.key === 'ArrowLeft' && idx > 0) {
-            otpBoxes[idx - 1].focus();
-          } else if (e.key === 'ArrowRight' && idx < otpBoxes.length - 1) {
-            otpBoxes[idx + 1].focus();
-          }
-        });
-        box.addEventListener('paste', function(e) {
-          e.preventDefault();
-          var data = (e.clipboardData || window.clipboardData).getData('text') || '';
-          var cleaned = filterOtpChars(data).slice(0, otpBoxes.length - idx);
-          for (var i = 0; i < cleaned.length; i++) otpBoxes[idx + i].value = cleaned[i];
-          updateHiddenCode();
-          var nextIdx = Math.min(idx + cleaned.length, otpBoxes.length - 1);
-          otpBoxes[nextIdx].focus();
-          if (hiddenCode.value.length === otpBoxes.length) {
-            document.getElementById('form-verify-otp').requestSubmit();
-          }
-        });
-        box.addEventListener('focus', function() { box.select(); });
+      /**
+       * Keep collapsed browser carets aligned with segmented-field editing.
+       * At the end of a partial value the caret remains in insertion mode;
+       * elsewhere one character is selected so typing replaces that slot
+       * instead of shifting every following character.
+       */
+      function syncOtpSelection() {
+        if (document.activeElement !== otpInput) {
+          renderOtpSlots();
+          return;
+        }
+
+        var selection = resolveOtpSelection(
+          otpInput.value.length,
+          otpLength,
+          otpInput.selectionStart,
+          otpInput.selectionEnd,
+          previousOtpSelection[0],
+          previousOtpSelection[1],
+        );
+        if (selection) {
+          otpInput.setSelectionRange(
+            selection.start,
+            selection.end,
+            selection.direction,
+          );
+        }
+
+        previousOtpSelection = [otpInput.selectionStart, otpInput.selectionEnd];
+        renderOtpSlots();
+      }
+
+      function positionOtpSelection() {
+        var end = otpInput.value.length;
+        var start = Math.min(end, otpBoxes.length - 1);
+        otpInput.setSelectionRange(start, end);
+        previousOtpSelection = [start, end];
+        renderOtpSlots();
+      }
+
+      function focusOtpInput() {
+        otpInput.focus();
+        positionOtpSelection();
+      }
+
+      otpInput.addEventListener('input', function() {
+        var normalized = normalizeOtpValue(otpInput.value, otpLength, otpCharset);
+        if (otpInput.value !== normalized) otpInput.value = normalized;
+        syncOtpSelection();
+        if (otpInput.value.length === otpLength) {
+          document.getElementById('form-verify-otp').requestSubmit();
+        }
       });
+
+      // Keep the real input visible to hit testing (opacity:1) for iOS
+      // long-press paste. Handle clipboard insertion before maxlength is
+      // applied so formatted values such as "123 456" can be normalized
+      // without the browser truncating the last character first.
+      otpInput.addEventListener('paste', function(e) {
+        if (!e.clipboardData) return;
+        e.preventDefault();
+        var pasted = e.clipboardData.getData('text/plain') || '';
+        var start = otpInput.selectionStart === null ? otpInput.value.length : otpInput.selectionStart;
+        var end = otpInput.selectionEnd === null ? start : otpInput.selectionEnd;
+        var valueBeforePaste = otpInput.value.slice(0, start);
+        otpInput.value = normalizeOtpValue(
+          valueBeforePaste + pasted + otpInput.value.slice(end),
+          otpLength,
+          otpCharset,
+        );
+        var cursor = Math.min(
+          normalizeOtpValue(valueBeforePaste + pasted, otpLength, otpCharset).length,
+          otpInput.value.length,
+        );
+        otpInput.setSelectionRange(cursor, cursor);
+        otpInput.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+
+      /** Select the visual OTP slot beneath a pointer coordinate. */
+      function selectOtpSlotAtPoint(clientX, clientY) {
+        var clickedBox = document.elementsFromPoint(clientX, clientY).find(function(element) {
+          return element.hasAttribute('data-slot');
+        });
+        if (!clickedBox) return false;
+
+        var selection = resolveOtpClickSelection(
+          otpInput.value.length,
+          Number(clickedBox.getAttribute('data-slot')),
+        );
+        otpInput.setSelectionRange(
+          selection.start,
+          selection.end,
+          selection.direction,
+        );
+        previousOtpSelection = [selection.start, selection.end];
+        renderOtpSlots();
+        return true;
+      }
+
+      otpInput.addEventListener('focus', positionOtpSelection);
+      otpInput.addEventListener('blur', renderOtpSlots);
+      otpInput.addEventListener('pointerdown', function(e) {
+        if (e.pointerType !== 'mouse' || e.button !== 0) return;
+        // Stop the native caret jumping to the end before click selects the
+        // intended slot. Touch remains native so iOS long-press paste works.
+        e.preventDefault();
+        otpInput.focus();
+        selectOtpSlotAtPoint(e.clientX, e.clientY);
+      });
+      otpInput.addEventListener('click', function(e) {
+        if (!selectOtpSlotAtPoint(e.clientX, e.clientY)) syncOtpSelection();
+      });
+      otpInput.addEventListener('keyup', syncOtpSelection);
+      document.addEventListener('selectionchange', function() {
+        if (document.activeElement === otpInput) syncOtpSelection();
+      });
+      renderOtpSlots();
 
       /**
        * Swap the flash region's contents in a single mutation.
@@ -1234,7 +1369,7 @@ export function renderLoginPage(opts: {
         headingEl.textContent = 'Enter your code';
         if (termsEl) termsEl.style.display = 'none';
         clearOtpBoxes();
-        if (otpBoxes.length) otpBoxes[0].focus();
+        focusOtpInput();
         clearError();
         moveFlashTo('flash-slot-otp');
         startHeartbeat();
@@ -1437,7 +1572,7 @@ export function renderLoginPage(opts: {
             // a still-full grid would auto-submit on the first keystroke
             // (length stays at 6) and spam the rate limiter.
             clearOtpBoxes();
-            if (otpBoxes.length) otpBoxes[0].focus();
+            focusOtpInput();
           }
         } finally {
           // Leave the latch set on success: verifyOtp triggers a redirect,
@@ -1472,7 +1607,7 @@ export function renderLoginPage(opts: {
           // Clear any characters typed for the old code so the new code
           // starts from a clean, focused input grid.
           clearOtpBoxes();
-          if (otpBoxes.length) otpBoxes[0].focus();
+          focusOtpInput();
           // Both facts only matter once a resend has happened, so they
           // live here rather than in permanently-visible page copy:
           // sending a new OTP invalidates every earlier one, and a user
@@ -1501,7 +1636,7 @@ export function renderLoginPage(opts: {
       if (initialStep === 'otp' && loginHint) {
         currentEmail = loginHint;
         var masked = loginHint.replace(/(.{2})[^@]*(@.*)/, '$1***$2');
-        if (otpBoxes.length) otpBoxes[0].focus();
+        focusOtpInput();
         if (!otpAlreadySent) {
           // First load — fire the OTP send in the background.
           sendOtp(loginHint).then(function(result) {

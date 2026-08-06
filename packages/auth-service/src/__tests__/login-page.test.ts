@@ -23,6 +23,7 @@ import {
   safeResolveClientMetadata,
 } from '../routes/login-page.js'
 import type { ClientMetadata } from '../lib/client-metadata.js'
+import { normalizeOtpValue } from '../otp-input.js'
 
 // ---------------------------------------------------------------------------
 // Shared DB helpers
@@ -561,6 +562,177 @@ describe('renderLoginPage sign-in error copy', () => {
   })
 })
 
+describe('renderLoginPage OTP branding compatibility', () => {
+  it('renders client metadata without custom CSS', () => {
+    const logoUri = 'https://client.example/logo.png'
+    const html = renderDefault({
+      branding: {
+        client_name: 'Example App',
+        brand_color: '#111111',
+        logo_uri: logoUri,
+      },
+      initialStep: 'otp',
+      otpAlreadySent: true,
+      loginHint: 'user@example.com',
+      termsOfServiceUrl: 'https://client.example/terms',
+      privacyPolicyUrl: 'https://client.example/privacy',
+      legalEntityName: 'Example Org',
+    })
+
+    expect(html).toContain('<title>Sign in to Example App</title>')
+    expect(html).toContain(`src="${logoUri}" alt="Example App"`)
+    expect(html).toContain('--focus-border: #111111')
+    expect(html).toContain('<h1 id="heading">Enter your code</h1>')
+    expect(html).toContain('Code already sent to us***@example.com')
+    expect(html).toContain(
+      'style="display:none;">By signing in, you agree to Example Org\'s',
+    )
+  })
+
+  it('rejects unsafe client brand colors before CSS interpolation', () => {
+    const html = renderDefault({
+      branding: {
+        brand_color: 'red; background: url(https://example.com/tracker)',
+      },
+    })
+
+    expect(html).toContain('--focus-border: #1A130F')
+    expect(html).not.toContain('tracker')
+  })
+
+  it('renders malformed client CSS unchanged without blocking login', () => {
+    const malformedCss = '.otp-box:focus { color: gold;'
+    const html = renderDefault({ customCss: malformedCss })
+
+    expect(html).toContain(`<style>${malformedCss}</style>`)
+    expect(html).toContain('data-epds-otp-invariants')
+    expect(html).toContain('id="form-verify-otp"')
+  })
+
+  it('aliases legacy focus styling to the active visual slot', () => {
+    const html = renderDefault({
+      customCss: '.otp-box:focus { border-color: rgb(1, 2, 3) !important; }',
+    })
+
+    expect(html).toMatch(
+      /\.otp-box:focus\s*,\s*\.otp-box\.active\s*\{\s*border-color: rgb\(1, 2, 3\) !important;/,
+    )
+  })
+
+  it('protects the real input after client branding is applied', () => {
+    const customCss =
+      'input { display: none !important; background: white !important; }'
+    const html = renderDefault({ customCss })
+    const clientCssIndex = html.indexOf(customCss)
+    const invariantCssIndex = html.indexOf('data-epds-otp-invariants')
+
+    expect(clientCssIndex).toBeGreaterThan(0)
+    expect(invariantCssIndex).toBeGreaterThan(clientCssIndex)
+    expect(html.slice(invariantCssIndex)).toContain(
+      '#form-verify-otp #otp-boxes > #code.otp-input-overlay',
+    )
+    expect(html.slice(invariantCssIndex)).toContain(
+      'pointer-events: auto !important',
+    )
+    expect(html.slice(invariantCssIndex)).toContain(
+      'background: transparent !important',
+    )
+  })
+
+  it('protects long-press paste and wins over important client layers', () => {
+    const customCss =
+      '@layer branding { input { display: none !important; touch-action: none !important; } }'
+    const html = renderDefault({ customCss })
+    const layerDeclarationIndex = html.indexOf('@layer epds-otp-invariants;')
+    const clientCssIndex = html.indexOf('@layer branding')
+    const invariantCssIndex = html.indexOf('data-epds-otp-invariants')
+    const invariantCss = html.slice(invariantCssIndex)
+
+    expect(layerDeclarationIndex).toBeGreaterThan(0)
+    expect(layerDeclarationIndex).toBeLessThan(clientCssIndex)
+    expect(invariantCssIndex).toBeGreaterThan(clientCssIndex)
+    expect(invariantCss).toContain('@layer epds-otp-invariants')
+    expect(invariantCss).toContain('-webkit-touch-callout: default !important')
+    expect(invariantCss).toContain('-webkit-user-select: text !important')
+    expect(invariantCss).toContain('touch-action: auto !important')
+  })
+})
+
+describe('renderLoginPage OTP accessibility', () => {
+  it('announces asynchronous status and error messages', () => {
+    const html = renderDefault()
+    expect(html).toContain(
+      'role="status" aria-live="polite" aria-atomic="true"',
+    )
+  })
+
+  it('describes code format and automatic submission to assistive technology', () => {
+    const numericHtml = renderDefault()
+    expect(numericHtml).toContain('aria-label="6-digit verification code"')
+    expect(numericHtml).toContain(
+      'aria-describedby="otp-subtitle otp-auto-submit"',
+    )
+    expect(numericHtml).toContain(
+      'The code submits automatically when all 6 digits are entered.',
+    )
+    expect(numericHtml).toContain('spellcheck="false"')
+
+    const alphanumericHtml = renderDefault({ otpCharset: 'alphanumeric' })
+    expect(alphanumericHtml).toContain(
+      'aria-label="6-character verification code"',
+    )
+    expect(alphanumericHtml).toContain(
+      'The code submits automatically when all 6 characters are entered.',
+    )
+  })
+
+  it('provides visible focus, themed caret colour, and reduced motion', () => {
+    const html = renderDefault()
+    expect(html).toContain(
+      '.otp-box.active { border-color: var(--focus-border); outline: 2px solid var(--focus-border); outline-offset: 2px; }',
+    )
+    expect(html).toContain('background: currentColor')
+    expect(html).toContain('@media (prefers-reduced-motion: reduce)')
+    expect(html).toContain('.otp-fake-caret { animation: none; }')
+  })
+})
+
+describe('renderLoginPage OTP pointer selection', () => {
+  it('selects mouse slots on pointerdown before native caret placement', () => {
+    const html = renderDefault()
+    const pointerStart = html.indexOf("otpInput.addEventListener('pointerdown'")
+    const pointerEnd = html.indexOf(
+      "otpInput.addEventListener('click'",
+      pointerStart,
+    )
+    expect(pointerStart).toBeGreaterThan(0)
+    expect(pointerEnd).toBeGreaterThan(pointerStart)
+
+    const pointerHandler = html.slice(pointerStart, pointerEnd)
+    expect(pointerHandler).toContain("e.pointerType !== 'mouse'")
+    const preventDefault = pointerHandler.indexOf('e.preventDefault();')
+    const focus = pointerHandler.indexOf('otpInput.focus();')
+    const selectSlot = pointerHandler.indexOf('selectOtpSlotAtPoint(')
+    expect(preventDefault).toBeGreaterThan(0)
+    expect(focus).toBeGreaterThan(preventDefault)
+    expect(selectSlot).toBeGreaterThan(focus)
+  })
+
+  it('retains click selection as the touch and iOS fallback', () => {
+    const html = renderDefault()
+    const clickStart = html.indexOf("otpInput.addEventListener('click'")
+    const clickEnd = html.indexOf(
+      "otpInput.addEventListener('keyup'",
+      clickStart,
+    )
+    expect(clickStart).toBeGreaterThan(0)
+    expect(clickEnd).toBeGreaterThan(clickStart)
+    expect(html.slice(clickStart, clickEnd)).toContain(
+      'selectOtpSlotAtPoint(e.clientX, e.clientY)',
+    )
+  })
+})
+
 describe('renderLoginPage OTP verify-form double-submit latch (regression)', () => {
   it('declares the verifying flag at IIFE scope so input/paste/submit handlers share it', () => {
     const html = renderDefault()
@@ -739,10 +911,10 @@ describe('renderLoginPage flow-aborted notice + reactive abort gates', () => {
     const fnEnd = html.indexOf('function abortIfFlowDead', fnStart)
     expect(fnEnd).toBeGreaterThan(fnStart)
     const fnBody = html.slice(fnStart, fnEnd)
-    // OTP boxes, Resend, Back, and Verify must all get disabled —
+    // OTP input, Resend, Back, and Verify must all get disabled —
     // anything left enabled would let the user click into a path
     // that silently fails.
-    expect(fnBody).toMatch(/otpBoxes\[i\]\.disabled = true/)
+    expect(fnBody).toMatch(/otpInput\.disabled = true/)
     expect(fnBody).toMatch(/resendBtn\.disabled = true/)
     expect(fnBody).toMatch(/backBtn\.disabled = true/)
     expect(fnBody).toMatch(/verifyBtn\.disabled = true/)
@@ -865,64 +1037,63 @@ describe('renderLoginPage flow-aborted notice + reactive abort gates', () => {
   })
 })
 
-// The segmented OTP grid used to strip whitespace only, so a code copied
+// The segmented OTP input used to strip whitespace only, so a code copied
 // with surrounding punctuation, or a letter typed into a digits-only code,
 // reached the server verbatim and failed verification. It also never
 // upper-cased, while alphanumeric codes are generated as A-Z0-9 and the
 // other two OTP forms upper-case on the way in — so a desktop user typing
 // lowercase (where `autocapitalize` does nothing) submitted a code the
-// server would always reject. These pin the shared charset filter.
-describe('renderLoginPage OTP grid charset filter', () => {
-  it('emits the numeric filter from the shared helper', () => {
-    const html = renderDefault({ otpCharset: 'numeric' })
-    expect(html).toContain(`var otpCharFilter = ${/\D/g.toString()};`)
-  })
-
-  it('emits the alphanumeric filter from the shared helper', () => {
-    const html = renderDefault({ otpCharset: 'alphanumeric' })
-    expect(html).toContain(`var otpCharFilter = ${/[^A-Za-z0-9]/g.toString()};`)
-  })
-
-  it('upper-cases only under the alphanumeric policy', () => {
-    expect(renderDefault({ otpCharset: 'alphanumeric' })).toContain(
-      "otpCharset === 'alphanumeric' ? cleaned.toUpperCase() : cleaned",
+// server would always reject. These pin the shared charset normalizer.
+describe('renderLoginPage OTP charset filter', () => {
+  // The single input replaced the per-box `filterOtpChars` helper these
+  // originally pinned. normalizeOtpValue subsumes it — it strips whitespace,
+  // drops out-of-charset characters, upper-cases alphanumeric codes, and caps
+  // the length — and is unit-tested directly in otp-input.test.ts. These now
+  // pin that the page really ships that shared function rather than a
+  // divergent client-side copy, and that every entry path routes through it.
+  it('serializes the shared normalizer into the page', () => {
+    const html = renderDefault()
+    expect(html).toContain(
+      `var normalizeOtpValue = (${normalizeOtpValue.toString()});`,
     )
   })
 
-  it('routes the input handler through the filter, not a whitespace-only strip', () => {
+  it('routes typed input through the normalizer, not a whitespace-only strip', () => {
     const html = renderDefault()
-    expect(html).toContain('var v = filterOtpChars(box.value);')
+    expect(html).toContain(
+      'var normalized = normalizeOtpValue(otpInput.value, otpLength, otpCharset);',
+    )
     // The old whitespace-only strip is a strict subset of every charset
-    // filter; leaving one behind would mean a handler was missed.
+    // filter; leaving one behind would mean an entry path was missed.
     expect(html).not.toMatch(/replace\(\/\\s\/g, ''\)/)
   })
 
-  it('routes the paste handler through the filter before slicing to the free boxes', () => {
+  it('routes pasted input through the normalizer', () => {
     const html = renderDefault()
-    expect(html).toContain(
-      'var cleaned = filterOtpChars(data).slice(0, otpBoxes.length - idx);',
+    const pasteStart = html.indexOf("otpInput.addEventListener('paste'")
+    expect(pasteStart).toBeGreaterThan(0)
+    const pasteEnd = html.indexOf(
+      "otpInput.addEventListener('focus'",
+      pasteStart,
     )
+    expect(pasteEnd).toBeGreaterThan(pasteStart)
+    expect(html.slice(pasteStart, pasteEnd)).toContain('normalizeOtpValue(')
   })
 
-  it('defines the filter before the box handlers that call it', () => {
-    const html = renderDefault()
-    const defIdx = html.indexOf('function filterOtpChars(s)')
-    const inputIdx = html.indexOf('var v = filterOtpChars(box.value);')
-    const pasteIdx = html.indexOf('var cleaned = filterOtpChars(data)')
-    expect(defIdx).toBeGreaterThan(0)
-    expect(inputIdx).toBeGreaterThan(defIdx)
-    expect(pasteIdx).toBeGreaterThan(defIdx)
-  })
-
-  it('declares otpCharset once, above the filter that reads it', () => {
+  it('declares otpCharset once, above the normalizer that reads it', () => {
     const html = renderDefault()
     expect(html.match(/var otpCharset =/g)).toHaveLength(1)
     expect(html.match(/var otpLength =/g)).toHaveLength(1)
-    // filterOtpChars is only ever called from event handlers, but keeping
-    // the declaration above it removes any reliance on var hoisting.
     expect(html.indexOf('var otpCharset =')).toBeLessThan(
-      html.indexOf('function filterOtpChars(s)'),
+      html.indexOf('var normalizeOtpValue ='),
     )
+  })
+
+  it('normalizes to the configured charset', () => {
+    // Behavioural cover for what the serialized normalizer will do in the
+    // browser under each policy the page can be rendered with.
+    expect(normalizeOtpValue('1a2-3 4', 6, 'numeric')).toBe('1234')
+    expect(normalizeOtpValue('a1-b2 c3', 6, 'alphanumeric')).toBe('A1B2C3')
   })
 })
 
