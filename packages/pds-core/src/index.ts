@@ -25,13 +25,19 @@ applyPdsPortFallback()
 import type * as http from 'node:http'
 import { randomBytes } from 'node:crypto'
 import * as path from 'node:path'
-import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
+import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
-/* v8 ignore next 3 -- module-level init, only testable via e2e */
-const atprotoPdsPkg: { version: string } = JSON.parse(
-  readFileSync(require.resolve('@atproto/pds/package.json'), 'utf8'),
-)
-import { HandleUnavailableError } from '@atproto/oauth-provider'
+import { createRequire } from 'node:module'
+import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
+import { HandleUnavailableError } from '@atproto/oauth-provider/errors'
+import type { Account } from '@atproto/oauth-provider/store'
+import type { DidString } from '@atproto/syntax'
+import {
+  canLookUpAccountByHandle,
+  canCheckHandle,
+  canResolveHandle,
+  isValidConstructedHandle,
+} from './lib/identifier-guards.js'
 import {
   generateRandomHandle,
   createLogger,
@@ -68,6 +74,14 @@ import { loadDeviceAccountEmails } from './lib/device-accounts.js'
 import { handleCallbackError } from './lib/epds-callback-error.js'
 import { installTestHooks } from './lib/test-hooks.js'
 import { buildPostCallbackAuthorizeUrl } from './lib/epds-callback-authorize.js'
+
+/* v8 ignore next 4 -- module-level init, only testable via e2e */
+const atprotoPdsPkg: { version: string } = JSON.parse(
+  readFileSync(
+    createRequire(import.meta.url).resolve('@atproto/pds/package.json'),
+    'utf8',
+  ),
+)
 
 const logger = createLogger('pds-core')
 
@@ -325,16 +339,29 @@ async function main() {
       // the HMAC-signed callback; by the time we reach here, email is the verified primary.
       const existingAccount =
         await pds.ctx.accountManager.getAccountByEmail(email)
-      let did: string | undefined = existingAccount?.did
+      // existingAccount.did is already branded DidString (ActorAccount).
+      let did: DidString | undefined = existingAccount?.did
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider Account type not exported
-      let account: any
+      let account: Account | undefined
 
       if (did) {
         // Existing account
         const accountData = await provider.accountManager.getAccount(did)
         account = accountData.account
       } else if (chosenHandle) {
+        // chosenHandle is `${localPart}.${handleDomain}`, already validated via
+        // validateLocalPart above. Brand it as HandleString for the strongly
+        // typed account APIs; a failure here means the constructed handle is
+        // malformed (a bug), so fail loudly rather than proceed.
+        if (!isValidConstructedHandle(chosenHandle)) {
+          logger.error(
+            { handle: chosenHandle },
+            'constructed handle failed validation',
+          )
+          res.status(500).send('Invalid handle')
+          return
+        }
+
         // User chose a handle — pre-check existence before attempting createAccount.
         // This avoids treating non-collision errors (datastore failures, invite-code
         // misconfiguration, etc.) as handle collisions.
@@ -373,7 +400,7 @@ async function main() {
               inviteCode: process.env.EPDS_INVITE_CODE,
             },
           )
-          did = account.sub
+          did = account.did
           logger.info(
             { did, email, handle: chosenHandle },
             'Created account with chosen handle',
@@ -413,6 +440,13 @@ async function main() {
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
             const randomHandle = generateRandomHandle(handleDomain)
+            // generateRandomHandle always yields `${local}.${domain}`; brand it
+            // for the strongly typed createAccount input.
+            if (!isValidConstructedHandle(randomHandle)) {
+              throw new Error(
+                `generated handle failed validation: ${randomHandle}`,
+              )
+            }
             account = await provider.accountManager.createAccount(
               deviceId,
               deviceMetadata,
@@ -430,7 +464,7 @@ async function main() {
                 inviteCode: process.env.EPDS_INVITE_CODE,
               },
             )
-            did = account.sub
+            did = account.did
             logger.info({ did, email, handle: randomHandle }, 'Created account')
             break
           } catch (createErr: unknown) {
@@ -444,7 +478,13 @@ async function main() {
       }
 
       // Step 4: Bind account to device session (for future SSO).
-      await provider.accountManager.upsertDeviceAccount(deviceId, account.sub)
+      if (!account) {
+        // Unreachable: every branch above either assigns account or returns/throws.
+        logger.error({ email }, 'account unexpectedly unset after resolution')
+        res.status(500).send('Account resolution failed')
+        return
+      }
+      await provider.accountManager.upsertDeviceAccount(deviceId, account.did)
 
       // Step 5: Determine whether to skip consent on sign-up.
       // Consent is skipped only when ALL of these hold:
@@ -913,7 +953,9 @@ async function main() {
   // pds-core-rendered error page and the /preview/consent shell can
   // reference the Certified favicon without a cross-origin request to
   // the auth-service host.
-  const publicDir = path.resolve(__dirname, '..', 'public')
+  // ESM has no __dirname; derive this module's directory from import.meta.url.
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url))
+  const publicDir = path.resolve(moduleDir, '..', 'public')
   pds.app.get('/favicon.ico', (_req, res) => {
     res.sendFile(path.join(publicDir, 'favicon.svg'))
   })
@@ -1006,6 +1048,11 @@ async function main() {
       res.status(400).json({ error: 'Missing handle' })
       return
     }
+    if (!canLookUpAccountByHandle(handle)) {
+      // A syntactically invalid identifier cannot match any account.
+      res.json({ email: null })
+      return
+    }
     try {
       const account = await pds.ctx.accountManager.getAccount(handle)
       res.json({ email: account?.email ?? null })
@@ -1026,6 +1073,13 @@ async function main() {
     const handle = ((req.query.handle as string) || '').trim()
     if (!handle) {
       res.status(400).json({ error: 'missing handle param' })
+      return
+    }
+    if (!canCheckHandle(handle)) {
+      // A syntactically invalid handle can never be registered, so report it as
+      // unavailable rather than "free" (which would let signup proceed and then
+      // fail at account creation).
+      res.json({ exists: true })
       return
     }
     try {
@@ -1192,6 +1246,12 @@ async function checkHandleRoute(
       return res.status(400).json({
         error: 'InvalidRequest',
         message: 'handles are not provided on this domain',
+      })
+    }
+    if (!canResolveHandle(domain)) {
+      return res.status(404).json({
+        error: 'NotFound',
+        message: 'handle not found for this domain',
       })
     }
     const account = await pds.ctx.accountManager.getAccount(domain)
