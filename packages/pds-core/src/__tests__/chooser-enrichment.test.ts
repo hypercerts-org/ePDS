@@ -2011,7 +2011,13 @@ describe('createChooserEnrichmentMiddleware handle-mode meta (HYPER-268 Layer 4)
       expect.objectContaining({ hasRequestUri: true }),
       'chooser-enrichment: failed to resolve handle mode from OAuth request context',
     )
-    expect(JSON.stringify(debug.mock.calls)).not.toContain(requestUri)
+    // JSON.stringify renders an Error as {} because message and stack are
+    // non-enumerable, which would hide a request_uri that leaked through an
+    // error message — the most likely way for it to reach the logs here.
+    const serialized = JSON.stringify(debug.mock.calls, (_key, value) =>
+      value instanceof Error ? `${value.name}: ${value.message}` : value,
+    )
+    expect(serialized).not.toContain(requestUri)
   })
 })
 
