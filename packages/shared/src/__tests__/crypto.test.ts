@@ -131,6 +131,36 @@ describe('generateRandomHandle', () => {
   })
 })
 
+function makeCallbackParams(overrides: Partial<CallbackParams> = {}) {
+  return {
+    request_uri: 'urn:ietf:params:oauth:request_uri:test',
+    email: 'alice@example.com',
+    approved: '1',
+    new_account: '1',
+    ...overrides,
+  } satisfies CallbackParams
+}
+
+function expectSignedCallbackToVerify(callbackParams: CallbackParams) {
+  const secret = 'test-secret'
+  const { sig, ts } = signCallback(callbackParams, secret)
+  expect(verifyCallback(callbackParams, ts, sig, secret)).toBe(true)
+}
+
+function expectTamperedHandleModeToFail(callbackParams: CallbackParams) {
+  const secret = 'test-secret'
+  const { sig, ts } = signCallback(callbackParams, secret)
+  expect(verifyCallback(callbackParams, ts, sig, secret)).toBe(true)
+  expect(
+    verifyCallback(
+      { ...callbackParams, epds_handle_mode: 'random' },
+      ts,
+      sig,
+      secret,
+    ),
+  ).toBe(false)
+}
+
 describe('signCallback / verifyCallback', () => {
   const secret = 'test-secret-32bytes-padding-here'
   const params: CallbackParams = {
@@ -182,11 +212,30 @@ describe('signCallback / verifyCallback', () => {
       params.new_account,
       '', // handle sentinel (absent)
       '', // client_id sentinel (absent)
+      '', // epds_handle_mode sentinel (absent)
       staleTs,
     ].join('\n')
     const { createHmac } = await import('node:crypto')
     const staleSig = createHmac('sha256', secret).update(payload).digest('hex')
     expect(verifyCallback(params, staleTs, staleSig, secret)).toBe(false)
+  })
+
+  it.each([
+    { name: 'with handle', handle: 'alice' },
+    { name: 'without handle', handle: undefined },
+  ])(
+    'signs and verifies callback with epds_handle_mode $name',
+    ({ handle }) => {
+      expectSignedCallbackToVerify(
+        makeCallbackParams({ handle, epds_handle_mode: 'picker' }),
+      )
+    },
+  )
+
+  it('rejects tampered epds_handle_mode', () => {
+    expectTamperedHandleModeToFail(
+      makeCallbackParams({ epds_handle_mode: 'picker' }),
+    )
   })
 
   it('rejects future timestamp', async () => {
@@ -198,6 +247,7 @@ describe('signCallback / verifyCallback', () => {
       params.new_account,
       '', // handle sentinel (absent)
       '', // client_id sentinel (absent)
+      '', // epds_handle_mode sentinel (absent)
       futureTs,
     ].join('\n')
     const { createHmac } = await import('node:crypto')
