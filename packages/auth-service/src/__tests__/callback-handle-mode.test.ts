@@ -117,6 +117,9 @@ function verifySignedCallbackUrl(url: URL): boolean {
     email: url.searchParams.get('email') ?? '',
     approved: url.searchParams.get('approved') ?? '',
     new_account: url.searchParams.get('new_account') ?? '',
+    // Required, not spread conditionally: a callback that omitted it
+    // must fail verification rather than be read as unverified.
+    email_verified: url.searchParams.get('email_verified') ?? '',
     ...(url.searchParams.has('handle')
       ? { handle: url.searchParams.get('handle') ?? '' }
       : {}),

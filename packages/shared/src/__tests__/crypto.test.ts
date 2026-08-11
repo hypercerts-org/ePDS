@@ -137,6 +137,8 @@ function makeCallbackParams(overrides: Partial<CallbackParams> = {}) {
     email: 'alice@example.com',
     approved: '1',
     new_account: '1',
+    // Required, so it has no sentinel — see CallbackParams.email_verified.
+    email_verified: '1',
     ...overrides,
   } satisfies CallbackParams
 }

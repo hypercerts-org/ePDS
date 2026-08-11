@@ -38,6 +38,7 @@
  * extraction pattern used by the other lib/ modules.
  */
 import type { Logger } from 'pino'
+import type { DidString } from '@atproto/syntax'
 
 /**
  * The slice of `AccountManager` this module needs. Structurally
@@ -46,8 +47,15 @@ import type { Logger } from 'pino'
  * honest without importing PDS internals.
  */
 export interface EmailConfirmingAccountManager {
-  createEmailToken: (did: string, purpose: 'confirm_email') => Promise<string>
-  confirmEmail: (opts: { did: string; token: string }) => Promise<void>
+  createEmailToken: (
+    did: DidString,
+    purpose: 'confirm_email',
+  ) => Promise<string>
+  confirmEmail: (
+    did: DidString,
+    email: string,
+    token: string,
+  ) => Promise<unknown>
 }
 
 /**
@@ -57,13 +65,20 @@ export interface EmailConfirmingAccountManager {
  * halves are public `AccountManager` operations; the token never
  * leaves this function and is deleted by `confirmEmail` as part of
  * the same transaction that records the confirmation.
+ *
+ * `email` is the address whose control was actually proved. Upstream
+ * compares it against the account's current address and throws
+ * `InvalidEmail` if they differ, so an address that changed between
+ * our check and this call is rejected rather than silently recorded
+ * as confirmed.
  */
 export async function confirmAccountEmail(
   accountManager: EmailConfirmingAccountManager,
-  did: string,
+  did: DidString,
+  email: string,
 ): Promise<void> {
   const token = await accountManager.createEmailToken(did, 'confirm_email')
-  await accountManager.confirmEmail({ did, token })
+  await accountManager.confirmEmail(did, email, token)
 }
 
 /**
@@ -87,11 +102,13 @@ export async function confirmAccountEmail(
  */
 export async function markEmailConfirmed(opts: {
   accountManager: EmailConfirmingAccountManager
-  did: string
+  did: DidString
+  /** The address whose control this sign-in proved. */
+  email: string
   logger: Pick<Logger, 'error'>
 }): Promise<void> {
   try {
-    await confirmAccountEmail(opts.accountManager, opts.did)
+    await confirmAccountEmail(opts.accountManager, opts.did, opts.email)
   } catch (err) {
     opts.logger.error(
       { err, did: opts.did },
@@ -213,7 +230,17 @@ export async function backfillEmailConfirmedAt(opts: {
   const failures: { did: string; error: string }[] = []
   for (const account of candidates) {
     try {
-      await confirmAccountEmail(opts.accountManager, account.did)
+      // needsEmailConfirmation() already excluded blank addresses, so
+      // this only narrows the type. Upstream compares the address we
+      // pass against the account's current one and rejects a mismatch,
+      // so a row whose email changed between the scan above and this
+      // call is reported as a failure rather than confirmed.
+      if (!account.email) continue
+      await confirmAccountEmail(
+        opts.accountManager,
+        account.did as DidString,
+        account.email,
+      )
       updated++
     } catch (err) {
       // One unconfirmable account must not strand the rest of the

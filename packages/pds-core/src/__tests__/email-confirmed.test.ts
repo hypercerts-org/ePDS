@@ -13,6 +13,7 @@ import {
 } from '../lib/email-confirmed.js'
 
 const DID = 'did:plc:7iza6de2dwap2sbkpav7c6c6'
+const EMAIL = 'alice@example.test'
 
 /**
  * Fake AccountManager recording the mint/redeem pair. Typed against
@@ -25,7 +26,7 @@ function makeAccountManager(
 ) {
   const calls: {
     minted: { did: string; purpose: string }[]
-    redeemed: { did: string; token: string }[]
+    redeemed: { did: string; email: string; token: string }[]
   } = { minted: [], redeemed: [] }
 
   let counter = 0
@@ -38,11 +39,14 @@ function makeAccountManager(
       calls.minted.push({ did, purpose })
       return Promise.resolve(`TOKEN-${++counter}`)
     },
-    confirmEmail: ({ did, token }) => {
+    confirmEmail: (did, email, token) => {
       if (opts.failOn === 'confirmEmail') {
         return Promise.reject(new Error('token rejected'))
       }
-      calls.redeemed.push({ did, token })
+      // Upstream rejects a mismatch between this address and the
+      // account's current one; recorded so tests can assert the
+      // proved address is what reaches it.
+      calls.redeemed.push({ did, email, token })
       return Promise.resolve()
     },
   }
@@ -54,12 +58,14 @@ describe('confirmAccountEmail', () => {
   it('redeems the token it just minted, for the same DID', async () => {
     const { accountManager, calls } = makeAccountManager()
 
-    await confirmAccountEmail(accountManager, DID)
+    await confirmAccountEmail(accountManager, DID, EMAIL)
 
     expect(calls.minted).toEqual([{ did: DID, purpose: 'confirm_email' }])
     // The token must be the minted one — redeeming anything else
     // would leave the freshly created token row behind.
-    expect(calls.redeemed).toEqual([{ did: DID, token: 'TOKEN-1' }])
+    expect(calls.redeemed).toEqual([
+      { did: DID, email: EMAIL, token: 'TOKEN-1' },
+    ])
   })
 
   it('propagates a minting failure without attempting to redeem', async () => {
@@ -67,18 +73,18 @@ describe('confirmAccountEmail', () => {
       failOn: 'createEmailToken',
     })
 
-    await expect(confirmAccountEmail(accountManager, DID)).rejects.toThrow(
-      'db down',
-    )
+    await expect(
+      confirmAccountEmail(accountManager, DID, EMAIL),
+    ).rejects.toThrow('db down')
     expect(calls.redeemed).toEqual([])
   })
 
   it('propagates a redemption failure', async () => {
     const { accountManager } = makeAccountManager({ failOn: 'confirmEmail' })
 
-    await expect(confirmAccountEmail(accountManager, DID)).rejects.toThrow(
-      'token rejected',
-    )
+    await expect(
+      confirmAccountEmail(accountManager, DID, EMAIL),
+    ).rejects.toThrow('token rejected')
   })
 })
 
@@ -87,9 +93,11 @@ describe('markEmailConfirmed', () => {
     const { accountManager, calls } = makeAccountManager()
     const logger = { error: vi.fn() }
 
-    await markEmailConfirmed({ accountManager, did: DID, logger })
+    await markEmailConfirmed({ accountManager, did: DID, email: EMAIL, logger })
 
-    expect(calls.redeemed).toEqual([{ did: DID, token: 'TOKEN-1' }])
+    expect(calls.redeemed).toEqual([
+      { did: DID, email: EMAIL, token: 'TOKEN-1' },
+    ])
     expect(logger.error).not.toHaveBeenCalled()
   })
 
@@ -100,7 +108,7 @@ describe('markEmailConfirmed', () => {
     // Must resolve, not reject — the user has already proven ownership
     // of the address, so bookkeeping failure must not fail their sign-in.
     await expect(
-      markEmailConfirmed({ accountManager, did: DID, logger }),
+      markEmailConfirmed({ accountManager, did: DID, email: EMAIL, logger }),
     ).resolves.toBeUndefined()
 
     expect(logger.error).toHaveBeenCalledTimes(1)

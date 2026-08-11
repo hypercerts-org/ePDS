@@ -544,7 +544,12 @@ async function main() {
       ) {
         await markEmailConfirmed({
           accountManager: pds.ctx.accountManager,
-          did: account.sub,
+          did: account.did,
+          // The HMAC-signed address whose control was proved — not the
+          // account's stored address. Upstream compares the two and
+          // rejects a mismatch, so an address changed since the flow
+          // began is not recorded as confirmed on this evidence.
+          email,
           logger,
         })
       }
