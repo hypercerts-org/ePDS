@@ -610,6 +610,19 @@ function aliceDeviceSession(): unknown[] {
   ]
 }
 
+/** An account with no handle yet, so only its DID can match the rendered text. */
+function handlelessDeviceSession(): unknown[] {
+  return [
+    {
+      account: {
+        sub: 'did:plc:alice',
+        email: 'alice@example.test',
+      },
+      selected: true,
+    },
+  ]
+}
+
 function appendHandleModeMeta(document: FakeDocument, mode: string): void {
   document.root.appendChild(
     new FakeElement('meta', { name: 'epds-handle-mode', content: mode }),
@@ -840,6 +853,22 @@ describe('buildChooserEnrichmentScript account row scoping', () => {
     expect(wrap.textContent).toContain('alice@example.test')
     expect(button.getAttribute('aria-label')).toBe(
       'Select account alice@example.test (@alice.test)',
+    )
+  })
+
+  it('does not present a DID as a handle in the account selector accessible name', () => {
+    const document = new FakeDocument()
+    const { button } = createAccountSelector(document, ['did:plc:alice'])
+
+    runChooserEnrichmentScript(
+      document,
+      { __sessions: [], __deviceSessions: handlelessDeviceSession() },
+      { pathname: '/account/did:plc:alice', search: '' },
+    )
+
+    // A DID is not a handle, so it must not be decorated with '@'.
+    expect(button.getAttribute('aria-label')).toBe(
+      'Select account alice@example.test (did:plc:alice)',
     )
   })
 
@@ -1114,6 +1143,36 @@ describe('buildChooserEnrichmentScript consent identity enrichment', () => {
     expect(identifier.textContent).toBe('alice@example.test')
     expect(container.textContent).toContain(ALICE_PUBLIC_HANDLE_TOOLTIP)
     expect(container.textContent).not.toContain('@@alice.test')
+  })
+
+  it('describes a DID as an identifier, not a handle, in the random consent tooltip', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'random')
+    const { container, identifier } = createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'did:plc:alice',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(document, {
+      __sessions: [
+        {
+          selected: true,
+          account: {
+            sub: 'did:plc:alice',
+            email: 'alice@example.test',
+            selected: true,
+          },
+        },
+      ],
+    })
+
+    expect(identifier.textContent).toBe('alice@example.test')
+    expect(container.textContent).toContain(
+      'Public AT Protocol identifier: did:plc:alice. This account has no handle yet, so its DID is shown instead.',
+    )
+    expect(container.textContent).not.toContain('@did:plc:alice')
   })
 
   it('enriches preview consent identity copy', () => {

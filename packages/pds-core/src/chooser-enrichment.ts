@@ -188,6 +188,32 @@ export function buildChooserEnrichmentScript(): string {
     return handle && handle.charAt(0) === '@' ? handle : '@' + handle;
   }
 
+  // matchAccountIdentifier also matches on account.sub, so the matched text
+  // can be a DID rather than a handle. '@'-prefixing a DID would assert a
+  // false identifier type, which matters most here because these strings end
+  // up in accessible names and tooltip copy.
+  function isDid(value) {
+    return value.indexOf('did:') === 0;
+  }
+
+  function publicIdentifierFor(account, matchedText) {
+    if (account.preferred_username)
+      return formatPublicHandle(account.preferred_username);
+    var trimmed = (matchedText || '').trim();
+    return isDid(trimmed) ? trimmed : formatPublicHandle(trimmed);
+  }
+
+  function publicIdentityTooltip(account, matchedText) {
+    var identifier = publicIdentifierFor(account, matchedText);
+    return isDid(identifier)
+      ? 'Public AT Protocol identifier: ' +
+          identifier +
+          '. This account has no handle yet, so its DID is shown instead.'
+      : 'Public AT Protocol handle: ' +
+          identifier +
+          '. Handles are public account names used by AT Protocol apps.';
+  }
+
   function appendAriaReference(el, attr, id) {
     var current = el.getAttribute(attr) || '';
     var refs = current ? current.split(/\s+/) : [];
@@ -316,10 +342,7 @@ export function buildChooserEnrichmentScript(): string {
 
       if (handleMode === 'random') {
         node.textContent = account.email;
-        appendIdentityInfoIcon(
-          node,
-          'Public AT Protocol handle: ' + formatPublicHandle(text) + '. Handles are public account names used by AT Protocol apps.',
-        );
+        appendIdentityInfoIcon(node, publicIdentityTooltip(account, text));
       } else {
         appendIdentityInfoIcon(
           node,
@@ -404,9 +427,7 @@ export function buildChooserEnrichmentScript(): string {
       var duplicateMatches = selectorMatches.filter(function(candidate) {
         return candidate.account === match.account;
       });
-      var publicIdentifier = match.account.preferred_username
-        ? formatPublicHandle(match.account.preferred_username)
-        : formatPublicHandle((match.text || '').trim());
+      var publicIdentifier = publicIdentifierFor(match.account, match.text);
       selector.setAttribute('aria-label', 'Select account ' + match.account.email + ' (' + publicIdentifier + ')');
       if (duplicateMatches.length > 1) {
         duplicateMatches[0].el.textContent = match.account.email;
@@ -499,9 +520,7 @@ export function buildChooserEnrichmentScript(): string {
       var anchor = accountListAnchor(m.el);
       if (!anchor || (anchor.dataset && anchor.dataset.epdsAccountListEnriched)) return;
       var ownText = (m.el.textContent || '').trim();
-      var publicIdentifier = m.account.preferred_username
-        ? formatPublicHandle(m.account.preferred_username)
-        : formatPublicHandle(ownText);
+      var publicIdentifier = publicIdentifierFor(m.account, ownText);
       var title = emptyAccountTitle(anchor);
       if (title) {
         title.textContent = m.email;
