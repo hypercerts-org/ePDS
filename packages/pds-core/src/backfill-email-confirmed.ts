@@ -27,7 +27,8 @@
  * `confirmEmail`, per AGENTS.md's account-manager boundary. Enumerating
  * the accounts to consider is the one read this script does directly,
  * under the documented exception to that rule — see "Database" in
- * AGENTS.md.
+ * AGENTS.md, and item 19 of docs/design/pds-white-boxing.md for what
+ * breaks it on an upstream bump.
  */
 import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
 import { createLogger } from '@certified-app/shared'
