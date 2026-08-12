@@ -252,8 +252,11 @@ is **not recommended for production**.
 Accounts created before email confirmation was recorded at sign-up report
 `email_verified: false` to relying parties. New accounts are recorded as
 confirmed automatically, and existing accounts are repaired the next time
-their owner signs in, so this is only needed for accounts whose owners have
-not signed in since the upgrade.
+their owner signs in **through the emailed-code flow** — repair requires a
+sign-in that proves control of the address, so an authentication method that
+does not (a passkey, say) leaves the account unconfirmed. This backfill is
+therefore needed for accounts whose owners have not signed in since the
+upgrade, and for any that sign in only by other means.
 
 Preview first:
 

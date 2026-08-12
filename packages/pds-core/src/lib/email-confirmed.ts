@@ -89,9 +89,12 @@ export async function confirmAccountEmail(
  * contract. If it fails (SQLite busy, disk error) the user has still
  * proven ownership of the address, so failing their sign-in over it
  * would be a strictly worse outcome than a stale
- * `email_verified: false` claim. The next sign-in retries — callers
- * skip already-confirmed accounts, not already-*seen* ones, so a
- * failure here is self-healing.
+ * `email_verified: false` claim. The next sign-in that proves control
+ * of the address retries — callers skip already-confirmed accounts,
+ * not already-*seen* ones. Self-healing therefore depends on the owner
+ * signing in through the emailed-code flow again; an account whose
+ * owner only ever uses another method stays unconfirmed until the
+ * operator backfill runs.
  *
  * Logged at `error`, not `warn`: swallowing the exception keeps the
  * user signed in, but the account is left claiming an unverified

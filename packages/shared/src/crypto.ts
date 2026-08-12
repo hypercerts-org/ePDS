@@ -107,8 +107,12 @@ export interface CallbackParams {
  * client_id (empty when absent), epds_handle_mode (empty when absent),
  * email_verified, and ts, joined by newlines.
  * A timestamp is included so signatures expire (see verifyCallback).
- * handle, client_id and epds_handle_mode use empty string as sentinel when absent so existing flows still produce valid signatures and so the payload shape stays stable across releases.
+ * handle, client_id and epds_handle_mode use empty string as sentinel when absent, so a flow that does not set them still produces a valid signature.
  * email_verified has no sentinel — it is required, so a caller that omits it signs a different payload and is rejected rather than being read as verified.
+ * Adding a field to this payload is a breaking change for the handover: both
+ * signer and verifier must be deployed together, since either side alone
+ * computes a different HMAC. See the rollout note in the changeset that
+ * introduced email_verified.
  */
 export function signCallback(
   params: CallbackParams,
