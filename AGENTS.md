@@ -383,6 +383,18 @@ import { AuthServiceContext } from './context.js'
   schema and crashes. Leave unused tables/columns in place; they're harmless.
 - Do **not** directly read or modify `@atproto/pds` database tables — use
   `pds.ctx.accountManager.*` methods.
+  - **One documented exception:** enumerating every account.
+    `AccountManager` exposes `getAccount`, `getAccounts(dids)` and
+    `getAccountByEmail`, all of which require knowing the identifier up
+    front, so there is no supported "list all accounts" call. A backfill
+    cannot know the DIDs in advance, so
+    `packages/pds-core/src/backfill-email-confirmed.ts` reads
+    `accountManager.db.db.selectFrom('account')` directly. This is confined
+    to that operator-invoked script — pds-core's request path must never do
+    it, and the writes it performs still go through
+    `createEmailToken` / `confirmEmail`. Re-check this on each
+    `@atproto/pds` upgrade: if upstream adds an enumeration API, switch to
+    it and delete this exception.
 
 ## Security
 

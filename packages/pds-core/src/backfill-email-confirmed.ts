@@ -24,14 +24,13 @@
  * binding a port; `start()` is never called, so nothing is served.
  *
  * Confirmation itself goes through `accountManager.createEmailToken` /
- * `confirmEmail`, per AGENTS.md's account-manager boundary. Listing
- * the accounts to consider is the one read this script does directly:
- * `AccountManager` exposes `getAccounts(dids)` but no "every account"
- * query, and a backfill cannot know the DIDs in advance. The read is
- * confined to this operator-invoked script — pds-core's request path
- * never does it.
+ * `confirmEmail`, per AGENTS.md's account-manager boundary. Enumerating
+ * the accounts to consider is the one read this script does directly,
+ * under the documented exception to that rule — see "Database" in
+ * AGENTS.md.
  */
 import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
+import { createLogger } from '@certified-app/shared'
 import {
   backfillEmailConfirmedAt,
   formatBackfillReport,
@@ -39,6 +38,8 @@ import {
   parseEmailFilter,
   type BackfillCandidate,
 } from './lib/email-confirmed.js'
+
+const logger = createLogger('pds-core:backfill-email-confirmed')
 
 async function main(): Promise<void> {
   const dryRun = parseDryRun(process.argv)
@@ -73,6 +74,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  process.stderr.write(`Backfill failed: ${String(err)}\n`)
+  logger.error({ err }, 'Email-confirmation backfill failed')
   process.exit(1)
 })
