@@ -67,6 +67,9 @@ export function createChooseHandleRouter(
       clientId: string | null
     }
     email: string
+    /** Whether this sign-in proved control of `email`; see
+     *  CallbackParams.email_verified. */
+    emailVerified: boolean
   } | null> {
     // Guard 1: auth_flow cookie
     const flowId = req.cookies[AUTH_FLOW_COOKIE] as string | undefined
@@ -144,7 +147,16 @@ export function createChooseHandleRouter(
       return null
     }
 
-    return { flowId, flow, email: session.user.email.toLowerCase() }
+    // Carried alongside the email so the signed callback can state
+    // whether this sign-in actually proved control of that address.
+    // better-auth sets emailVerified when the emailed one-time code is
+    // verified. See CallbackParams.email_verified.
+    return {
+      flowId,
+      flow,
+      email: session.user.email.toLowerCase(),
+      emailVerified: session.user.emailVerified === true,
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -245,7 +257,7 @@ export function createChooseHandleRouter(
     const result = await getFlowAndSession(req, res)
     if (!result) return
 
-    const { flowId, flow, email } = result
+    const { flowId, flow, email, emailVerified } = result
 
     // Guard: reject flows with handleMode='random' — they should skip the picker entirely
     if (flow.handleMode === 'random') {
@@ -405,6 +417,7 @@ export function createChooseHandleRouter(
       new_account: '1',
       handle: normalizedLocal,
       epds_handle_mode: flow.handleMode ?? '',
+      email_verified: emailVerified ? '1' : '0',
     }
     if (flow.clientId) callbackParams.client_id = flow.clientId
     const { sig, ts } = signCallback(

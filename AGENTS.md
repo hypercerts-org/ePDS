@@ -383,6 +383,14 @@ import { AuthServiceContext } from './context.js'
   schema and crashes. Leave unused tables/columns in place; they're harmless.
 - Do **not** directly read or modify `@atproto/pds` database tables — use
   `pds.ctx.accountManager.*` methods.
+  - **One documented exception:** enumerating every account in
+    `packages/pds-core/src/backfill-email-confirmed.ts`, because
+    `AccountManager` has no "list all accounts" call. Confined to that
+    operator-invoked script; the request path must never do it. See item 19
+    of [`docs/design/pds-white-boxing.md`](docs/design/pds-white-boxing.md)
+    for the rationale and the breakage scenario — that document is the
+    catalogue of upstream-internal dependencies, and is the list to check
+    on every `@atproto/pds` bump.
 
 ## Security
 

@@ -1,0 +1,294 @@
+/**
+ * Marks ePDS accounts as email-confirmed.
+ *
+ * Every ePDS account is created by /oauth/epds-callback, which only
+ * runs after auth-service has verified a one-time code sent to that
+ * address. The email is therefore *already* verified by the time the
+ * account row exists — but the PDS `account` table's
+ * `emailConfirmedAt` column stays null, because upstream only ever
+ * populates it from `confirmEmail()`, which consumes a
+ * `confirm_email` token that the OTP flow never mints.
+ *
+ * Leaving it null has two observable consequences:
+ *   1. `email_verified` is false in every OIDC/token claim, because
+ *      upstream's oauth-store derives it as `emailConfirmedAt != null`.
+ *      Relying parties see a verified address reported as unverified.
+ *   2. Upstream's `requestEmailUpdate` only demands a confirmation
+ *      token when `emailConfirmedAt` is set, so a null value skips
+ *      the verification gate on email change entirely.
+ *
+ * ## Why mint-then-redeem rather than writing the column
+ *
+ * AGENTS.md: "Do not directly read or modify `@atproto/pds` database
+ * tables — use `pds.ctx.accountManager.*` methods." `createEmailToken`
+ * and `confirmEmail` are both public `AccountManager` methods, and
+ * together they are exactly the supported route to a confirmed email:
+ * `confirmEmail` validates the token, deletes it, and sets
+ * `emailConfirmedAt` in a single transaction, so no token row is left
+ * behind.
+ *
+ * `createEmailToken` only inserts the row and returns the token —
+ * upstream's XRPC handlers do the mailing separately, so nothing is
+ * sent to the user here. That matters: the user already proved
+ * ownership of this address via the OTP, and a second unexpected mail
+ * would be worse than the bug being fixed.
+ *
+ * Lives in its own module so the flow can be unit-tested against a
+ * fake account manager without booting a real PDS, matching the
+ * extraction pattern used by the other lib/ modules.
+ */
+import type { Logger } from 'pino'
+import type { DidString } from '@atproto/syntax'
+
+/**
+ * The slice of `AccountManager` this module needs. Structurally
+ * compatible with the real class, so the call sites pass
+ * `pds.ctx.accountManager` directly and the fakes in tests stay
+ * honest without importing PDS internals.
+ */
+export interface EmailConfirmingAccountManager {
+  createEmailToken: (
+    did: DidString,
+    purpose: 'confirm_email',
+  ) => Promise<string>
+  confirmEmail: (
+    did: DidString,
+    email: string,
+    token: string,
+  ) => Promise<unknown>
+}
+
+/**
+ * Confirm a single account's email address.
+ *
+ * Mints a `confirm_email` token and immediately redeems it. Both
+ * halves are public `AccountManager` operations; the token never
+ * leaves this function and is deleted by `confirmEmail` as part of
+ * the same transaction that records the confirmation.
+ *
+ * `email` is the address whose control was actually proved. Upstream
+ * compares it against the account's current address and throws
+ * `InvalidEmail` if they differ, so an address that changed between
+ * our check and this call is rejected rather than silently recorded
+ * as confirmed.
+ */
+export async function confirmAccountEmail(
+  accountManager: EmailConfirmingAccountManager,
+  did: DidString,
+  email: string,
+): Promise<void> {
+  const token = await accountManager.createEmailToken(did, 'confirm_email')
+  await accountManager.confirmEmail(did, email, token)
+}
+
+/**
+ * Best-effort variant used on the sign-in hot path.
+ *
+ * The email genuinely *is* verified at this point, so recording that
+ * fact is correct — but it is bookkeeping, not part of the sign-in
+ * contract. If it fails (SQLite busy, disk error) the user has still
+ * proven ownership of the address, so failing their sign-in over it
+ * would be a strictly worse outcome than a stale
+ * `email_verified: false` claim. The next sign-in that proves control
+ * of the address retries — callers skip already-confirmed accounts,
+ * not already-*seen* ones. Self-healing therefore depends on the owner
+ * signing in through the emailed-code flow again; an account whose
+ * owner only ever uses another method stays unconfirmed until the
+ * operator backfill runs.
+ *
+ * Logged at `error`, not `warn`: swallowing the exception keeps the
+ * user signed in, but the account is left claiming an unverified
+ * address to every relying party until some later sign-in happens to
+ * succeed — and the operator has no other signal that it happened.
+ * Self-healing is not the same as harmless, so this should reach
+ * error-level alerting rather than sit quietly in the logs.
+ */
+export async function markEmailConfirmed(opts: {
+  accountManager: EmailConfirmingAccountManager
+  did: DidString
+  /** The address whose control this sign-in proved. */
+  email: string
+  logger: Pick<Logger, 'error'>
+}): Promise<void> {
+  try {
+    await confirmAccountEmail(opts.accountManager, opts.did, opts.email)
+  } catch (err) {
+    opts.logger.error(
+      { err, did: opts.did },
+      'Failed to record email confirmation after OTP-verified sign-in',
+    )
+  }
+}
+
+/** An account as far as the backfill is concerned. */
+export interface BackfillCandidate {
+  did: string
+  email?: string | null
+  emailConfirmedAt?: string | null
+}
+
+/** True when this account has a real address that is not yet confirmed. */
+export function needsEmailConfirmation(
+  account: Pick<BackfillCandidate, 'email' | 'emailConfirmedAt'> | null,
+): boolean {
+  if (!account) return false
+  // An account with no address has nothing to confirm — upstream
+  // reports `email_verified` as undefined rather than false for those.
+  if (!account.email) return false
+  return !account.emailConfirmedAt
+}
+
+/**
+ * Case-insensitive substring match on the address, so an operator can
+ * scope a backfill run to a domain (`@gmail.com`) or a single account
+ * (`my.account@yahoo.com`) instead of the whole table.
+ *
+ * An empty or absent filter matches everything — "no filter given"
+ * must mean "all accounts", never "none", or a mistyped invocation
+ * would silently do nothing and look like a clean run.
+ */
+export function matchesEmailFilter(
+  email: string | null | undefined,
+  filter?: string,
+): boolean {
+  if (!filter) return true
+  if (!email) return false
+  return email.toLowerCase().includes(filter.toLowerCase())
+}
+
+/**
+ * The first non-flag argument, treated as the address filter.
+ * Returns undefined when the operator passed only flags.
+ */
+export function parseEmailFilter(argv: readonly string[]): string | undefined {
+  // argv[0] is the node binary and argv[1] the script path; anything
+  // further that is not a flag is the filter.
+  return argv.slice(2).find((a) => !a.startsWith('-'))
+}
+
+export interface BackfillResult {
+  /** Accounts found needing confirmation. */
+  candidates: number
+  /** Accounts confirmed successfully. */
+  updated: number
+  /** Accounts that failed to confirm; see `failures`. */
+  failed: number
+  /** DIDs that failed, with the reason, for the operator to chase. */
+  failures: { did: string; error: string }[]
+  /** True when no write was attempted. */
+  dryRun: boolean
+}
+
+/**
+ * One-off backfill for accounts created before this fix landed, whose
+ * email was verified by OTP but never recorded as confirmed.
+ *
+ * Deliberately NOT run automatically at startup. Whether a null
+ * `emailConfirmedAt` means "verified via OTP but never recorded" or
+ * "genuinely never verified" depends on how a given deployment was
+ * operated — ePDS does not block upstream's
+ * `com.atproto.server.createAccount` XRPC route, so an operator who
+ * provisioned accounts by other means must not have those addresses
+ * silently promoted to verified. Only the operator knows which case
+ * applies, so this is exposed as a script they choose to run.
+ *
+ * Confirms one account at a time via the public API rather than a
+ * single set-based UPDATE. That is more round-trips, but it keeps to
+ * the account-manager boundary and lets one bad row be reported
+ * without abandoning the rest of the run.
+ *
+ * Idempotent — already-confirmed accounts are skipped, so re-running
+ * is a no-op. Use `dryRun` to report the candidate count without
+ * writing.
+ */
+export async function backfillEmailConfirmedAt(opts: {
+  accountManager: EmailConfirmingAccountManager
+  /** Every account to consider, typically the full account list. */
+  accounts: readonly BackfillCandidate[]
+  /**
+   * Optional case-insensitive substring match on the address, so a run
+   * can be scoped to a domain or a single account. Absent means all.
+   */
+  emailFilter?: string
+  dryRun?: boolean
+}): Promise<BackfillResult> {
+  const dryRun = opts.dryRun ?? false
+  const candidates = opts.accounts.filter(
+    (a) =>
+      needsEmailConfirmation(a) &&
+      matchesEmailFilter(a.email, opts.emailFilter),
+  )
+
+  if (dryRun || candidates.length === 0) {
+    return {
+      candidates: candidates.length,
+      updated: 0,
+      failed: 0,
+      failures: [],
+      dryRun,
+    }
+  }
+
+  let updated = 0
+  const failures: { did: string; error: string }[] = []
+  for (const account of candidates) {
+    try {
+      // needsEmailConfirmation() already excluded blank addresses, so
+      // this only narrows the type. Upstream compares the address we
+      // pass against the account's current one and rejects a mismatch,
+      // so a row whose email changed between the scan above and this
+      // call is reported as a failure rather than confirmed.
+      if (!account.email) continue
+      await confirmAccountEmail(
+        opts.accountManager,
+        account.did as DidString,
+        account.email,
+      )
+      updated++
+    } catch (err) {
+      // One unconfirmable account must not strand the rest of the
+      // run; collect and report instead.
+      failures.push({
+        did: account.did,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
+  return {
+    candidates: candidates.length,
+    updated,
+    failed: failures.length,
+    failures,
+    dryRun,
+  }
+}
+
+/** True when the operator asked to preview rather than write. */
+export function parseDryRun(argv: readonly string[]): boolean {
+  return argv.includes('--dry-run')
+}
+
+/**
+ * The line the backfill script prints on completion. Split out from
+ * the script so the wording is covered by tests — the script itself
+ * is an entry point and never imported by one.
+ */
+export function formatBackfillReport(
+  result: BackfillResult,
+  location: string,
+  emailFilter?: string,
+): string {
+  // Name the filter in the output: a scoped run and an
+  // everything-matched run otherwise look identical, and an operator
+  // reading "0 account(s)" needs to know whether that means "none left
+  // to do" or "your filter matched nothing".
+  const scope = emailFilter ? `${location} matching "${emailFilter}"` : location
+  if (result.dryRun) {
+    return `[dry run] ${result.candidates} account(s) in ${scope} would be marked email-confirmed.`
+  }
+  const base = `Marked ${result.updated} account(s) in ${scope} as email-confirmed.`
+  if (result.failed === 0) return base
+  const detail = result.failures.map((f) => `  ${f.did}: ${f.error}`).join('\n')
+  return `${base}\n${result.failed} account(s) could not be confirmed:\n${detail}`
+}

@@ -57,7 +57,10 @@ The call assumes:
 - A real password string is **required** — passing `undefined` skips
   `registerAccount()` internally, leaving the `account` table empty and
   breaking `upsertDeviceAccount()` FK constraints
-- Returns an `Account` object with a `.sub` property (the DID)
+- Returns an `Account` object carrying the DID. **This has already broken
+  once:** the property was `.sub` up to `@atproto/pds` 0.4.x and is `.did`
+  as of 0.5.23. Call sites were updated in the upgrade; a future rename
+  would break them again.
 
 The `Account` type is not exported, so the return value is typed `any`.
 
@@ -136,6 +139,45 @@ Methods accessed on the PDS-level account manager:
 `pds.ctx.accountManager` (PDS-level, manages the SQLite account table) and
 `provider.accountManager` (OAuth-provider-level, manages OAuth sessions).
 The code assumes these are kept in sync by the upstream PDS.
+
+### 19. Direct `account` table read in the email-confirmation backfill
+
+**File:** `packages/pds-core/src/backfill-email-confirmed.ts`
+
+```ts
+const accounts: BackfillCandidate[] = await pds.ctx.accountManager.db.db
+  .selectFrom('account')
+  .select(['did', 'email', 'emailConfirmedAt'])
+  .execute()
+```
+
+This reaches past the `accountManager` methods catalogued in item 6 and
+queries upstream's SQLite `account` table directly, via the nested
+`.db.db` Kysely instance. It is the only place in the codebase that does
+so, and it is the documented exception to AGENTS.md's "do not directly
+read or modify `@atproto/pds` database tables" rule.
+
+**Why there is no supported alternative:** as of `@atproto/pds` 0.5.23,
+`AccountManager` exposes `getAccount(handleOrDid)`,
+`getAccounts(dids)` and `getAccountByEmail(email)` — every one of which
+requires knowing the identifier up front. There is no "list all accounts"
+query, and a backfill cannot know the DIDs in advance. Adding a wrapper
+helper would relocate the same raw query rather than remove it.
+
+**Scope of the exposure:** confined to an operator-invoked one-off script.
+pds-core's request path never does this, and the _writes_ still go through
+the public `createEmailToken` / `confirmEmail` pair (see item 6).
+
+**Breakage scenario:** upstream renames the `account` table or the `did` /
+`email` / `emailConfirmedAt` columns, or restructures `AccountDb` so
+`accountManager.db.db` is no longer a Kysely instance. The backfill script
+fails — loudly, at run time, in an operator's terminal rather than in a
+user-facing path. Lowest-consequence failure of anything in this document,
+but it fails with no type-checking safety net, since `.db.db` is untyped
+at this depth.
+
+**If upstream ever adds an enumeration API**, switch to it and delete both
+this entry and the exception in AGENTS.md's "Database" section.
 
 ### 7. `provider.deviceManager.load()`
 

@@ -72,6 +72,10 @@ import { createUpstreamFaviconMiddleware } from './upstream-favicon.js'
 import { createAuthUiGuard, parsePromptTokens } from './auth-ui-guard.js'
 import { loadDeviceAccountEmails } from './lib/device-accounts.js'
 import { handleCallbackError } from './lib/epds-callback-error.js'
+import {
+  markEmailConfirmed,
+  needsEmailConfirmation,
+} from './lib/email-confirmed.js'
 import { installTestHooks } from './lib/test-hooks.js'
 import { buildPostCallbackAuthorizeUrl } from './lib/epds-callback-authorize.js'
 
@@ -218,9 +222,33 @@ async function main() {
 
     const approvedStr = req.query.approved as string
     const newAccountStr = req.query.new_account as string
+    // Whether auth-service is claiming this sign-in proved control of
+    // `email`. Part of the HMAC payload, so it cannot be forged or
+    // stripped: a callback without it fails verifyCallback outright.
+    const emailVerifiedStr = req.query.email_verified as string
     const handleParam = req.query.handle as string | undefined
     const clientIdParam = req.query.client_id as string | undefined
     const handleModeParam = req.query.epds_handle_mode as string | undefined
+
+    // Reject a missing or malformed email_verified before signature
+    // verification. The signature check would catch it anyway — the
+    // field is inside the HMAC — but it would surface as "Invalid
+    // callback signature", which sends an operator hunting for a
+    // secret mismatch during what is actually a mixed-version rollout
+    // (an auth-service too old to send the field). Say what is
+    // actually wrong instead.
+    if (emailVerifiedStr !== '0' && emailVerifiedStr !== '1') {
+      logger.warn(
+        { emailVerified: emailVerifiedStr },
+        'epds-callback missing or invalid email_verified — auth-service too old, or a hand-built callback',
+      )
+      res.status(400).json({
+        error:
+          'Missing or invalid email_verified parameter (expected "0" or "1")',
+      })
+      return
+    }
+
     const signatureValid = verifyCallback(
       {
         request_uri: requestUri,
@@ -230,6 +258,7 @@ async function main() {
         handle: handleParam,
         client_id: clientIdParam,
         epds_handle_mode: handleModeParam,
+        email_verified: emailVerifiedStr,
       },
       ts,
       sig,
@@ -485,6 +514,45 @@ async function main() {
         return
       }
       await provider.accountManager.upsertDeviceAccount(deviceId, account.did)
+
+      // Step 4b: Record that the email is confirmed, but only when
+      // auth-service explicitly claims this sign-in proved control of
+      // `email`. Upstream only records confirmation via confirmEmail()'s
+      // token flow, so without this the address stays marked unverified
+      // forever.
+      //
+      // The claim is read from the signed callback rather than inferred
+      // from "a valid callback arrived". Only the authenticating service
+      // knows *how* the user authenticated: today that is always an
+      // emailed one-time code, but a passkey or similar flow would
+      // legitimately send a signed callback carrying `email` merely to
+      // locate the account, having proved nothing about that address.
+      // Inferring verification here would assert `email_verified: true`
+      // to relying parties on no evidence, and would engage the
+      // email-change verification gate on an unproven address.
+      //
+      // Keyed on whether the account is *confirmed*, not on whether it
+      // is new: a returning user whose earlier confirmation failed
+      // (or who predates this code) is repaired on their next sign-in
+      // rather than waiting for the backfill script. Already-confirmed
+      // accounts skip it, so the common case costs no writes.
+      // Best-effort: never fails the sign-in.
+      const emailProven = emailVerifiedStr === '1'
+      if (
+        emailProven &&
+        (!existingAccount || needsEmailConfirmation(existingAccount))
+      ) {
+        await markEmailConfirmed({
+          accountManager: pds.ctx.accountManager,
+          did: account.did,
+          // The HMAC-signed address whose control was proved — not the
+          // account's stored address. Upstream compares the two and
+          // rejects a mismatch, so an address changed since the flow
+          // began is not recorded as confirmed on this evidence.
+          email,
+          logger,
+        })
+      }
 
       // Step 5: Determine whether to skip consent on sign-up.
       // Consent is skipped only when ALL of these hold:
