@@ -24,7 +24,7 @@ export default defineConfig({
       // See AGENTS.md for the ratcheting policy.
       thresholds: {
         statements: 58,
-        branches: 57,
+        branches: 58,
         functions: 71,
         lines: 57,
       },
