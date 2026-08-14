@@ -53,6 +53,7 @@ import {
   requireEnv,
 } from '@certified-app/shared'
 import { shouldRewriteSecFetchSite } from './lib/sec-fetch-site-rewrite.js'
+import { isReservedServiceHandle } from './lib/reserved-handle.js'
 import {
   findInsertionIndex,
   installCssInjectionMiddleware,
@@ -1152,7 +1153,14 @@ async function main() {
     }
     try {
       const account = await pds.ctx.accountManager.getAccount(handle)
-      res.json({ exists: !!account })
+      const reserved = isReservedServiceHandle(
+        handle,
+        pds.ctx.cfg.identity.serviceHandleDomains,
+      )
+      // `exists` is the endpoint's historical name for "unavailable".
+      // Include upstream-reserved handles so the picker cannot promise a
+      // handle which account creation will reject moments later.
+      res.json({ exists: !!account || reserved })
     } catch (err) {
       logger.error({ err, handle }, 'Failed to check handle availability')
       res.status(503).json({ error: 'handle_check_failed' })
