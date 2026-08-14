@@ -403,6 +403,14 @@ Feature: Passwordless authentication via email OTP
     When the user clicks "Use different email"
     Then the email input is empty and focused
 
+  # Direct visits to /oauth/authorize have no active request. Explain
+  # how to restart instead of exposing the internal request_uri field.
+  @stale-link
+  Scenario: Direct visit to /oauth/authorize surfaces a friendly explanation
+    When the user navigates directly to the authorize page without an active sign-in
+    Then the page explains that sign-in has to start from the app
+    And the page does not mention the technical field name "request_uri"
+
   @email @demo-cookie-expiry @bug-report
   Scenario: Demo client's OAuth cookie has expired by the time of callback — useful error, not generic auth_failed
     When the demo client starts a new OAuth flow with random handle mode
