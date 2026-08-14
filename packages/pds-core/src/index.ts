@@ -981,7 +981,9 @@ async function main() {
 
   const chooserEnrichmentMiddleware = createChooserEnrichmentMiddleware({
     resolveClientMetadata,
+    resolveClientIdFromRequestUri,
     authOrigin,
+    logger,
   })
 
   pds.app.use(chooserEnrichmentMiddleware)

@@ -9,6 +9,7 @@
 
 import { Given, Then, When } from '@cucumber/cucumber'
 import { expect } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import type { EpdsWorld } from '../support/world.js'
 import { testEnv } from '../support/env.js'
 import {
@@ -34,6 +35,66 @@ import { fillOtp } from '../support/otp.js'
 
 // Note: When('the user clicks {string}') lives in common.steps.ts — it is a
 // generic UI interaction step used here for "Authorize" and "Deny access" buttons.
+
+function requireScenarioEmail(world: EpdsWorld): string {
+  if (!world.testEmail) {
+    throw new Error(
+      'No test email set — "a returning user has a PDS account" step must run first',
+    )
+  }
+  return world.testEmail
+}
+
+function requireScenarioHandle(world: EpdsWorld): string {
+  if (!world.userHandle) {
+    throw new Error(
+      'No user handle set — "a returning user has a PDS account" step must run first',
+    )
+  }
+  return world.userHandle
+}
+
+function formatPublicHandle(handle: string): string {
+  return handle.startsWith('@') ? handle : `@${handle}`
+}
+
+function formatRawPublicHandle(handle: string): string {
+  return handle.startsWith('@') ? handle.slice(1) : handle
+}
+
+function escapeRegex(value: string): string {
+  return value.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)
+}
+
+async function openIdentityTooltip(page: Page): Promise<Locator> {
+  // .first(): enrichment walks every matching identity node, so a consent
+  // page rendering more than one approved phrasing ("Grant access to your
+  // X account" / "... wants to access your X account") gets an icon on
+  // each. Without this the locator resolves to several elements and
+  // Playwright throws a strict-mode error. Each icon carries its own
+  // aria-describedby, so asserting against the first is well-defined.
+  const tooltipControl = page
+    .getByRole('main')
+    .getByRole('button', { name: 'Identity information' })
+    .first()
+
+  await expect(tooltipControl).toHaveAttribute('type', 'button')
+  await expect(tooltipControl).toHaveAttribute('aria-expanded', 'false')
+  const describedBy = await tooltipControl.getAttribute('aria-describedby')
+  expect(describedBy?.trim()).toBeTruthy()
+  if (!describedBy?.trim()) {
+    throw new Error('Expected aria-describedby to reference a tooltip')
+  }
+  const [tooltipId] = describedBy.trim().split(/\s+/)
+
+  await tooltipControl.click()
+  await expect(tooltipControl).toHaveAttribute('aria-expanded', 'true')
+
+  const tooltip = page.locator(`#${tooltipId}`)
+  await expect(tooltip).toHaveAttribute('role', 'tooltip')
+  await expect(tooltip).toBeVisible()
+  return tooltip
+}
 
 Then('a consent screen is displayed', async function (this: EpdsWorld) {
   const page = getPage(this)
@@ -100,6 +161,80 @@ When(
     if (!testEnv.demoUntrustedUrl) return 'pending'
     const page = getPage(this)
     await page.goto(testEnv.demoUntrustedUrl)
+  },
+)
+
+When(
+  'the untrusted demo client starts a new OAuth flow with random handle mode',
+  async function (this: EpdsWorld) {
+    if (!testEnv.demoUntrustedUrl) return 'pending'
+    const page = getPage(this)
+    const base = testEnv.demoUntrustedUrl.replace(/\/$/, '')
+    await page.goto(`${base}/flow3`)
+    await page.click('button[type=submit]')
+  },
+)
+
+Then(
+  'the consent page shows the email as the primary account identifier',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    const scenarioEmail = requireScenarioEmail(this)
+    const grantAccessText = /\bGrant\s+access\s+to\s+your\b/
+    const accountCardText = /\bwants\s+to\s+access\s+your\b/
+    const grantAccessParagraph = page.getByText(grantAccessText).first()
+    const accountCard = page
+      .getByRole('main')
+      .getByText(accountCardText)
+      .first()
+
+    await expect(grantAccessParagraph).toBeVisible()
+    await expect(grantAccessParagraph).toContainText(scenarioEmail)
+    await expect(accountCard).toBeVisible()
+    await expect(accountCard).toContainText(scenarioEmail)
+  },
+)
+
+Then(
+  'the consent identity tooltip exposes the public AT Protocol handle',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    const publicHandle = formatPublicHandle(requireScenarioHandle(this))
+    const tooltip = await openIdentityTooltip(page)
+    await expect(tooltip).toContainText('Public AT Protocol handle:')
+    await expect(tooltip).toContainText(publicHandle)
+  },
+)
+
+Then(
+  'the consent identity tooltip exposes the account email',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    const scenarioEmail = requireScenarioEmail(this)
+    const tooltip = await openIdentityTooltip(page)
+    await expect(tooltip).toContainText('This handle is associated with')
+    await expect(tooltip).toContainText(scenarioEmail)
+  },
+)
+
+Then(
+  'the public handle is not shown as the primary consent identifier',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    const scenarioHandle = requireScenarioHandle(this)
+    const primaryHandlePatterns = [
+      formatPublicHandle(scenarioHandle),
+      formatRawPublicHandle(scenarioHandle),
+    ].map(
+      (publicHandle) =>
+        new RegExp(
+          String.raw`\byour\s+${escapeRegex(publicHandle)}\s+account\b`,
+        ),
+    )
+
+    for (const primaryHandlePattern of primaryHandlePatterns) {
+      await expect(page.getByText(primaryHandlePattern)).toHaveCount(0)
+    }
   },
 )
 

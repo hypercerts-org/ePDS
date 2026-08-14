@@ -33,13 +33,7 @@
  * value-add is showing email beside (or instead of) handle, so a
  * preview without emails would have nothing to demonstrate.
  */
-import {
-  escapeHtml,
-  resolveHandleMode,
-  VALID_HANDLE_MODES,
-  type ClientMetadata,
-  type HandleMode,
-} from '@certified-app/shared'
+import { escapeHtml, type HandleMode } from '@certified-app/shared'
 import {
   buildChooserEnrichmentScript,
   escapeHtmlAttr,
@@ -53,6 +47,7 @@ import {
   readClientIdQuery,
   renderHydration,
   resolveClientForPreview,
+  resolveQueryHandleMode,
   type PreviewAuthorizeFixture,
   type PreviewMetadataDeps,
   type RequestLike,
@@ -175,27 +170,6 @@ function parseNumAccounts(raw: unknown): number {
   // let the upstream SPA fall through to its no-session welcome view — a
   // surface ePDS exists to suppress, so it must never leak via the preview.
   return Math.min(MAX_FIXTURE_ACCOUNTS, Math.max(1, n))
-}
-
-function resolveQueryHandleMode(
-  req: RequestLike,
-  metadata: ClientMetadata,
-): HandleMode {
-  // Resolve handle-mode the same way the real chooserEnrichment
-  // middleware does: query > client metadata > env default. Same
-  // override name (epds_handle_mode) so the index dropdown exercises
-  // the production resolver path verbatim.
-  const queryMode =
-    typeof req.query.epds_handle_mode === 'string'
-      ? req.query.epds_handle_mode
-      : undefined
-  const rawMetaMode = metadata.epds_handle_mode
-  const metaMode =
-    typeof rawMetaMode === 'string' &&
-    (VALID_HANDLE_MODES as readonly string[]).includes(rawMetaMode)
-      ? rawMetaMode
-      : undefined
-  return resolveHandleMode(queryMode, metaMode)
 }
 
 /**

@@ -79,7 +79,7 @@ Feature: Welcome-page guard suppresses upstream's authentication UI
     When the demo client starts a new OAuth flow with random handle mode
     Then the browser lands on the ePDS enriched account picker
     And the enriched account picker renders without the handle visible
-    And each row exposes the handle only via a title tooltip
+    And each row exposes the hidden handle through an accessible description
     And the email remains visible as the primary identifier
 
   @pending

@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm'
 import { describe, expect, it, vi } from 'vitest'
 import {
   appendScriptHashToCsp,
@@ -27,6 +28,1396 @@ describe('buildChooserEnrichmentScript (HYPER-268)', () => {
 
   it('is deterministic', () => {
     expect(buildChooserEnrichmentScript()).toBe(buildChooserEnrichmentScript())
+  })
+})
+
+class FakeTextNode {
+  readonly nodeType = 3
+
+  constructor(readonly data: string) {}
+}
+
+class FakeClassList {
+  private readonly classes = new Set<string>()
+
+  add(className: string): void {
+    this.classes.add(className)
+  }
+
+  contains(className: string): boolean {
+    return this.classes.has(className)
+  }
+
+  set(value: string): void {
+    this.classes.clear()
+    for (const className of value.split(/\s+/)) {
+      if (className) this.classes.add(className)
+    }
+  }
+}
+
+class FakeElement {
+  readonly nodeType = 1
+  readonly childNodes: Array<FakeElement | FakeTextNode> = []
+  readonly dataset: Record<string, string> = {}
+  readonly classList = new FakeClassList()
+  readonly style: Record<string, string> = {}
+  id = ''
+  hidden = false
+  type = ''
+  parentElement: FakeElement | null = null
+  textContentOverride: string | null = null
+  private readonly eventListeners = new Map<
+    string,
+    Array<(event: FakeEvent) => void>
+  >()
+
+  constructor(
+    readonly tagName: string,
+    private readonly attributes: Record<string, string> = {},
+  ) {}
+
+  appendChild(child: FakeElement | FakeTextNode): void {
+    if (child instanceof FakeElement) {
+      child.parentElement = this
+    }
+    this.childNodes.push(child)
+  }
+
+  insertAdjacentElement(position: string, element: FakeElement): void {
+    if (position !== 'afterend' || !this.parentElement) return
+    const siblings = this.parentElement.childNodes
+    const index = siblings.indexOf(this)
+    if (index === -1) return
+    element.parentElement = this.parentElement
+    siblings.splice(index + 1, 0, element)
+  }
+
+  set textContent(value: string) {
+    this.textContentOverride = value
+  }
+
+  set className(value: string) {
+    this.classList.set(value)
+  }
+
+  setAttribute(name: string, value: string): void {
+    this.attributes[name] = value
+    if (name === 'id') this.id = value
+  }
+
+  getAttribute(name: string): string | null {
+    return this.attributes[name] ?? null
+  }
+
+  get textContent(): string {
+    if (this.textContentOverride !== null) return this.textContentOverride
+    return this.childNodes
+      .map((child) =>
+        child instanceof FakeTextNode ? child.data : child.textContent,
+      )
+      .join('')
+  }
+
+  closest(selector: string): FakeElement | null {
+    if (selector === 'a') {
+      if (this.tagName === 'a') return this
+
+      let current = this.parentElement
+      while (current) {
+        if (current.tagName === 'a') return current
+        current = current.parentElement
+      }
+      return null
+    }
+
+    if (selector !== '[role="button"][tabindex="0"]') return null
+
+    if (this.attributes.role === 'button' && this.attributes.tabindex === '0') {
+      return this
+    }
+
+    let current = this.parentElement
+    while (current) {
+      if (
+        current.attributes.role === 'button' &&
+        current.attributes.tabindex === '0'
+      ) {
+        return current
+      }
+      current = current.parentElement
+    }
+    return null
+  }
+
+  addEventListener(event: string, listener: (event: FakeEvent) => void): void {
+    const listeners = this.eventListeners.get(event) ?? []
+    listeners.push(listener)
+    this.eventListeners.set(event, listeners)
+  }
+
+  dispatchEvent(eventName: string, init: { key?: string } = {}): FakeEvent {
+    const event = new FakeEvent(init.key)
+    for (const listener of this.eventListeners.get(eventName) ?? []) {
+      listener(event)
+    }
+    return event
+  }
+
+  querySelectorAll(selector: string): FakeElement[] {
+    const descendants = this.descendants()
+    if (selector === 'button, a') {
+      return descendants.filter(
+        (el) => el.tagName === 'button' || el.tagName === 'a',
+      )
+    }
+    if (selector === '[role="button"]') {
+      return descendants.filter((el) => el.attributes.role === 'button')
+    }
+    if (selector === 'h2') {
+      return descendants.filter((el) => el.tagName === 'h2')
+    }
+    return []
+  }
+
+  querySelector(selector: string): FakeElement | null {
+    if (
+      selector ===
+      '[role="button"][aria-label="Login to account that is not listed"]'
+    ) {
+      return (
+        this.descendants().find(
+          (el) =>
+            el.attributes.role === 'button' &&
+            el.attributes['aria-label'] ===
+              'Login to account that is not listed',
+        ) ?? null
+      )
+    }
+    if (selector === 'meta[name="epds-handle-mode"]') {
+      return (
+        this.descendants().find(
+          (el) =>
+            el.tagName === 'meta' && el.attributes.name === 'epds-handle-mode',
+        ) ?? null
+      )
+    }
+    if (selector === 'meta[name="epds-auth-origin"]') {
+      return (
+        this.descendants().find(
+          (el) =>
+            el.tagName === 'meta' && el.attributes.name === 'epds-auth-origin',
+        ) ?? null
+      )
+    }
+    return null
+  }
+
+  descendants(): FakeElement[] {
+    const result: FakeElement[] = []
+    const visit = (node: FakeElement): void => {
+      for (const child of node.childNodes) {
+        if (child instanceof FakeElement) {
+          result.push(child)
+          visit(child)
+        }
+      }
+    }
+    visit(this)
+    return result
+  }
+}
+
+class FakeEvent {
+  defaultPrevented = false
+  propagationStopped = false
+
+  constructor(readonly key?: string) {}
+
+  preventDefault(): void {
+    this.defaultPrevented = true
+  }
+
+  stopPropagation(): void {
+    this.propagationStopped = true
+  }
+}
+
+class FakeDocument {
+  readonly root = new FakeElement('div', { id: 'root' })
+  readyState = 'loading'
+  private domContentLoadedListener: (() => void) | null = null
+
+  get documentElement(): FakeElement {
+    return this.root
+  }
+
+  getElementById(id: string): FakeElement | null {
+    return id === 'root' ? this.root : null
+  }
+
+  /**
+   * Deliberate divergence from the browser: this snapshots the descendant
+   * list up front, whereas a real TreeWalker is live. The enrichment script
+   * inserts icons, tooltips and email labels *while* walking, so a browser
+   * walker visits those inserted nodes and this fake does not.
+   *
+   * Benign today because nothing the script inserts can match
+   * isConsentIdentityElement() (which requires a <b>/<strong> in an approved
+   * consent phrasing) or matchAccountIdentifier(). If either ever loosens,
+   * this fake would hide the resulting re-entrancy, so make it live rather
+   * than trusting that the tests still cover the browser's behaviour.
+   */
+  createTreeWalker(root: FakeElement): { nextNode: () => FakeElement | null } {
+    const elements = root.descendants()
+    let index = 0
+    return {
+      nextNode: () => elements[index++] ?? null,
+    }
+  }
+
+  createElement(tagName: string): FakeElement {
+    return new FakeElement(tagName)
+  }
+
+  querySelector(selector: string): FakeElement | null {
+    return this.root.querySelector(selector)
+  }
+
+  addEventListener(event: string, listener: () => void): void {
+    if (event === 'DOMContentLoaded') this.domContentLoadedListener = listener
+  }
+
+  dispatchDOMContentLoaded(): void {
+    this.readyState = 'complete'
+    this.domContentLoadedListener?.()
+  }
+}
+
+function appendText(parent: FakeElement, text: string): void {
+  parent.appendChild(new FakeTextNode(text))
+}
+
+const DEFAULT_CHOOSER_LOCATION = {
+  pathname: '/oauth/authorize',
+  search: '',
+}
+
+const ALICE_ASSOCIATED_TOOLTIP =
+  'This handle is associated with alice@example.test.'
+const ASSOCIATED_TOOLTIP_PREFIX = 'This handle is associated'
+const ALICE_PUBLIC_HANDLE_TOOLTIP =
+  'Public AT Protocol handle: @alice.test. Handles are public account names used by AT Protocol apps.'
+const EMAIL_LABEL_CLASS = 'epds-email-label'
+const HIDDEN_HANDLE_DESCRIPTION_CLASS = 'epds-hidden-handle-description'
+const IDENTITY_INFO_ICON_CLASS = 'epds-identity-info-icon'
+const IDENTITY_TOOLTIP_CLASS = 'epds-identity-tooltip'
+
+function findChildWithClass(
+  parent: FakeElement,
+  className: string,
+): FakeElement | undefined {
+  return parent.childNodes.find(
+    (child) =>
+      child instanceof FakeElement && child.classList.contains(className),
+  ) as FakeElement | undefined
+}
+
+function findEmailLabel(parent: FakeElement): FakeElement | undefined {
+  return findChildWithClass(parent, EMAIL_LABEL_CLASS)
+}
+
+function findHiddenHandleDescription(
+  parent: FakeElement,
+): FakeElement | undefined {
+  return findChildWithClass(parent, HIDDEN_HANDLE_DESCRIPTION_CLASS)
+}
+
+function findDescendantsWithClass(
+  parent: FakeElement,
+  className: string,
+): FakeElement[] {
+  return parent.descendants().filter((el) => el.classList.contains(className))
+}
+
+function expectConsentTooltip(
+  container: FakeElement,
+  expectedText: string,
+): void {
+  const icon = findChildWithClass(container, IDENTITY_INFO_ICON_CLASS)
+  const tooltip = findChildWithClass(container, IDENTITY_TOOLTIP_CLASS)
+
+  expect(icon).toBeInstanceOf(FakeElement)
+  expect(icon?.tagName).toBe('button')
+  expect(icon?.getAttribute('aria-describedby')).toBe(tooltip?.id)
+  expect(tooltip?.textContent).toBe(expectedText)
+}
+
+function expectConsentTooltipTexts(
+  document: FakeDocument,
+  expectedTexts: string[],
+): void {
+  const icons = findDescendantsWithClass(
+    document.root,
+    IDENTITY_INFO_ICON_CLASS,
+  )
+  const tooltips = findDescendantsWithClass(
+    document.root,
+    IDENTITY_TOOLTIP_CLASS,
+  )
+
+  expect(icons).toHaveLength(expectedTexts.length)
+  expect(tooltips.map((tooltip) => tooltip.textContent)).toEqual(expectedTexts)
+}
+
+function runChooserEnrichmentScript(
+  document: FakeDocument,
+  globals: {
+    __sessions?: unknown[]
+    __deviceSessions?: unknown[]
+    // Opt-in hook receiving the script's MutationObserver callback, so a
+    // test can replay a re-render tick the way the real SPA would.
+    onObserve?: (tick: () => void) => void
+  } = {},
+  location: { pathname: string; search?: string } = DEFAULT_CHOOSER_LOCATION,
+): void {
+  const fakeWindow: Record<string, unknown> = {
+    location,
+  }
+  const onObserve = globals.onObserve
+  const sandbox = {
+    document,
+    MutationObserver: class {
+      observed = false
+
+      constructor(private readonly tick: () => void) {}
+
+      observe(): void {
+        this.observed = true
+        onObserve?.(this.tick)
+      }
+    },
+    Node: { TEXT_NODE: 3 },
+    NodeFilter: { SHOW_ELEMENT: 1 },
+    URLSearchParams,
+    window: fakeWindow,
+  }
+
+  runInNewContext(buildChooserEnrichmentScript(), sandbox) // NOSONAR — test executes only the deterministic script generated in this repository.
+  fakeWindow.__sessions = globals.__sessions ?? [
+    {
+      selected: true,
+      account: {
+        sub: 'did:plc:alice',
+        email: 'alice@example.test',
+        preferred_username: 'alice.test',
+        selected: true,
+      },
+    },
+    {
+      account: {
+        sub: 'did:plc:bob',
+        email: 'bob@example.test',
+        preferred_username: 'bob.test',
+      },
+    },
+  ]
+  if (globals.__deviceSessions) {
+    fakeWindow.__deviceSessions = globals.__deviceSessions
+  }
+  document.dispatchDOMContentLoaded()
+}
+
+function createChooserRow(
+  document: FakeDocument,
+  identifierText: string,
+): { row: FakeElement; wrap: FakeElement; identifier: FakeElement } {
+  const row = new FakeElement('div', { role: 'button', tabindex: '0' })
+  const wrap = new FakeElement('span')
+  const identifier = new FakeElement('span')
+  appendText(identifier, identifierText)
+  wrap.appendChild(identifier)
+  row.appendChild(wrap)
+  document.root.appendChild(row)
+  return { row, wrap, identifier }
+}
+
+function createAccountListRow(
+  document: FakeDocument,
+  identifierText: string,
+  { emptyTitle = false }: { emptyTitle?: boolean } = {},
+): {
+  anchor: FakeElement
+  title?: FakeElement
+  wrap: FakeElement
+  identifier: FakeElement
+} {
+  const anchor = new FakeElement('a', {
+    href: '/account/did:plc:alice',
+    'aria-label': 'View and manage account for alice.test',
+  })
+  const wrap = new FakeElement('span')
+  const identifier = new FakeElement('span')
+  const title = emptyTitle ? new FakeElement('h2') : undefined
+
+  if (title) anchor.appendChild(title)
+  appendText(identifier, identifierText)
+  wrap.appendChild(identifier)
+  anchor.appendChild(wrap)
+  document.root.appendChild(anchor)
+  return { anchor, title, wrap, identifier }
+}
+
+function createAccountSelector(
+  document: FakeDocument,
+  identifierTexts: string[],
+): { button: FakeElement; identifiers: FakeElement[]; wrap: FakeElement } {
+  const button = new FakeElement('button', {
+    'aria-label': 'Select an account',
+  })
+  const wrap = new FakeElement('span')
+  const identifiers = identifierTexts.map((identifierText) => {
+    const identifier = new FakeElement('p')
+    appendText(identifier, identifierText)
+    wrap.appendChild(identifier)
+    return identifier
+  })
+  button.appendChild(wrap)
+  document.root.appendChild(button)
+  return { button, identifiers, wrap }
+}
+
+function createConsentIdentity(
+  document: FakeDocument,
+  textBefore: string,
+  identifierText: string,
+  textAfter: string,
+  tagName = 'b',
+): { container: FakeElement; identifier: FakeElement } {
+  const container = new FakeElement('p')
+  appendText(container, textBefore)
+  const identifier = new FakeElement(tagName)
+  appendText(identifier, identifierText)
+  container.appendChild(identifier)
+  appendText(container, textAfter)
+  document.root.appendChild(container)
+  return { container, identifier }
+}
+
+function createPreviewChooserConsentIdentities(
+  document: FakeDocument,
+  mode: string,
+): {
+  sidebar: { container: FakeElement; identifier: FakeElement }
+  mainCard: { container: FakeElement; identifier: FakeElement }
+} {
+  appendHandleModeMeta(document, mode)
+
+  return {
+    sidebar: createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'alice.test',
+      ' account',
+    ),
+    mainCard: createConsentIdentity(
+      document,
+      'wants to access your ',
+      'alice.test',
+      ' account',
+    ),
+  }
+}
+
+function runPreviewChooserConsentEnrichment(
+  document: FakeDocument,
+  mode: string,
+): void {
+  runChooserEnrichmentScript(
+    document,
+    { __sessions: selectedAliceSession() },
+    {
+      pathname: '/preview/chooser',
+      search: `?epds_handle_mode=${mode}`,
+    },
+  )
+}
+
+function expectArbitraryConsentProseUntouched({
+  prefix,
+  identifierText,
+  suffix,
+  tagName,
+  expectedText,
+}: {
+  prefix: string
+  identifierText: string
+  suffix: string
+  tagName?: string
+  expectedText: string
+}): void {
+  const document = new FakeDocument()
+  appendHandleModeMeta(document, 'picker')
+  const { container, identifier } = createConsentIdentity(
+    document,
+    prefix,
+    identifierText,
+    suffix,
+    tagName,
+  )
+
+  runChooserEnrichmentScript(document, { __sessions: selectedAliceSession() })
+
+  expect(identifier.textContent).toBe(identifierText)
+  expect(container.textContent).toBe(expectedText)
+  expect(container.textContent).not.toContain(ASSOCIATED_TOOLTIP_PREFIX)
+}
+
+function findConsentIdentityTooltip(container: FakeElement): {
+  icon: FakeElement
+  tooltip: FakeElement
+} {
+  const icon = findChildWithClass(container, IDENTITY_INFO_ICON_CLASS)
+  const tooltip = findChildWithClass(container, IDENTITY_TOOLTIP_CLASS)
+
+  return { icon: icon as FakeElement, tooltip: tooltip as FakeElement }
+}
+
+function selectedAliceSession(preferredUsername = 'alice.test'): unknown[] {
+  return [
+    {
+      selected: true,
+      account: {
+        sub: 'did:plc:alice',
+        email: 'alice@example.test',
+        preferred_username: preferredUsername,
+        selected: true,
+      },
+    },
+  ]
+}
+
+function aliceDeviceSession(): unknown[] {
+  return [
+    {
+      account: {
+        sub: 'did:plc:alice',
+        email: 'alice@example.test',
+        preferred_username: 'alice.test',
+      },
+      selected: true,
+    },
+  ]
+}
+
+/** An account with no handle yet, so only its DID can match the rendered text. */
+function handlelessDeviceSession(): unknown[] {
+  return [
+    {
+      account: {
+        sub: 'did:plc:alice',
+        email: 'alice@example.test',
+      },
+      selected: true,
+    },
+  ]
+}
+
+function appendHandleModeMeta(document: FakeDocument, mode: string): void {
+  document.root.appendChild(
+    new FakeElement('meta', { name: 'epds-handle-mode', content: mode }),
+  )
+}
+
+describe('buildChooserEnrichmentScript account row scoping', () => {
+  it('does not enrich consent copy outside a chooser account row', () => {
+    const document = new FakeDocument()
+    const paragraph = new FakeElement('p')
+    const consentHandle = new FakeElement('span')
+    appendText(consentHandle, 'alice.test')
+    paragraph.appendChild(consentHandle)
+    appendText(paragraph, ' grants access to did:plc:alice')
+    document.root.appendChild(paragraph)
+
+    runChooserEnrichmentScript(document)
+
+    expect(document.root.descendants()).not.toContainEqual(
+      expect.objectContaining({ textContentOverride: 'alice@example.test' }),
+    )
+    expect(consentHandle.classList.contains('epds-handle-label')).toBe(false)
+  })
+
+  it('enriches a chooser-like account row', () => {
+    const document = new FakeDocument()
+    const {
+      row,
+      wrap,
+      identifier: handle,
+    } = createChooserRow(document, 'alice.test')
+
+    runChooserEnrichmentScript(document)
+
+    const emailLabel = findEmailLabel(wrap)
+
+    expect(emailLabel).toBeInstanceOf(FakeElement)
+    // Trimmed: the chooser label is rendered with a leading space for
+    // visual separation from the handle, which is presentation, not identity.
+    expect(emailLabel?.textContent.trim()).toBe('alice@example.test')
+    expect(handle.classList.contains('epds-handle-label')).toBe(true)
+    expect(handle.style.display).toBeUndefined()
+    expect(row.getAttribute('aria-label')).toBe('Sign in as alice@example.test')
+  })
+
+  it('enriches preview chooser rows in picker-with-random mode', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'picker-with-random')
+    const {
+      row,
+      wrap,
+      identifier: handle,
+    } = createChooserRow(document, 'alice.test')
+
+    runChooserEnrichmentScript(
+      document,
+      {},
+      { pathname: '/preview/chooser', search: '' },
+    )
+
+    expect(wrap.textContent).toContain('alice@example.test')
+    expect(handle.classList.contains('epds-handle-label')).toBe(true)
+    expect(handle.style.display).toBeUndefined()
+    expect(row.getAttribute('aria-label')).toBe('Sign in as alice@example.test')
+  })
+
+  it('uses email as the visible random-mode identifier and describes the hidden handle', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'random')
+    const {
+      row,
+      wrap,
+      identifier: handle,
+    } = createChooserRow(document, 'alice.test')
+
+    runChooserEnrichmentScript(document)
+
+    const emailLabel = findEmailLabel(wrap)
+    const handleDescription = findHiddenHandleDescription(row)
+
+    expect(emailLabel?.textContent.trim()).toBe('alice@example.test')
+    expect(handle.style.display).toBe('none')
+    expect(handleDescription?.textContent).toBe('Underlying handle: alice.test')
+    expect(row.getAttribute('aria-describedby')).toBe(handleDescription?.id)
+    expect(emailLabel?.getAttribute('title')).toBeNull()
+    expect(row.getAttribute('aria-label')).toBe('Sign in as alice@example.test')
+  })
+
+  it('uses email as the visible random-mode identifier on preview chooser rows', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'random')
+    const {
+      row,
+      wrap,
+      identifier: handle,
+    } = createChooserRow(document, 'alice.test')
+
+    runChooserEnrichmentScript(
+      document,
+      {},
+      { pathname: '/preview/chooser', search: '' },
+    )
+
+    const emailLabel = findEmailLabel(wrap)
+    const handleDescription = findHiddenHandleDescription(row)
+
+    expect(emailLabel?.textContent.trim()).toBe('alice@example.test')
+    expect(handle.style.display).toBe('none')
+    expect(handleDescription?.textContent).toBe('Underlying handle: alice.test')
+    expect(row.getAttribute('aria-describedby')).toBe(handleDescription?.id)
+  })
+
+  it('gives rows enriched on a later re-render tick a distinct hidden-handle id', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'random')
+    const { row: aliceRow } = createChooserRow(document, 'alice.test')
+
+    let replayTick: (() => void) | undefined
+    runChooserEnrichmentScript(document, {
+      onObserve: (tick) => {
+        replayTick = tick
+      },
+    })
+
+    // Bob's row arrives in a later SPA render. The first row is already
+    // marked enriched and so is excluded from the rebuilt match list,
+    // which is exactly the situation where a per-tick index restarts
+    // at 0 and collides with Alice's existing description id.
+    const { row: bobRow } = createChooserRow(document, 'bob.test')
+    expect(replayTick).toBeDefined()
+    replayTick?.()
+
+    const aliceId = findHiddenHandleDescription(aliceRow)?.id
+    const bobId = findHiddenHandleDescription(bobRow)?.id
+
+    expect(aliceId).toBeTruthy()
+    expect(bobId).toBeTruthy()
+    // Duplicate ids would make aria-describedby resolve to the first
+    // node, so Bob's row would announce Alice's handle.
+    expect(bobId).not.toBe(aliceId)
+    expect(bobRow.getAttribute('aria-describedby')).toBe(bobId)
+  })
+
+  it('does not hide random-mode handles outside oauth authorize', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'random')
+    const { wrap, identifier, anchor } = createAccountListRow(
+      document,
+      'alice.test',
+    )
+
+    runChooserEnrichmentScript(
+      document,
+      {},
+      { pathname: '/account', search: '' },
+    )
+
+    expect(wrap.textContent).toContain('alice@example.test')
+    expect(identifier.style.display).toBeUndefined()
+    expect(anchor.getAttribute('aria-label')).toBe(
+      'View and manage account for alice@example.test (@alice.test)',
+    )
+  })
+
+  it('uses an empty account-list title slot for the email on account pages', () => {
+    const document = new FakeDocument()
+    const { title, identifier, anchor } = createAccountListRow(
+      document,
+      'alice.test',
+      { emptyTitle: true },
+    )
+
+    runChooserEnrichmentScript(
+      document,
+      {},
+      { pathname: '/account', search: '' },
+    )
+
+    expect(title?.textContent).toBe('alice@example.test')
+    expect(identifier.textContent).toBe('alice.test')
+    expect(identifier.style.display).toBeUndefined()
+    expect(anchor.getAttribute('aria-label')).toBe(
+      'View and manage account for alice@example.test (@alice.test)',
+    )
+  })
+
+  it('leaves non-account links on account pages untouched', () => {
+    const document = new FakeDocument()
+    const anotherAccount = new FakeElement('a', {
+      href: '/account/login',
+      'aria-label': 'Sign in with another account',
+    })
+    appendText(anotherAccount, 'Sign in with another account')
+    document.root.appendChild(anotherAccount)
+    const terms = new FakeElement('a', { href: '/terms' })
+    appendText(terms, 'Terms')
+    document.root.appendChild(terms)
+    const prose = new FakeElement('p')
+    appendText(prose, 'Manage alice.test from this page.')
+    document.root.appendChild(prose)
+
+    runChooserEnrichmentScript(
+      document,
+      {},
+      { pathname: '/account', search: '' },
+    )
+
+    expect(anotherAccount.textContent).toBe('Sign in with another account')
+    expect(terms.textContent).toBe('Terms')
+    expect(prose.textContent).toBe('Manage alice.test from this page.')
+    expect(document.root.textContent).not.toContain('alice@example.test')
+  })
+
+  it('adds email next to the current account selector handle on account detail pages', () => {
+    const document = new FakeDocument()
+    const { button, identifiers, wrap } = createAccountSelector(document, [
+      'alice.test',
+    ])
+
+    runChooserEnrichmentScript(
+      document,
+      { __sessions: [], __deviceSessions: aliceDeviceSession() },
+      { pathname: '/account/did:plc:alice', search: '' },
+    )
+
+    expect(identifiers[0].textContent).toBe('alice.test')
+    expect(identifiers[0].style.display).toBeUndefined()
+    expect(wrap.textContent).toContain('alice@example.test')
+    expect(button.getAttribute('aria-label')).toBe(
+      'Select account alice@example.test (@alice.test)',
+    )
+  })
+
+  it('does not present a DID as a handle in the account selector accessible name', () => {
+    const document = new FakeDocument()
+    const { button } = createAccountSelector(document, ['did:plc:alice'])
+
+    runChooserEnrichmentScript(
+      document,
+      { __sessions: [], __deviceSessions: handlelessDeviceSession() },
+      { pathname: '/account/did:plc:alice', search: '' },
+    )
+
+    // A DID is not a handle, so it must not be decorated with '@'.
+    expect(button.getAttribute('aria-label')).toBe(
+      'Select account alice@example.test (did:plc:alice)',
+    )
+  })
+
+  it('collapses duplicate current account selector handle lines to email plus handle', () => {
+    const document = new FakeDocument()
+    const { button, identifiers } = createAccountSelector(document, [
+      'alice.test',
+      'alice.test',
+    ])
+
+    runChooserEnrichmentScript(
+      document,
+      { __sessions: [], __deviceSessions: aliceDeviceSession() },
+      { pathname: '/account/did:plc:alice', search: '' },
+    )
+
+    expect(identifiers[0].textContent).toBe('alice@example.test')
+    expect(identifiers[1].textContent).toBe('alice.test')
+    expect(button.textContent).toBe('alice@example.testalice.test')
+    expect(button.getAttribute('aria-label')).toBe(
+      'Select account alice@example.test (@alice.test)',
+    )
+  })
+
+  it('keeps the current account selector handle visible when account pages use random mode', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'random')
+    const { identifiers, wrap } = createAccountSelector(document, [
+      'alice.test',
+    ])
+
+    runChooserEnrichmentScript(
+      document,
+      { __sessions: [], __deviceSessions: aliceDeviceSession() },
+      { pathname: '/account/did:plc:alice', search: '' },
+    )
+
+    expect(identifiers[0].textContent).toBe('alice.test')
+    expect(identifiers[0].style.display).toBeUndefined()
+    expect(wrap.textContent).toContain('alice@example.test')
+  })
+
+  it('does not enrich non-selector controls on account detail pages', () => {
+    const document = new FakeDocument()
+    createAccountSelector(document, ['alice.test'])
+    const connectedApp = new FakeElement('button', {
+      'aria-label': 'Open app settings',
+    })
+    appendText(connectedApp, 'alice.test')
+    document.root.appendChild(connectedApp)
+    const signOut = new FakeElement('button', { 'aria-label': 'Sign out' })
+    appendText(signOut, 'Sign out alice.test')
+    document.root.appendChild(signOut)
+    const breadcrumb = new FakeElement('a', { href: '/account' })
+    appendText(breadcrumb, 'alice.test')
+    document.root.appendChild(breadcrumb)
+
+    runChooserEnrichmentScript(
+      document,
+      { __sessions: [], __deviceSessions: aliceDeviceSession() },
+      { pathname: '/account/did:plc:alice', search: '' },
+    )
+
+    expect(connectedApp.textContent).toBe('alice.test')
+    expect(signOut.textContent).toBe('Sign out alice.test')
+    expect(breadcrumb.textContent).toBe('alice.test')
+  })
+
+  it('enriches exact at-prefixed handle matches', () => {
+    const document = new FakeDocument()
+    const { wrap, identifier } = createChooserRow(document, '@alice.test')
+
+    runChooserEnrichmentScript(document)
+
+    expect(wrap.textContent).toContain('alice@example.test')
+    expect(identifier.classList.contains('epds-handle-label')).toBe(true)
+  })
+
+  it('enriches exact DID matches', () => {
+    const document = new FakeDocument()
+    const { wrap, identifier } = createChooserRow(document, 'did:plc:alice')
+
+    runChooserEnrichmentScript(document)
+
+    expect(wrap.textContent).toContain('alice@example.test')
+    expect(identifier.classList.contains('epds-handle-label')).toBe(true)
+  })
+
+  it('enriches rows from captured device sessions', () => {
+    const document = new FakeDocument()
+    const { wrap, identifier } = createChooserRow(document, 'carol.test')
+
+    runChooserEnrichmentScript(document, {
+      __sessions: [],
+      __deviceSessions: [
+        {
+          account: {
+            sub: 'did:plc:carol',
+            email: 'carol@example.test',
+            preferred_username: 'carol.test',
+          },
+          selected: true,
+        },
+      ],
+    })
+
+    expect(wrap.textContent).toContain('carol@example.test')
+    expect(identifier.classList.contains('epds-handle-label')).toBe(true)
+  })
+
+  it('does not enrich substring-only chooser row prose', () => {
+    const document = new FakeDocument()
+    const { wrap, identifier } = createChooserRow(
+      document,
+      'Signed in as alice.test',
+    )
+
+    runChooserEnrichmentScript(document)
+
+    expect(wrap.textContent).not.toContain('alice@example.test')
+    expect(identifier.classList.contains('epds-handle-label')).toBe(false)
+  })
+
+  it('enriches multiple chooser-like account rows', () => {
+    const document = new FakeDocument()
+    const rows = ['alice.test', 'bob.test'].map((handleText) => {
+      const row = new FakeElement('div', { role: 'button', tabindex: '0' })
+      const wrap = new FakeElement('span')
+      const handle = new FakeElement('span')
+      appendText(handle, handleText)
+      wrap.appendChild(handle)
+      row.appendChild(wrap)
+      document.root.appendChild(row)
+      return { wrap, handle }
+    })
+
+    runChooserEnrichmentScript(document)
+
+    expect(rows[0].wrap.textContent).toContain('alice@example.test')
+    expect(rows[1].wrap.textContent).toContain('bob@example.test')
+    expect(rows[0].handle.classList.contains('epds-handle-label')).toBe(true)
+    expect(rows[1].handle.classList.contains('epds-handle-label')).toBe(true)
+  })
+})
+
+describe('buildChooserEnrichmentScript consent identity enrichment', () => {
+  it('enriches grant-access consent identity copy', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'picker')
+    const { container, identifier } = createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'alice.test',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(document)
+
+    expect(identifier.textContent).toBe('alice.test')
+    expectConsentTooltip(container, ALICE_ASSOCIATED_TOOLTIP)
+  })
+
+  it('enriches client-wants-access consent identity copy', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'picker')
+    const { container, identifier } = createConsentIdentity(
+      document,
+      'Example App wants to access your ',
+      'alice.test',
+      ' account',
+      'strong',
+    )
+
+    runChooserEnrichmentScript(document, {
+      __sessions: selectedAliceSession(),
+    })
+
+    expect(identifier.textContent).toBe('alice.test')
+    expect(container.textContent).toContain(ALICE_ASSOCIATED_TOOLTIP)
+  })
+
+  it('enriches upstream main-card consent identity copy without same-paragraph client name', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'picker')
+    const { container, identifier } = createConsentIdentity(
+      document,
+      'wants to access your ',
+      'alice.test',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(document, {
+      __sessions: selectedAliceSession(),
+    })
+
+    const iconIndex = container.childNodes.findIndex(
+      (child) =>
+        child instanceof FakeElement &&
+        child.classList.contains(IDENTITY_INFO_ICON_CLASS),
+    )
+    const identifierIndex = container.childNodes.indexOf(identifier)
+
+    expect(identifier.textContent).toBe('alice.test')
+    expect(iconIndex).toBe(identifierIndex + 1)
+    expect(container.textContent).toContain(ALICE_ASSOCIATED_TOOLTIP)
+  })
+
+  it('enriches sidebar and main-card consent identities on the same page', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'picker-with-random')
+    const sidebar = createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'alice.test',
+      ' account',
+    )
+    const mainCard = createConsentIdentity(
+      document,
+      'wants to access your ',
+      'alice.test',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(
+      document,
+      { __sessions: selectedAliceSession() },
+      { pathname: '/preview/consent', search: '' },
+    )
+
+    expect(sidebar.identifier.textContent).toBe('alice.test')
+    expect(mainCard.identifier.textContent).toBe('alice.test')
+    expectConsentTooltipTexts(document, [
+      ALICE_ASSOCIATED_TOOLTIP,
+      ALICE_ASSOCIATED_TOOLTIP,
+    ])
+  })
+
+  it('treats picker-with-random and default consent like picker consent', () => {
+    for (const mode of ['picker-with-random', null]) {
+      const document = new FakeDocument()
+      if (mode) appendHandleModeMeta(document, mode)
+      const { container, identifier } = createConsentIdentity(
+        document,
+        'Example App wants to access your ',
+        'alice.test',
+        ' account',
+      )
+
+      runChooserEnrichmentScript(document, {
+        __sessions: selectedAliceSession(),
+      })
+
+      expect(identifier.textContent).toBe('alice.test')
+      expect(container.textContent).toContain(ALICE_ASSOCIATED_TOOLTIP)
+    }
+  })
+
+  it('shows the email for random consent and exposes the public handle in the tooltip', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'random')
+    const { container, identifier } = createConsentIdentity(
+      document,
+      'Grant access to your ',
+      '@alice.test',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(document, {
+      __sessions: selectedAliceSession('@alice.test'),
+    })
+
+    expect(identifier.textContent).toBe('alice@example.test')
+    expect(container.textContent).toContain(ALICE_PUBLIC_HANDLE_TOOLTIP)
+    expect(container.textContent).not.toContain('@@alice.test')
+  })
+
+  it('describes a DID as an identifier, not a handle, in the random consent tooltip', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'random')
+    const { container, identifier } = createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'did:plc:alice',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(document, {
+      __sessions: [
+        {
+          selected: true,
+          account: {
+            sub: 'did:plc:alice',
+            email: 'alice@example.test',
+            selected: true,
+          },
+        },
+      ],
+    })
+
+    expect(identifier.textContent).toBe('alice@example.test')
+    expect(container.textContent).toContain(
+      'Public AT Protocol identifier: did:plc:alice. This account has no handle yet, so its DID is shown instead.',
+    )
+    expect(container.textContent).not.toContain('@did:plc:alice')
+  })
+
+  it('enriches preview consent identity copy', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'picker-with-random')
+    const { container, identifier } = createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'alice.test',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(
+      document,
+      { __sessions: selectedAliceSession() },
+      { pathname: '/preview/consent', search: '' },
+    )
+
+    expect(identifier.textContent).toBe('alice.test')
+    expect(container.textContent).toContain(ALICE_ASSOCIATED_TOOLTIP)
+  })
+
+  it('enriches preview chooser consent state in picker-with-random mode', () => {
+    const document = new FakeDocument()
+    const { sidebar, mainCard } = createPreviewChooserConsentIdentities(
+      document,
+      'picker-with-random',
+    )
+
+    runPreviewChooserConsentEnrichment(document, 'picker-with-random')
+
+    expect(sidebar.identifier.textContent).toBe('alice.test')
+    expect(mainCard.identifier.textContent).toBe('alice.test')
+    expectConsentTooltipTexts(document, [
+      ALICE_ASSOCIATED_TOOLTIP,
+      ALICE_ASSOCIATED_TOOLTIP,
+    ])
+  })
+
+  it('uses email as the visible preview chooser consent identity in random mode', () => {
+    const document = new FakeDocument()
+    const { sidebar, mainCard } = createPreviewChooserConsentIdentities(
+      document,
+      'random',
+    )
+
+    runPreviewChooserConsentEnrichment(document, 'random')
+
+    expect(sidebar.identifier.textContent).toBe('alice@example.test')
+    expect(mainCard.identifier.textContent).toBe('alice@example.test')
+    expectConsentTooltipTexts(document, [
+      ALICE_PUBLIC_HANDLE_TOOLTIP,
+      ALICE_PUBLIC_HANDLE_TOOLTIP,
+    ])
+  })
+
+  it('uses email as the visible preview consent identity in random mode', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'random')
+    const { container, identifier } = createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'alice.test',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(
+      document,
+      { __sessions: selectedAliceSession() },
+      { pathname: '/preview/consent', search: '' },
+    )
+
+    expect(identifier.textContent).toBe('alice@example.test')
+    expect(container.textContent).toContain(ALICE_PUBLIC_HANDLE_TOOLTIP)
+  })
+
+  it('leaves generic and legal consent paragraphs untouched', () => {
+    const document = new FakeDocument()
+    appendHandleModeMeta(document, 'picker')
+    const legal = new FakeElement('p')
+    appendText(
+      legal,
+      'By clicking Authorize, you confirm that alice.test is your account.',
+    )
+    document.root.appendChild(legal)
+    const unrelated = createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'bob.test',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(document, { __sessions: selectedAliceSession() })
+
+    expect(document.root.textContent).not.toContain(ASSOCIATED_TOOLTIP_PREFIX)
+    expect(unrelated.identifier.textContent).toBe('bob.test')
+  })
+
+  it('leaves arbitrary bold selected-account legal copy untouched', () => {
+    expectArbitraryConsentProseUntouched({
+      prefix: 'By clicking Authorize, ',
+      identifierText: 'alice.test',
+      suffix: ' confirms access.',
+      expectedText: 'By clicking Authorize, alice.test confirms access.',
+    })
+  })
+
+  it('leaves arbitrary strong selected-account technical prose untouched', () => {
+    expectArbitraryConsentProseUntouched({
+      prefix: 'Technical details for ',
+      identifierText: 'alice.test',
+      suffix: ' may include OAuth scopes.',
+      tagName: 'strong',
+      expectedText:
+        'Technical details for alice.test may include OAuth scopes.',
+    })
+  })
+
+  it('opens the tooltip on hover/focus and toggles it on click/tap', () => {
+    const document = new FakeDocument()
+    const { container } = createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'alice.test',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(document, { __sessions: selectedAliceSession() })
+
+    const { icon, tooltip } = findConsentIdentityTooltip(container)
+
+    expect(tooltip.hidden).toBe(true)
+    expect(icon.getAttribute('aria-expanded')).toBe('false')
+    icon.dispatchEvent('mouseenter')
+    expect(tooltip.hidden).toBe(false)
+    expect(icon.getAttribute('aria-expanded')).toBe('true')
+    icon.dispatchEvent('mouseleave')
+    expect(tooltip.hidden).toBe(true)
+    expect(icon.getAttribute('aria-expanded')).toBe('false')
+    icon.dispatchEvent('focus')
+    expect(tooltip.hidden).toBe(false)
+    expect(icon.getAttribute('aria-expanded')).toBe('true')
+    icon.dispatchEvent('blur')
+    expect(tooltip.hidden).toBe(true)
+    expect(icon.getAttribute('aria-expanded')).toBe('false')
+    const click = icon.dispatchEvent('click')
+    expect(click.defaultPrevented).toBe(true)
+    expect(click.propagationStopped).toBe(true)
+    expect(tooltip.hidden).toBe(false)
+    expect(icon.getAttribute('aria-expanded')).toBe('true')
+    icon.dispatchEvent('mouseleave')
+    expect(tooltip.hidden).toBe(false)
+    icon.dispatchEvent('blur')
+    expect(tooltip.hidden).toBe(false)
+    icon.dispatchEvent('click')
+    expect(tooltip.hidden).toBe(true)
+    expect(icon.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('dismisses the consent tooltip on Escape, including when pinned', () => {
+    const document = new FakeDocument()
+    const { container } = createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'alice.test',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(document, { __sessions: selectedAliceSession() })
+
+    const { icon, tooltip } = findConsentIdentityTooltip(container)
+
+    // Pinned is the case that matters: hide() bails out early while
+    // pinned, so before the Escape handler a keyboard user had no way
+    // to dismiss it without moving focus (WCAG 1.4.13 Dismissible).
+    icon.dispatchEvent('click')
+    expect(tooltip.hidden).toBe(false)
+
+    const escape = icon.dispatchEvent('keyup', { key: 'Escape' })
+    expect(tooltip.hidden).toBe(true)
+    expect(icon.getAttribute('aria-expanded')).toBe('false')
+    expect(escape.propagationStopped).toBe(true)
+
+    // Unpinned hover/focus content is dismissible the same way.
+    icon.dispatchEvent('focus')
+    expect(tooltip.hidden).toBe(false)
+    icon.dispatchEvent('keyup', { key: 'Escape' })
+    expect(tooltip.hidden).toBe(true)
+
+    // Other keys leave it alone, and Escape on an already-hidden tooltip
+    // does not claim the event from the surrounding page.
+    icon.dispatchEvent('focus')
+    icon.dispatchEvent('keyup', { key: 'a' })
+    expect(tooltip.hidden).toBe(false)
+    icon.dispatchEvent('keyup', { key: 'Escape' })
+    const escapeWhenHidden = icon.dispatchEvent('keyup', { key: 'Escape' })
+    expect(escapeWhenHidden.propagationStopped).toBe(false)
+  })
+
+  it('keeps the tooltip pinned open when touch focus fires before click', () => {
+    const document = new FakeDocument()
+    const { container } = createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'alice.test',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(document, { __sessions: selectedAliceSession() })
+
+    const { icon, tooltip } = findConsentIdentityTooltip(container)
+
+    icon.dispatchEvent('focus')
+    expect(tooltip.hidden).toBe(false)
+    expect(icon.getAttribute('aria-expanded')).toBe('true')
+
+    icon.dispatchEvent('click')
+    expect(tooltip.hidden).toBe(false)
+    expect(icon.getAttribute('aria-expanded')).toBe('true')
+
+    icon.dispatchEvent('blur')
+    expect(tooltip.hidden).toBe(false)
+    expect(icon.getAttribute('aria-expanded')).toBe('true')
+
+    icon.dispatchEvent('click')
+    expect(tooltip.hidden).toBe(true)
+    expect(icon.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('does not apply consent tooltip behavior on account pages', () => {
+    const document = new FakeDocument()
+    createConsentIdentity(
+      document,
+      'Grant access to your ',
+      'alice.test',
+      ' account',
+    )
+
+    runChooserEnrichmentScript(
+      document,
+      { __sessions: selectedAliceSession() },
+      { pathname: '/account', search: '' },
+    )
+
+    expect(document.root.textContent).not.toContain(ASSOCIATED_TOOLTIP_PREFIX)
   })
 })
 
@@ -388,13 +1779,15 @@ describe('buildChooserEnrichmentScript handle-mode hiding (HYPER-268 Layer 4)', 
     expect(script).toContain('querySelector(\'meta[name="epds-handle-mode"]\')')
   })
 
-  it("hides the handle span and sets a title tooltip when mode is 'random'", () => {
+  it("hides the handle span and adds an accessible description when mode is 'random'", () => {
     const script = buildChooserEnrichmentScript()
-    // Hiding strategy: display:none on the handle element + title
-    // attribute on the email label carrying the original handle text.
-    expect(script).toContain("hideHandle = handleMode === 'random'")
+    // Hiding strategy: display:none on the handle element plus an
+    // aria-describedby target carrying the original handle text.
+    expect(script).toContain(
+      "hideHandle = handleMode === 'random' && isChooserLikePage()",
+    )
     expect(script).toContain("m.el.style.display = 'none'")
-    expect(script).toContain('label.title = ownText')
+    expect(script).toContain("appendAriaReference(row, 'aria-describedby'")
   })
 
   it('leaves the handle visible for picker / picker-with-random', () => {
@@ -456,6 +1849,92 @@ describe('createChooserEnrichmentMiddleware handle-mode meta (HYPER-268 Layer 4)
     expect(written).toContain('<meta name="epds-handle-mode" content="random">')
   })
 
+  it('resolves client metadata handle mode from request_uri when client_id is absent', async () => {
+    const resolveClientIdFromRequestUri = vi
+      .fn()
+      .mockResolvedValue('https://demo.example/client')
+    const resolveClientMetadata = vi
+      .fn()
+      .mockResolvedValue({ epds_handle_mode: 'random' as const })
+
+    const written = await captureWrittenHtml(
+      {
+        resolveClientMetadata,
+        resolveClientIdFromRequestUri,
+      },
+      { request_uri: 'urn:ietf:params:oauth:request_uri:req-123' },
+    )
+
+    expect(resolveClientIdFromRequestUri).toHaveBeenCalledWith(
+      'urn:ietf:params:oauth:request_uri:req-123',
+    )
+    expect(resolveClientMetadata).toHaveBeenCalledWith(
+      'https://demo.example/client',
+    )
+    expect(written).toContain('<meta name="epds-handle-mode" content="random">')
+  })
+
+  it('keeps explicit query handle mode ahead of request_uri metadata', async () => {
+    const resolveClientIdFromRequestUri = vi
+      .fn()
+      .mockResolvedValue('https://demo.example/client')
+    const resolveClientMetadata = vi
+      .fn()
+      .mockResolvedValue({ epds_handle_mode: 'random' as const })
+
+    const written = await captureWrittenHtml(
+      {
+        resolveClientMetadata,
+        resolveClientIdFromRequestUri,
+      },
+      {
+        epds_handle_mode: 'picker',
+        request_uri: 'urn:ietf:params:oauth:request_uri:req-123',
+      },
+    )
+
+    expect(resolveClientIdFromRequestUri).not.toHaveBeenCalled()
+    expect(resolveClientMetadata).not.toHaveBeenCalled()
+    expect(written).toContain('<meta name="epds-handle-mode" content="picker">')
+  })
+
+  it('degrades silently when request_uri client-id resolution rejects', async () => {
+    const written = await captureWrittenHtml(
+      {
+        resolveClientMetadata: vi.fn(),
+        resolveClientIdFromRequestUri: () =>
+          Promise.reject(new Error('request expired')),
+      },
+      { request_uri: 'urn:ietf:params:oauth:request_uri:req-123' },
+    )
+
+    expect(written).toContain(
+      '<meta name="epds-handle-mode" content="picker-with-random">',
+    )
+  })
+
+  it('degrades silently when request_uri metadata lookup rejects', async () => {
+    const resolveClientMetadata = vi
+      .fn()
+      .mockRejectedValue(new Error('metadata unavailable'))
+
+    const written = await captureWrittenHtml(
+      {
+        resolveClientMetadata,
+        resolveClientIdFromRequestUri: () =>
+          Promise.resolve('https://demo.example/client'),
+      },
+      { request_uri: 'urn:ietf:params:oauth:request_uri:req-123' },
+    )
+
+    expect(resolveClientMetadata).toHaveBeenCalledWith(
+      'https://demo.example/client',
+    )
+    expect(written).toContain(
+      '<meta name="epds-handle-mode" content="picker-with-random">',
+    )
+  })
+
   it('ignores invalid handle modes from metadata (fall through to fallback)', async () => {
     const written = await captureWrittenHtml(
       {
@@ -472,9 +1951,29 @@ describe('createChooserEnrichmentMiddleware handle-mode meta (HYPER-268 Layer 4)
     )
   })
 
-  it('degrades silently when the metadata resolver rejects', async () => {
+  it('ignores invalid request_uri metadata handle modes through the shared resolver', async () => {
     const written = await captureWrittenHtml(
       {
+        resolveClientMetadata: () =>
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- deliberate bad value
+          Promise.resolve({ epds_handle_mode: 'garbage' as any }),
+        resolveClientIdFromRequestUri: () =>
+          Promise.resolve('https://demo.example/client'),
+      },
+      { request_uri: 'urn:ietf:params:oauth:request_uri:req-123' },
+    )
+
+    expect(written).toContain(
+      '<meta name="epds-handle-mode" content="picker-with-random">',
+    )
+  })
+
+  it('logs and falls back when the metadata resolver rejects', async () => {
+    const debug = vi.fn()
+
+    const written = await captureWrittenHtml(
+      {
+        logger: { debug },
         resolveClientMetadata: () => Promise.reject(new Error('network error')),
       },
       { client_id: 'https://demo.example/client' },
@@ -483,6 +1982,42 @@ describe('createChooserEnrichmentMiddleware handle-mode meta (HYPER-268 Layer 4)
     expect(written).toContain(
       '<meta name="epds-handle-mode" content="picker-with-random">',
     )
+    expect(debug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        err: expect.any(Error),
+        queryMode: undefined,
+        // This flow carried client_id, not request_uri.
+        hasRequestUri: false,
+      }),
+      'chooser-enrichment: failed to resolve handle mode from OAuth request context',
+    )
+  })
+
+  // request_uri is a short-lived bearer reference to the PAR entry, so a
+  // log line carrying its value is replayable by anyone reading the logs.
+  it('logs request_uri presence but never its value', async () => {
+    const requestUri = 'urn:ietf:params:oauth:request_uri:secret-par-handle'
+    const debug = vi.fn()
+    await captureWrittenHtml(
+      {
+        logger: { debug },
+        resolveClientMetadata: () => Promise.resolve({}),
+        resolveClientIdFromRequestUri: () =>
+          Promise.reject(new Error('network error')),
+      },
+      { request_uri: requestUri },
+    )
+    expect(debug).toHaveBeenCalledWith(
+      expect.objectContaining({ hasRequestUri: true }),
+      'chooser-enrichment: failed to resolve handle mode from OAuth request context',
+    )
+    // JSON.stringify renders an Error as {} because message and stack are
+    // non-enumerable, which would hide a request_uri that leaked through an
+    // error message — the most likely way for it to reach the logs here.
+    const serialized = JSON.stringify(debug.mock.calls, (_key, value) =>
+      value instanceof Error ? `${value.name}: ${value.message}` : value,
+    )
+    expect(serialized).not.toContain(requestUri)
   })
 })
 

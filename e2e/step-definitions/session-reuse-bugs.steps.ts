@@ -320,8 +320,8 @@ When(
     // pds-core's chooser middleware reads to inject
     // <meta name="epds-handle-mode" content="random"> into the chooser's
     // <head>. The enrichment script reads that meta and hides the handle
-    // span (display:none on .epds-handle-label, title= on
-    // .epds-email-label) without touching the DB or the account's actual
+    // span (display:none on .epds-handle-label) and describes it through
+    // aria-describedby without touching the DB or the account's actual
     // stored handle.
     const page = getPage(this)
     const base = testEnv.demoTrustedUrl.replace(/\/$/, '')
@@ -417,25 +417,100 @@ Then(
   },
 )
 
+type HiddenHandleDescriptionRow = {
+  describedBy: string | null
+  descriptions: {
+    id: string
+    isHiddenHandleDescription: boolean
+    text: string
+  }[]
+  emailTitle: string | null
+  hiddenHandleText: string
+  rowIndex: number
+}
+
 Then(
-  'each row exposes the handle only via a title tooltip',
+  'each row exposes the hidden handle through an accessible description',
   async function (this: EpdsWorld) {
     const page = getPage(this)
-    // The script copies the hidden handle span's text into a title=
-    // attribute on the adjacent .epds-email-label so power-users can
-    // still inspect which account maps to which DID without the
-    // gibberish random handle cluttering the visual hierarchy.
-    const emailLabels = page.locator('.epds-email-label')
-    const count = await emailLabels.count()
-    expect(count).toBeGreaterThan(0)
-    for (let i = 0; i < count; i++) {
-      const title = await emailLabels.nth(i).getAttribute('title')
-      const titleRepr = title === null ? 'null' : `"${title}"`
+    await expect(page.locator('.epds-email-label').first()).toBeVisible({
+      timeout: 10_000,
+    })
+
+    const rows = await page
+      .locator('.epds-email-label')
+      .evaluateAll((emailLabels): HiddenHandleDescriptionRow[] => {
+        return emailLabels
+          .map((emailLabel, rowIndex) => {
+            const row = emailLabel.closest('[aria-label]')
+            const handleLabel = row?.querySelector('.epds-handle-label')
+            if (!row || !handleLabel) return null
+
+            const handleIsHidden =
+              globalThis.getComputedStyle(handleLabel).display === 'none'
+            if (!handleIsHidden) return null
+
+            const hiddenHandleText = handleLabel.textContent?.trim() ?? ''
+            const describedBy = row.getAttribute('aria-describedby')
+            const descriptionIds =
+              describedBy?.trim().split(/\s+/).filter(Boolean) ?? []
+            const descriptions = descriptionIds.map((id) => {
+              const describedElement = document.getElementById(id)
+              return {
+                id,
+                isHiddenHandleDescription:
+                  describedElement?.classList.contains(
+                    'epds-hidden-handle-description',
+                  ) ?? false,
+                text: describedElement?.textContent?.trim() ?? '',
+              }
+            })
+
+            return {
+              describedBy,
+              descriptions,
+              emailTitle: emailLabel.getAttribute('title'),
+              hiddenHandleText,
+              rowIndex,
+            }
+          })
+          .filter((row): row is HiddenHandleDescriptionRow => row !== null)
+      })
+
+    expect(rows.length).toBeGreaterThan(0)
+    for (const row of rows) {
       expect(
-        title,
-        `Row ${i}: expected .epds-email-label to carry the hidden handle as title=, got ${titleRepr}`,
+        row.describedBy,
+        `Row ${row.rowIndex}: expected chooser row to reference the hidden handle with aria-describedby`,
       ).toBeTruthy()
-      expect(title!.trim().length).toBeGreaterThan(0)
+
+      const description = row.descriptions.find(
+        (candidate) => candidate.isHiddenHandleDescription,
+      )
+      expect(
+        description,
+        `Row ${row.rowIndex}: expected aria-describedby to reference an .epds-hidden-handle-description element`,
+      ).toBeDefined()
+
+      const descriptionText = description?.text ?? ''
+      const prefix = 'Underlying handle:'
+      const prefixIndex = descriptionText.indexOf(prefix)
+      expect(
+        prefixIndex,
+        `Row ${row.rowIndex}: expected hidden-handle description to contain "${prefix}", got "${descriptionText}"`,
+      ).toBeGreaterThanOrEqual(0)
+      const describedHiddenHandle = descriptionText
+        .slice(prefixIndex + prefix.length)
+        .trim()
+      expect(
+        describedHiddenHandle,
+        `Row ${row.rowIndex}: expected hidden-handle description suffix to match the hidden handle text`,
+      ).toBe(row.hiddenHandleText)
+
+      expect(
+        row.emailTitle,
+        `Row ${row.rowIndex}: .epds-email-label should not expose the hidden handle through title=`,
+      ).toBeNull()
     }
   },
 )
