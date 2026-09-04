@@ -113,10 +113,9 @@ key generation and serving details.
 | `dpop_bound_access_tokens`        | Yes         | Always `true`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `client_uri`                      | No          | Your app's homepage URL                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `logo_uri`                        | No          | URL to your app logo (shown on login page)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `email_template_uri`              | No          | URL to a custom OTP email HTML template                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `email_subject_template`          | No          | Custom email subject line with `{{code}}` placeholder                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `email_template_uri`              | No          | URL to a custom OTP email HTML template. Trusted clients only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `email_subject_template`          | No          | Custom email subject line with `{{code}}` placeholder. Trusted clients only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `brand_color`                     | No          | Hex colour for buttons and input focus rings (default: `#1A130F`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `background_color`                | No          | Hex colour for the login page background (default: `#F2EBE4`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `epds_handle_mode`                | No          | ePDS extension. Handle picker variant for new users: `"picker"`, `"random"`, or `"picker-with-random"` (default). See [tutorial](../../../../docs/tutorial.md#optional-control-the-handle-picker).                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `epds_skip_consent_on_signup`     | No          | ePDS extension. When `true`, skip the consent screen on initial sign-up. Only honoured when the PDS has `PDS_SIGNUP_ALLOW_CONSENT_SKIP=true` AND the client is in `PDS_OAUTH_TRUSTED_CLIENTS`.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `epds_handle_login_url`           | No          | ePDS extension. Absolute http(s) URL on your client's origin. When set, the auth-service login page renders an "Or sign in with ATProto/Bluesky" button; submitting a handle redirects the browser to this URL with `?handle=<value>` appended. See [tutorial](../../../../docs/tutorial.md#optional-offer-atprotobluesky-handle-sign-in).                                                                                                                                                                                                                                                                                                         |
@@ -134,18 +133,20 @@ for the route list and example URLs.
 
 ## Custom email templates
 
-If you provide `email_template_uri`, the auth service fetches that URL and
-uses it as the OTP email body instead of the default Certified template.
+Custom email HTML and subject fields are honored only when the client is in
+`PDS_OAUTH_TRUSTED_CLIENTS`. When trusted metadata provides
+`email_template_uri`, auth-service fetches that HTML and uses it for the HTML
+part of the OTP email. The server retains control of the plain-text part.
 
 Your template must be an HTML file. Supported placeholders:
 
-| Placeholder                           | Description                               |
-| ------------------------------------- | ----------------------------------------- |
-| `{{code}}`                            | The 8-digit OTP code — **required**       |
-| `{{app_name}}`                        | Value of `client_name` from your metadata |
-| `{{logo_uri}}`                        | Value of `logo_uri` from your metadata    |
-| `{{#is_new_user}}...{{/is_new_user}}` | Block shown only on first sign-up         |
-| `{{^is_new_user}}...{{/is_new_user}}` | Block shown only on subsequent sign-ins   |
+| Placeholder                           | Description                                       |
+| ------------------------------------- | ------------------------------------------------- |
+| `{{code}}`                            | Configured 4–12-character OTP code — **required** |
+| `{{app_name}}`                        | Value of `client_name` from your metadata         |
+| `{{logo_uri}}`                        | Value of `logo_uri` from your metadata            |
+| `{{#is_new_user}}...{{/is_new_user}}` | Block shown only on first sign-up                 |
+| `{{^is_new_user}}...{{/is_new_user}}` | Block shown only on subsequent sign-ins           |
 
 Minimal template example:
 
@@ -281,6 +282,12 @@ allow-list.
 
 ## Local development
 
-During local development you can use `http://localhost` client IDs. The
-`client_id` must still be a reachable URL — ePDS fetches it at runtime.
-Use a local server or `ngrok` to expose your metadata endpoint.
+A remote ePDS must be able to fetch a discoverable client metadata URL and any
+remote `jwks_uri`. It cannot reach a server bound only to your localhost. Every
+ordinary web client, including a public client, must use an HTTPS tunnel or
+deployed HTTPS development URL.
+
+AT Protocol loopback clients are the only exception. They use a separate
+metadata encoding and public-client rules. Do not assume an ordinary
+`http://localhost/.../client-metadata.json` URL will be fetched successfully by
+a remote ePDS.
