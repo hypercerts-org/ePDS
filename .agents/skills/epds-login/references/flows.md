@@ -1,10 +1,19 @@
-# Legacy Flow Walkthrough
+# Flow Walkthrough
 
-This reference previously documented a hand-rolled email-first OAuth flow.
-Do not use it for new integrations.
+Use `NodeOAuthClient` for email, hosted-form, handle, and DID login.
 
-Use `NodeOAuthClient` for email, hosted-form, handle, and DID login. For an
-email-first flow:
+For a hosted-form flow, where the client does not collect the user's email:
+
+```typescript
+const url = await client.authorize(epdsUrl)
+// Redirect without adding login_hint.
+```
+
+The ePDS presents its hosted login form, where the user supplies their email.
+“No email” means the client does not collect the email before redirecting; it
+does not mean the account has no email.
+
+For an email-first flow:
 
 ```typescript
 const url = await client.authorize(epdsUrl)
@@ -22,8 +31,6 @@ url.searchParams.set('prompt', 'login')
 ```
 
 Email `login_hint` belongs only on the returned browser authorization URL,
-never in the PAR body. `NodeOAuthClient` must retain ownership of PAR, PKCE,
-DPoP, nonce retry, token exchange, and OAuth state/session storage.
+never in the PAR body.
 
-See [`../SKILL.md`](../SKILL.md) for maintained flow, callback, and application
-session guidance.
+See [`../SKILL.md`](../SKILL.md) for maintained flow and callback guidance.

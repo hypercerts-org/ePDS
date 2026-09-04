@@ -1,21 +1,18 @@
 ---
 name: epds-login
-description: Implement AT Protocol OAuth login against an ePDS instance with @atproto/oauth-client-node. Covers email-first OTP, hosted email entry, handle/DID login, client metadata, application sessions, callbacks, and debugging. Use when building passwordless or social login against ePDS, configuring confidential/public OAuth clients, or integrating NodeOAuthClient.
+description: Implement AT Protocol OAuth login against an ePDS instance with @atproto/oauth-client-node. Covers email-first OTP, hosted email entry, handle/DID login, client metadata, callbacks, and debugging. Use when building passwordless login against ePDS, configuring confidential/public OAuth clients, or integrating NodeOAuthClient.
 ---
 
 # Implementing ePDS Login
 
-ePDS lets users sign in to AT Protocol apps using email OTP, Google, GitHub,
-or another provider supported by Better Auth. New users receive a DID, handle,
-and data repository automatically.
+ePDS lets users sign in to AT Protocol apps using email OTP. New users receive
+a DID, handle, and data repository automatically.
 
-From a client's perspective, ePDS uses standard AT Protocol OAuth with PAR,
-PKCE, and DPoP. Use `@atproto/oauth-client-node` for every login variant. Do
-not implement those protocol mechanisms yourself.
-
-The ePDS repository demonstrates server behavior and UI. Its `packages/demo`
-OAuth client still contains a legacy hand-rolled flow; do not copy that client
-implementation.
+Earlier versions of this skill recommended a hand-rolled OAuth flow. That
+guidance is deprecated in favor of `@atproto/oauth-client-node`, which handles
+PAR, PKCE, DPoP, token exchange, and OAuth state. The repository's
+`packages/demo` client still contains the earlier implementation and is not the
+current integration reference.
 
 For protocol-level guidance beyond ePDS specifics—granular scope design,
 identity verification after token exchange, session storage, and refresh-token
@@ -216,62 +213,10 @@ await client.callback(callbackParams, {
 })
 ```
 
-### 5. Create an Application Session
+Application-session management is a generic AT Protocol OAuth concern; follow
+the `atproto-oauth` skill for that guidance.
 
-OAuth session storage and browser application sessions have different jobs:
-
-- `NodeOAuthClient.sessionStore` stores OAuth tokens and DPoP material by DID.
-- Application session store maps a random ID to the signed-in DID.
-- Browser cookie contains only that random ID, never tokens, email, or DID.
-
-```typescript
-interface AppSession {
-  did: string
-}
-
-const APP_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
-const { session: oauthSession } = await client.callback(callbackParams)
-const appSessionId = crypto.randomUUID()
-
-await appSessionStore.set<AppSession>(
-  appSessionId,
-  { did: oauthSession.did },
-  { ttlSeconds: APP_SESSION_TTL_SECONDS },
-)
-
-setCookie('app_session', appSessionId, {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax',
-  path: '/',
-  maxAge: APP_SESSION_TTL_SECONDS,
-})
-```
-
-The cookie is opaque: its random value reveals no identity or credentials.
-`httpOnly` prevents browser JavaScript from reading it. On later requests, load
-the DID server-side and restore the OAuth session:
-
-```typescript
-const appSession = await appSessionStore.get<AppSession>(appSessionId)
-if (!appSession) throw new Error('Application session expired; sign in again')
-
-const oauthSession = await client.restore(appSession.did)
-```
-
-Generate session IDs with a cryptographically secure random source. Rotate the
-ID after authentication, delete it during logout, and protect state-changing
-routes against CSRF. Do not treat `httpOnly` alone as complete session security.
-
-`NodeOAuthClient` stores OAuth credentials by DID. Multiple opaque application
-sessions for one DID therefore share one underlying OAuth session; they are not
-independent device credentials. A later login may replace that stored OAuth
-session. Deleting one application session should normally delete only its random
-ID. Calling OAuth `signOut()` revokes shared credentials and may affect other
-application sessions for that DID. Choose and document intended multi-device
-logout behavior.
-
-### 6. Serve Metadata and JWKS
+### 5. Serve Metadata and JWKS
 
 ```typescript
 app.get('/client-metadata.json', (_request, response) => {
@@ -292,22 +237,6 @@ The ePDS must be able to reach discoverable client metadata and remote JWKS. A
 remote ePDS cannot fetch an endpoint bound only to your local machine; use an
 HTTPS tunnel or deployed development URL. Loopback clients follow separate AT
 Protocol metadata rules and are not confidential clients.
-
-## Do Not Hand-Roll OAuth Primitives
-
-Do not manually implement:
-
-- PKCE verifier or challenge generation
-- DPoP key generation, proof JWTs, or nonce retry
-- PAR requests
-- authorization-code token exchange
-- `private_key_jwt` client assertions
-- authorization-server discovery
-- OAuth state/session object construction
-
-`NodeOAuthClient` already coordinates these operations and their persisted
-state. Reimplementing only part of that lifecycle risks mismatched keys,
-incorrect issuer or audience values, replay vulnerabilities, and broken refresh.
 
 ## Forcing Fresh Sign-In
 
@@ -385,8 +314,10 @@ debugging.
 
 ## Handles
 
-New users choose a handle during signup. Local part must be 5–20 characters,
-alphanumeric with hyphens. Handles are not derived from email addresses.
+New users receive a handle during signup. With `epds_handle_mode` set to
+`picker` or `picker-with-random`, they can choose a local part of 5–20
+characters using letters, numbers, and hyphens. With `random`, ePDS assigns the
+handle without showing a picker. Handles are not derived from email addresses.
 
 Do not expect `OAuthSession` to expose `session.handle`; its stable identity is
 `session.did`. Resolve current handle through an AT Protocol identity resolver
@@ -401,5 +332,5 @@ separate PDS and auth-service hostnames; that is normal.
 ## Reference Files
 
 - [Client metadata](references/client-metadata.md): confidential/public clients, JWKS, branding, email templates
-- [Legacy flow walkthrough](references/flows.md): historical hand-rolled flow; do not use for new integrations
-- [Legacy PKCE/DPoP helpers](references/dpop-pkce.md): historical reference only; prefer `NodeOAuthClient`
+- [Flow walkthrough](references/flows.md): hosted-form and email-first login examples
+- [PKCE and DPoP](references/dpop-pkce.md): responsibilities handled by `NodeOAuthClient`

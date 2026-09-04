@@ -283,9 +283,11 @@ allow-list.
 ## Local development
 
 A remote ePDS must be able to fetch a discoverable client metadata URL and any
-remote `jwks_uri`. It cannot reach a server bound only to your localhost. Use an
-HTTPS tunnel or deployed development URL for a confidential client.
+remote `jwks_uri`. It cannot reach a server bound only to your localhost. Every
+ordinary web client, including a public client, must use an HTTPS tunnel or
+deployed HTTPS development URL.
 
-AT Protocol loopback clients use a separate metadata encoding and public-client
-rules. Do not assume an ordinary `http://localhost/.../client-metadata.json` URL
-will be fetched successfully by a remote ePDS.
+AT Protocol loopback clients are the only exception. They use a separate
+metadata encoding and public-client rules. Do not assume an ordinary
+`http://localhost/.../client-metadata.json` URL will be fetched successfully by
+a remote ePDS.
