@@ -66,12 +66,20 @@ describe('createPreviewConsentHandler', () => {
         "script-src 'self' 'unsafe-inline'",
       )
       expect(res.body).toContain('preview.example/client-metadata.json')
-      // Drives the SPA to the consent view, not sign-in. The hydration
-      // data is JSON-stringified twice (once for the value, once for the
-      // script-literal), so field names appear with escaped quotes.
-      expect(res.body).toContain(String.raw`\"consentRequired\":true`)
-      expect(res.body).toContain(String.raw`\"selected\":true`)
-      // No loginHint — would force sign-in mode in authorize-view.tsx:
+      // Drives provider UI 0.10.3 straight to consent. The session account
+      // uses the provider API's `did` field, and AuthorizeData selects it via
+      // `selectedDid`; the removed `account.sub` / `session.selected` fixture
+      // shape silently opens the account chooser instead.
+      // Hydration is JSON-stringified twice, so names appear escaped.
+      expect(res.body).toContain(
+        String.raw`\"selectedDid\":\"did:web:preview.example\"`,
+      )
+      expect(res.body).toContain(
+        String.raw`\"did\":\"did:web:preview.example\"`,
+      )
+      expect(res.body).not.toContain(String.raw`\"sub\"`)
+      expect(res.body).not.toContain(String.raw`\"selected\"`)
+      // No loginHint — it would force account authentication.
       expect(res.body).not.toContain(String.raw`\"loginHint\"`)
       // Hydration script + entry bundle present:
       expect(res.body).toMatch(

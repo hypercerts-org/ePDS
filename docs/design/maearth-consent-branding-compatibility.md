@@ -1,20 +1,65 @@
-# Ma Earth Consent Branding Compatibility
+# Ma Earth Consent Branding on Provider UI 0.10.3
 
 ## Context
 
-ePDS currently uses `@atproto/pds` 0.5.23, with the matching OAuth provider and
-provider UI packages. The proposed upgrade to PDS 0.5.34 also upgrades the
-provider UI from 0.8.9 to 0.10.3.
+ePDS is upgrading `@atproto/pds` from 0.5.23 to 0.5.34 and the matching
+`@atproto/oauth-provider-ui` from 0.8.9 to 0.10.3. Provider UI 0.10.3 changes
+the authorization-page component structure, CSS utility classes, spacing,
+typography, and controls. It is a redesigned authorization UI, not only a
+class-name update.
 
-The provider UI upgrade changes the HTML structure and CSS utility classes used
-by the upstream consent and account-selection screens. Ma Earth's existing
-OAuth client metadata supplies custom branding CSS written for the old provider
-UI. Ma Earth is outside our control, so its CSS cannot be changed as part of the
-ePDS upgrade.
+Ma Earth supplies its branding through the public OAuth client metadata at:
 
-The goal is visual compatibility: after upgrading ePDS, a Ma Earth consent
-screen should retain its current appearance without requiring any Ma Earth
-change.
+```text
+https://maearth.com/atproto-client-metadata.json
+```
+
+Its current `branding.css` was written against the older provider UI. There is
+no separate historical Ma Earth CSS version to restore or compare. The same
+current CSS partly applies to UI 0.10.3 through generic element selectors and
+branding variables, while selectors coupled to the old gray/slate utilities or
+old component structure no longer match.
+
+## Revised objective
+
+Do not recreate the old provider consent layout.
+
+Create an MVP showing how Ma Earth's current visual language can apply to the
+new authorization layout. The result is for Ma Earth team review before any
+change is proposed in the Ma Earth application.
+
+```text
+provider UI 0.10.3 authorization layout
+  + permanent generic ePDS branding fixes
+  + temporary adaptation of current Ma Earth branding.css
+  = Ma Earth consent-screen MVP
+```
+
+The MVP should preserve Ma Earth's recognizable brand choices:
+
+- warm page, card, and secondary-control surfaces;
+- dark primary actions with light text;
+- warm muted text and borders;
+- the Ma Earth wordmark;
+- consistent inputs, focus states, and hover states;
+- forced light-theme behavior where the current CSS requires it;
+- intentional desktop and mobile presentation.
+
+It should retain the new provider's information architecture, consent copy,
+permission presentation, and security behavior.
+
+## Non-goals
+
+Do not:
+
+- force the new provider component tree into the old layout;
+- treat pixel parity with provider UI 0.8.9 as the target;
+- modify Ma Earth's production metadata or application during the MVP;
+- install a permanent copy of Ma Earth's stylesheet in ePDS;
+- build a generic client-CSS transformation system;
+- mutate provider DOM solely to recreate removed utility classes;
+- hide or rewrite new consent information introduced upstream;
+- infer successful styling from selector presence without rendering the page.
 
 ## Actual exposure
 
@@ -39,122 +84,185 @@ Its normal email login behaves as follows:
 Trust and consent skip do not provide a blanket consent bypass for existing
 accounts. Consent remains scope-aware.
 
-## What is and is not affected
+## Work split
 
-### Unaffected
+Keep permanent ePDS compatibility work separate from the temporary Ma Earth
+showcase.
 
-The email, OTP, and random-handle pages are custom auth-service pages. Upgrading
-the upstream provider UI does not replace their HTML. Ma Earth's existing CSS
-rules for those pages should continue to work.
+### Permanent ePDS work
 
-Gainforest's own login page is likewise owned by its authentication service and
-is not changed by this provider UI upgrade.
+The stacked PR should retain:
 
-### Affected
+1. A repaired `/preview/consent` fixture for provider UI 0.10.3. The upgraded UI
+   selects a session through `authorizeData.selectedDid` and identifies the
+   account through `account.did`; the old fixture's `session.selected` and
+   `account.sub` shape no longer opens consent directly.
+2. Updates to `DEFAULT_BRANDING_CSS` where ePDS-owned selectors depend on old
+   provider utility classes or structure.
+3. Regression tests proving the preview opens consent and generic branding
+   targets the installed provider UI contract.
+4. Documentation of the new provider UI dependency.
 
-Rare Ma Earth consent screens are rendered by the upstream provider UI. UI
-0.10.3 replaces many old utility classes, including gray/slate background and
-text classes, with semantic classes and variables such as `bg-accent`,
-`text-muted-foreground`, and `border-border`.
+These changes belong to ePDS and remain after the visual review.
 
-Ma Earth's existing CSS contains rules for the old provider markup. Those rules
-will no longer match some new elements. Local source comparison confirms the
-selector mismatch, but browser rendering is still required to measure visible
-impact. Likely differences include:
+### Temporary Ma Earth showcase
 
-- page and card backgrounds;
-- text hierarchy;
-- secondary controls and hover states;
-- logo/title placement;
-- responsive action layout.
+A separate, clearly identified commit should:
 
-Primary branding variables remain supported, so this is expected to be visual
-degradation rather than a broken OAuth flow.
+1. Start from the CSS currently returned by Ma Earth's production client
+   metadata.
+2. Adapt obsolete selectors to provider UI 0.10.3's semantic targets and current
+   DOM.
+3. Serve that adapted CSS from the trusted ePDS demo client metadata so the PR
+   Railway deployment can render it without changing Ma Earth or Railway
+   variables.
+4. Affect only the temporary demo presentation.
+5. Be reverted after the Ma Earth team has reviewed the MVP.
 
-## Decision
+The temporary fixture is deployment scaffolding, not the eventual source of
+truth for Ma Earth branding.
 
-Use a small Ma Earth-specific compatibility stylesheet owned by ePDS.
+## CSS adaptation strategy
 
-Do not:
+Prefer provider theme variables and semantic targets over brittle utility-class
+chains.
 
-- modify Ma Earth;
-- build a generic client-CSS transformation system;
-- mutate provider UI DOM to add legacy classes;
-- rewrite all ePDS branding before visible differences are known;
-- treat obsolete selectors alone as proof that every screen is visibly broken.
+```diff
+- .bg-gray-100
+- .text-slate-600
+- .md\:bg-slate-100
+- .grid h1.text-primary
 
-A generic compatibility layer would add disproportionate complexity for a rare,
-client-specific screen. If more clients later need similar patches, reconsider
-a documented semantic branding contract.
-
-## Implementation shape
-
-First render and compare the current and upgraded Ma Earth consent screens.
-Then add only rules required to preserve the current appearance.
-
-Suggested ownership:
-
-```text
-packages/pds-core/src/
-├── lib/client-css-injection.ts       # selects and appends compatibility CSS
-├── lib/maearth-branding-compat.ts    # focused ePDS-owned stylesheet
-└── __tests__/                        # injection and rendered-contract coverage
++ :root branding variables
++ .bg-background / .bg-card / .bg-accent
++ .text-foreground / .text-muted-foreground
++ .border-border
++ stable elements and accessibility attributes where necessary
 ```
 
-CSS order on `/oauth/authorize` should be:
+Apply these rules:
+
+1. **Use variables first.** Keep `--branding-color-primary` and
+   `--branding-color-primary-contrast` as the main provider-supported controls.
+2. **Map semantic surfaces deliberately.** Give page, card, accent, muted, and
+   border roles explicit Ma Earth colors instead of broadly recoloring every
+   element with a matching class fragment.
+3. **Use stable element selectors for controls.** Style submit buttons, links,
+   inputs, and selects by role or element when the component contract supports
+   it.
+4. **Avoid copy replacement through pseudo-elements.** The MVP should not hide
+   provider text and synthesize different text unless product requirements
+   explicitly demand it.
+5. **Use metadata-provided identity.** Prefer the provider-rendered client name
+   and logo to broad selectors such as `img[alt*="Logo"]` where possible.
+6. **Scope structural selectors narrowly.** When a semantic class is
+   insufficient, target the authorization component involved rather than all
+   provider pages.
+7. **Validate interaction states.** Hover, focus-visible, disabled, loading,
+   warning, and error states are part of the visual contract.
+8. **Test responsive behavior.** Desktop and mobile must both be intentional;
+   desktop-only selector matching is not sufficient.
+
+The expected CSS order remains:
 
 ```text
-1. ePDS default branding CSS
-2. Ma Earth's existing client branding CSS
-3. ePDS-owned Ma Earth compatibility CSS
+1. upstream provider UI CSS
+2. ePDS default branding CSS
+3. client branding.css
 ```
 
-The final layer applies only when the exact trusted Ma Earth client ID is
-resolved. It should target only the upgraded provider consent UI and should not
-alter auth-service email, OTP, or handle pages.
+The temporary demo's adapted Ma Earth stylesheet occupies layer 3. Permanent
+ePDS defaults must not contain Ma Earth-specific palette or logo rules.
 
-Keep the exception explicit and documented. Avoid parsing or rewriting remote
-client CSS.
+## Implementation and review sequence
 
-## Implementation sequence
+```text
+pds/upgrade-0-5-34                 # PR #251
+└── pds/maearth-branding-compat    # stacked PR
+    ├── permanent preview + generic selector fixes
+    └── temporary Ma Earth MVP fixture
+```
 
-1. Establish reference screenshots or computed styles for today's Ma Earth
-   consent screen using an existing Certified.one user with no Ma Earth grant.
-2. Upgrade PDS, OAuth provider, and provider UI together in an isolated branch.
-3. Render the same consent scenario with Ma Earth's unchanged branding CSS.
-4. List actual visible differences. Ignore obsolete rules that produce no
-   visible regression.
-5. Add the smallest ePDS-owned compatibility stylesheet needed to reproduce the
-   current appearance.
-6. Inject it after client CSS only for Ma Earth's trusted client ID.
-7. Verify first-grant and expanded-scope consent on desktop and mobile.
-8. Confirm normal new-user and returning-user email/OTP flows remain unchanged.
+1. Repair the consent preview and prove it opens the consent component from the
+   installed provider UI bundle.
+2. Render provider UI 0.10.3 with ePDS defaults only and record its DOM,
+   computed styles, and desktop/mobile screenshots.
+3. Load Ma Earth's current production metadata and stylesheet without modifying
+   the upstream resource.
+4. Add the smallest new-selector adaptation that produces a coherent Ma Earth
+   version of the redesigned authorization page.
+5. Expose the adapted stylesheet through the trusted demo metadata on the
+   stacked branch.
+6. Push the branch and open a PR based on `pds/upgrade-0-5-34`, allowing Railway
+   to create isolated deployments.
+7. Review the deployed consent preview on desktop and mobile, including hover,
+   focus, and expanded permission content.
+8. Iterate on the MVP with visual evidence rather than selector guesses.
+9. Present the result to the Ma Earth team as a proposed first version for the
+   new provider UI.
+10. Revert the temporary demo fixture after review. Keep the preview repair,
+    generic ePDS selector updates, tests, and documentation.
+11. If approved, implement the final stylesheet in the Ma Earth repository so
+    its client metadata remains the source of truth.
 
-## Required tests
+## Required validation
 
-- Compatibility CSS is injected for the exact Ma Earth client ID.
-- It is not injected for other trusted or untrusted clients.
-- It is injected only on the upstream authorization response where needed.
-- Ma Earth's existing client CSS remains present and precedes the compatibility
-  stylesheet.
-- First-grant consent preserves current background, card, text, logo, primary
-  action, secondary action, hover, and responsive behavior.
-- Expanded-scope consent has the same result.
-- New-user random-handle signup still skips consent.
-- Returning users with existing grants still return without consent.
+### Automated
 
-## Separate upgrade work
+- `/preview/consent` selects its fixture account and renders consent under
+  provider UI 0.10.3.
+- `/preview/chooser` continues to render the chooser.
+- Permanent default-branding selectors cover the new semantic provider targets.
+- Trusted demo CSS is injected after ePDS defaults.
+- Untrusted clients do not receive the temporary trusted-client stylesheet.
+- CSP permits each injected style block.
+- Existing chooser, OAuth, and account-switching tests continue to pass.
 
-This branding decision does not replace other PDS 0.5.34 upgrade tasks:
+### Visual
 
-- align `@atproto/pds`, `@atproto/oauth-provider`, and
-  `@atproto/oauth-provider-ui` versions;
-- update the `Another account` lookup to support native `<button>` elements;
-- validate provider errors, preview assets, OAuth flows, runtime dependencies,
-  and standard PDS behavior.
+Capture desktop and mobile states for:
+
+- consent page initial state;
+- expanded permission details, when available;
+- primary and secondary actions;
+- hover, keyboard focus, disabled, and loading states;
+- long client name or scope content;
+- warning and error presentation;
+- Ma Earth logo sizing and alignment;
+- light-theme behavior under a dark OS preference.
+
+Compare the MVP against Ma Earth's broader product language, not against the old
+provider component geometry. The review question is: “Does the redesigned
+consent page look intentionally Ma Earth while retaining the provider's new
+consent behavior?”
+
+## Cleanup and ownership
+
+Before the stacked PR is made merge-ready:
+
+```text
+keep
+├── provider UI 0.10.3 preview repair
+├── generic ePDS default-branding fixes
+├── regression tests
+└── documentation
+
+drop
+└── temporary Ma Earth CSS served by the demo
+```
+
+If the Ma Earth team accepts the direction, the production adaptation should be
+implemented and reviewed in the Ma Earth application. ePDS should continue to
+consume the public client metadata rather than owning a permanent client-specific
+stylesheet.
 
 ## Evidence limits
 
-Findings came from local source snapshots. Production client metadata, rendered
-pages, computed styles, and deployment configuration were not fetched or
-inspected. Visual changes must be measured before compatibility CSS is written.
+The public production metadata and current CSS were retrieved during this
+assessment. The upgraded PR preview currently demonstrates that the old consent
+fixture opens the chooser instead of consent, which must be repaired before a
+valid visual comparison.
+
+No Ma Earth production configuration was changed. No claim about the final
+appearance should be made until the repaired preview is deployed and reviewed
+in a browser at desktop and mobile sizes.
