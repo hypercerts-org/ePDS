@@ -196,9 +196,58 @@ const amber: Theme = {
   }),
 }
 
+const maEarthConsentMvpPage: PageTheme = {
+  bg: '#F2ECE4',
+  surface: '#FAF8F6',
+  surfaceShadow: '0 12px 32px rgba(33,32,31,0.10)',
+  text: '#21201F',
+  textMuted: '#4C4139',
+  textHint: '#6B6259',
+  primary: '#21201F',
+  primaryText: '#FAF8F6',
+  primaryHover: '#3A3735',
+  inputBg: '#EAE1D7',
+  inputBorder: '#D4C9BC',
+  focusBorder: '#D4B08A',
+  errorText: '#B25032',
+  errorBg: '#F7E8E2',
+  logoBg: '#21201F',
+}
+
+/**
+ * Temporary consent-screen concept for Ma Earth review on provider UI 0.10.
+ * This is deployment scaffolding for the stacked PR, not production ownership
+ * of Ma Earth's client branding. Remove it after the visual review.
+ */
+export const MAEARTH_CONSENT_MVP_THEME: Theme = {
+  page: maEarthConsentMvpPage,
+  injectedCss: [
+    buildInjectedCss(maEarthConsentMvpPage, {
+      primaryChannels: '33 32 31',
+      primaryContrastChannels: '250 248 246',
+      fieldLabel: '#4C4139',
+      secondarySurfaceHover: '#DDD4C8',
+      accountInfoBg: '#EAE1D7',
+      accountInfoText: '#4C4139',
+    }),
+    ':root { --branding-color-error: 178 80 50; --branding-color-warning: 180 140 80; --branding-color-success: 93 138 93; --recovery-link-display: none; }',
+    '.auth-background > div:has(> [data-slot="card"]) { max-width: 30rem; }',
+    '[data-slot="card"] { border-radius: 18px; }',
+    '[data-slot="card-footer"] { background: #EAE1D7; }',
+    '[data-slot="card-title"] { letter-spacing: -0.01em; }',
+    '[data-slot="button"] { min-height: 2.5rem; }',
+    '[data-slot="button"].bg-secondary { border-color: #D4C9BC; }',
+    '[data-slot="avatar"]:has(> img[alt="Ma Earth"]) { width: 6rem; height: 2rem; border-radius: 0; }',
+    '[data-slot="avatar"]:has(> img[alt="Ma Earth"])::after { display: none; }',
+    'div:has(> [data-slot="avatar"] > img[alt="Ma Earth"]) { width: 6rem; margin-left: 0; }',
+    '[data-slot="avatar"] > img[alt="Ma Earth"] { width: 100%; height: 100%; object-fit: contain; }',
+  ].join(' '),
+}
+
 const presets: Record<string, Theme> = {
   ocean,
   amber,
+  'maearth-consent-mvp': MAEARTH_CONSENT_MVP_THEME,
 }
 
 // ---------------------------------------------------------------------------

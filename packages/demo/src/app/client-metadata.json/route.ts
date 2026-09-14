@@ -23,7 +23,7 @@
 import { NextResponse } from 'next/server'
 import { getBaseUrl } from '@/lib/auth'
 import { getClientPublicJwk } from '@/lib/client-jwk'
-import { getTheme } from '@/lib/theme'
+import { getTheme, MAEARTH_CONSENT_MVP_THEME } from '@/lib/theme'
 
 export const runtime = 'nodejs'
 
@@ -39,16 +39,27 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   const baseUrl = getBaseUrl()
-  const theme = getTheme()
+  const configuredTheme = getTheme()
+  // Temporary review fixture: only the already-themed trusted demo advertises
+  // the Ma Earth concept. The untrusted demo has no configured theme and keeps
+  // its normal identity. Revert this override after Ma Earth's visual review.
+  const showMaEarthConsentMvp = configuredTheme !== null
+  const theme = showMaEarthConsentMvp
+    ? MAEARTH_CONSENT_MVP_THEME
+    : configuredTheme
 
   const publicJwk = await getClientPublicJwk()
   const isConfidential = publicJwk !== null
 
   const metadata = {
     client_id: `${baseUrl}/client-metadata.json`,
-    client_name: process.env.EPDS_CLIENT_NAME ?? 'ePDS Demo',
+    client_name: showMaEarthConsentMvp
+      ? 'Ma Earth'
+      : (process.env.EPDS_CLIENT_NAME ?? 'ePDS Demo'),
     client_uri: baseUrl,
-    logo_uri: `${baseUrl}/certified-logo.png`,
+    logo_uri: showMaEarthConsentMvp
+      ? `${baseUrl}/maearth-logo-mvp.svg`
+      : `${baseUrl}/certified-logo.png`,
     redirect_uris: [`${baseUrl}/api/oauth/callback`],
     scope:
       'atproto include:org.hypercerts.authWrite include:app.certified.authWrite',
