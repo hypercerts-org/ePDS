@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 // packages/shared/{src,dist}/ → repo root is always three levels up
-const ROOT = join(__dirname, '..', '..', '..')
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 
 /**
  * Resolve the ePDS version string.

@@ -272,16 +272,20 @@ export function buildChooserEnrichmentScript(): string {
     if (!buildAnotherAccountUrl(authOrigin)) return;
     var root = document.getElementById('root');
     if (!root) return;
-    // Upstream @atproto/oauth-provider-ui renders this as a
-    // div-with-role, NOT a native button:
+    // Upstream @atproto/oauth-provider-ui has rendered this as both a
+    // div-with-role and a native button:
     //   <div role="button" aria-label="Sign in to an account that is not listed">
     //     Select another account
     //   </div>
+    //   <button aria-label="Sign in to an account that is not listed">
+    //     Select another account
+    //   </button>
     // The aria-label copy changed in oauth-provider-ui 0.8 ("Login to
     // account…" -> "Sign in to an account…", visible text "Another
-    // account" -> "Select another account"). Match either aria-label,
-    // then fall back to either visible-text variant scoped to role=button
-    // (div OR button) so a future copy tweak degrades rather than breaks.
+    // account" -> "Select another account"). Match either aria-label
+    // on either element type, then fall back to either visible-text
+    // variant on either element type so a future copy tweak degrades
+    // rather than breaks.
     var ARIA_LABELS = [
       'Sign in to an account that is not listed',
       'Login to account that is not listed',
@@ -290,11 +294,15 @@ export function buildChooserEnrichmentScript(): string {
     var btn = null;
     for (var a = 0; a < ARIA_LABELS.length && !btn; a++) {
       btn = root.querySelector(
-        '[role="button"][aria-label="' + ARIA_LABELS[a] + '"]',
+        'button[aria-label="' +
+          ARIA_LABELS[a] +
+          '"], [role="button"][aria-label="' +
+          ARIA_LABELS[a] +
+          '"]',
       );
     }
     if (!btn) {
-      var candidates = root.querySelectorAll('[role="button"]');
+      var candidates = root.querySelectorAll('button, [role="button"]');
       for (var i = 0; i < candidates.length; i++) {
         if (TEXTS.indexOf((candidates[i].textContent || '').trim()) >= 0) {
           btn = candidates[i];

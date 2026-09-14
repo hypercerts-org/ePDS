@@ -285,8 +285,8 @@ Middleware intercepts HTML responses for `GET /oauth/authorize` and
 (a) appends each bound account's email next to its handle in the chooser UI,
 (b) hides upstream's "Sign up" button on the chooser (ePDS routes signup
 through auth-service, not upstream), and (c) rebinds upstream's "Another
-account" button (`<div role="button" aria-label="Login to account that is
-not listed">`) with a capture-phase click listener that hard-navigates to
+account" control (a native `<button>` in provider UI 0.10.3, previously
+`<div role="button">`) with a capture-phase click listener that hard-navigates to
 `auth.<host>/oauth/authorize?prompt=login&<orig params>`, beating React's
 delegated root-level click handler and preventing the SPA from swapping
 the chooser for its stock sign-in form. The injected script reads two
@@ -323,6 +323,11 @@ Depends on:
   JSON post-load).
 - The global variable names `__sessions` and `__deviceSessions`.
 - The account payload shape (`sub`, `email`, `preferred_username`).
+- The account-switch control being a native button or `[role="button"]`,
+  with a recognized aria-label (`Sign in to an account that is not listed`
+  or the older `Login to account that is not listed`) or visible text
+  (`Select another account` or `Another account`). Existing Gherkin
+  account-switch scenarios exercise the resulting email-form navigation.
 - The chooser rendering handle text as visible DOM text that a tree-walker
   can find.
 
