@@ -25,6 +25,15 @@ describe('buildChooserEnrichmentScript (HYPER-268)', () => {
     )
   })
 
+  it('indexes current Account identifiers with legacy fallbacks', () => {
+    const script = buildChooserEnrichmentScript()
+
+    expect(script).toContain('var handle = a.handle || a.preferred_username;')
+    expect(script).toContain('var did = a.did || a.sub;')
+    expect(script).toContain("if (handle) byHandle[handle] = a.email || '';")
+    expect(script).toContain("if (did) byDid[did] = a.email || '';")
+  })
+
   it('is deterministic', () => {
     expect(buildChooserEnrichmentScript()).toBe(buildChooserEnrichmentScript())
   })

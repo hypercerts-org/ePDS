@@ -51,8 +51,10 @@ export function buildChooserEnrichmentScript(): string {
   //     sets window.__sessions (type: readonly Session[])
   //   - /account          (the standalone account-management SPA)
   //     sets window.__deviceSessions (type: readonly ActiveDeviceSession[])
-  // Both contain { account: { sub, email, preferred_username, ... }, ... }
-  // so our DOM-enrichment heuristic can operate on either one.
+  // Both contain { account: { did, handle, email, ... }, ... }
+  // so our DOM-enrichment heuristic can operate on either one. Legacy
+  // sub/preferred_username fields are accepted as a fallback below for
+  // older rendered pages.
   var captured = null;
   function interceptGlobal(name) {
     try {
@@ -139,16 +141,18 @@ export function buildChooserEnrichmentScript(): string {
     var handleMode = readHandleMode();
     var hideHandle = handleMode === 'random';
     var byHandle = Object.create(null);
-    var bySub = Object.create(null);
+    var byDid = Object.create(null);
     captured.forEach(function(s) {
       var a = s && s.account;
       if (!a) return;
-      if (a.preferred_username) byHandle[a.preferred_username] = a.email || '';
-      if (a.sub) bySub[a.sub] = a.email || '';
+      var handle = a.handle || a.preferred_username;
+      var did = a.did || a.sub;
+      if (handle) byHandle[handle] = a.email || '';
+      if (did) byDid[did] = a.email || '';
     });
 
     // Find the deepest element whose own text content contains a known
-    // handle or sub, and append the email next to it. Upstream's markup
+    // handle or DID, and append the email next to it. Upstream's markup
     // varies between versions; walking by leaf-element text is more
     // resilient than guessing at class names. We skip elements that have
     // children whose text also matches (so we only label the deepest
@@ -173,8 +177,8 @@ export function buildChooserEnrichmentScript(): string {
         if (own.indexOf(handle) >= 0) { email = byHandle[handle]; break; }
       }
       if (!email) {
-        for (var sub in bySub) {
-          if (own.indexOf(sub) >= 0) { email = bySub[sub]; break; }
+        for (var did in byDid) {
+          if (own.indexOf(did) >= 0) { email = byDid[did]; break; }
         }
       }
       if (email) matches.push({ el: node, email: email });
