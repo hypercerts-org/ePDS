@@ -107,6 +107,8 @@ export interface PreviewAuthorizeFixture {
   clientId: string
   clientMetadata: ClientMetadata
   isTrusted: boolean
+  /** Account selected by consent previews; omit for chooser previews. */
+  selectedDid?: string
 }
 
 /** Minimal AuthorizeData fixture shared by /preview/consent + /preview/chooser. */
@@ -125,6 +127,7 @@ export function buildAuthorizeData(opts: PreviewAuthorizeFixture): unknown {
     clientMetadata: opts.clientMetadata,
     clientTrusted: opts.isTrusted,
     clientFirstParty: false,
+    selectedDid: opts.selectedDid,
     scope: 'atproto transition:generic',
     uiLocales: undefined,
     promptMode: undefined,
