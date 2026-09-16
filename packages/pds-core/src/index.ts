@@ -46,10 +46,8 @@ import {
   validateLocalPart,
   resolveClientMetadata,
   getClientCss,
-  getClientMetadataCacheStatus,
   getEpdsVersion,
   renderError,
-  validateClientMetadataForPreview,
   requireEnv,
 } from '@certified-app/shared'
 import { shouldRewriteSecFetchSite } from './lib/sec-fetch-site-rewrite.js'
@@ -57,11 +55,8 @@ import {
   findInsertionIndex,
   installCssInjectionMiddleware,
 } from './lib/client-css-injection.js'
-import express, { type Application, type Request, type Response } from 'express'
-import {
-  createPreviewConsentHandler,
-  renderPreviewIndex,
-} from './lib/preview-consent.js'
+import express from 'express'
+import { createPreviewConsentHandler } from './lib/preview-consent.js'
 import { createPreviewChooserHandler } from './lib/preview-chooser.js'
 import {
   createCookieDomainMiddleware,
@@ -78,6 +73,7 @@ import {
 } from './lib/email-confirmed.js'
 import { installTestHooks } from './lib/test-hooks.js'
 import { buildPostCallbackAuthorizeUrl } from './lib/epds-callback-authorize.js'
+import { installPreviewRoutes } from './preview-routes.js'
 
 /* v8 ignore next 4 -- module-level init, only testable via e2e */
 const atprotoPdsPkg: { version: string } = JSON.parse(
@@ -88,66 +84,6 @@ const atprotoPdsPkg: { version: string } = JSON.parse(
 )
 
 const logger = createLogger('pds-core')
-
-/**
- * Wire up the /preview/* routes on the given Express app, if
- * `createPreviewConsentHandler` returned a handler (i.e. the env flag
- * is on). No-op otherwise. Factored out of `main` to keep its cognitive
- * complexity under the Sonar ceiling.
- */
-function installPreviewRoutes(
-  app: Application,
-  opts: {
-    previewConsentHandler: NonNullable<
-      ReturnType<typeof createPreviewConsentHandler>
-    >
-    previewChooserHandler: NonNullable<
-      ReturnType<typeof createPreviewChooserHandler>
-    >
-    authHostname: string
-    pdsPublicUrl: string
-    trustedClients: string[]
-  },
-): void {
-  // auth-service runs on auth.<PDS_HOSTNAME>; pds-core is pdsPublicUrl.
-  // Use https for real hostnames, http for localhost (see setup.sh and
-  // Caddyfile — same rule applied in auth-service's preview router).
-  const authScheme =
-    opts.authHostname === 'localhost' ||
-    opts.authHostname.endsWith('.localhost')
-      ? 'http'
-      : 'https'
-  const authPublicUrl = `${authScheme}://${opts.authHostname}`
-  app.get('/preview', (_req: Request, res: Response) => {
-    res.setHeader('Content-Type', 'text/html; charset=utf-8')
-    res.send(
-      renderPreviewIndex({ authPublicUrl, pdsPublicUrl: opts.pdsPublicUrl }),
-    )
-  })
-  app.get('/preview/consent', opts.previewConsentHandler)
-  app.get('/preview/chooser', opts.previewChooserHandler)
-  app.get('/preview/cache-status', (_req: Request, res: Response) => {
-    res.setHeader('Cache-Control', 'no-store')
-    res.json({ now: Date.now(), entries: getClientMetadataCacheStatus() })
-  })
-  app.get('/preview/validate', async (req: Request, res: Response) => {
-    const url =
-      typeof req.query.client_id === 'string' ? req.query.client_id : ''
-    res.setHeader('Cache-Control', 'no-store')
-    if (!url) {
-      res.json({ url: '', fetched: false, checks: [] })
-      return
-    }
-    const result = await validateClientMetadataForPreview(
-      url,
-      opts.trustedClients,
-    )
-    res.json(result)
-  })
-  logger.info(
-    'Preview routes installed (PDS_PREVIEW_ROUTES=1): /preview, /preview/consent, /preview/chooser, /preview/cache-status, /preview/validate',
-  )
-}
 
 async function main() {
   const env = readEnv()
@@ -950,6 +886,7 @@ async function main() {
       authHostname,
       pdsPublicUrl: pdsUrl,
       trustedClients,
+      logger,
     })
   }
 

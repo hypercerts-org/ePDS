@@ -1,9 +1,13 @@
+import { createServer } from 'node:http'
+import express from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   createPreviewConsentHandler,
   renderPreviewIndex,
 } from '../lib/preview-consent.js'
+import { createPreviewChooserHandler } from '../lib/preview-chooser.js'
+import { installPreviewRoutes } from '../preview-routes.js'
 import { mockLogger, mockRes } from './preview-test-helpers.js'
 
 describe('createPreviewConsentHandler', () => {
@@ -50,34 +54,79 @@ describe('createPreviewConsentHandler', () => {
       process.env.PDS_PREVIEW_ROUTES = '1'
     })
 
-    it('renders fixture consent HTML with default client id when none provided', async () => {
-      const handler = createPreviewConsentHandler({
+    it('renders fixture consent HTML through the registered route', async () => {
+      const deps = {
         trustedClients: [],
         resolveClientMetadata: () => Promise.resolve({}),
         getClientCss: () => null,
         logger: mockLogger(),
-      })!
-      const res = mockRes()
-      await handler({ query: {} }, res)
+      }
+      const app = express()
+      installPreviewRoutes(app, {
+        previewConsentHandler: createPreviewConsentHandler(deps)!,
+        previewChooserHandler: createPreviewChooserHandler({
+          ...deps,
+          authOrigin: 'http://auth.localhost',
+        })!,
+        authHostname: 'auth.localhost',
+        pdsPublicUrl: 'http://pds.localhost',
+        trustedClients: [],
+        logger: deps.logger,
+      })
+      const server = createServer(app)
+      const serverReady = new Promise<void>((resolve, reject) => {
+        server.once('listening', resolve)
+        server.once('error', reject)
+      })
+      server.listen(0)
 
-      expect(res.headers['Content-Type']).toBe('text/html; charset=utf-8')
-      expect(res.headers['Cache-Control']).toBe('no-store')
-      expect(res.headers['Content-Security-Policy']).toContain(
-        "script-src 'self' 'unsafe-inline'",
-      )
-      expect(res.body).toContain('preview.example/client-metadata.json')
-      // Drives the SPA to the consent view, not sign-in. The hydration
-      // data is JSON-stringified twice (once for the value, once for the
-      // script-literal), so field names appear with escaped quotes.
-      expect(res.body).toContain(String.raw`\"consentRequired\":true`)
-      expect(res.body).toContain(String.raw`\"selected\":true`)
-      // No loginHint — would force sign-in mode in authorize-view.tsx:
-      expect(res.body).not.toContain(String.raw`\"loginHint\"`)
-      // Hydration script + entry bundle present:
-      expect(res.body).toMatch(
-        /<script>window\["__authorizeData"\]=JSON\.parse/,
-      )
-      expect(res.body).toContain('/@atproto/oauth-provider/~assets/')
+      try {
+        await serverReady
+        const address = server.address()
+        if (!address || typeof address === 'string') {
+          throw new Error('Expected the preview test server to have a port')
+        }
+        const response = await fetch(
+          `http://127.0.0.1:${address.port}/preview/consent`,
+        )
+        const body = await response.text()
+
+        expect(response.status).toBe(200)
+        expect(response.headers.get('content-type')).toBe(
+          'text/html; charset=utf-8',
+        )
+        expect(response.headers.get('cache-control')).toBe('no-store')
+        expect(response.headers.get('content-security-policy')).toContain(
+          "script-src 'self' 'unsafe-inline'",
+        )
+        expect(body).toContain('preview.example/client-metadata.json')
+        // Drives provider UI 0.10.3 straight to consent. The session account
+        // uses the provider API's `did` field, and AuthorizeData selects it via
+        // `selectedDid`; the removed `account.sub` / `session.selected` fixture
+        // shape silently opens the account chooser instead.
+        // Hydration is JSON-stringified twice, so names appear escaped.
+        expect(body).toContain(
+          String.raw`\"selectedDid\":\"did:web:preview.example\"`,
+        )
+        expect(body).toContain(String.raw`\"did\":\"did:web:preview.example\"`)
+        expect(body).not.toContain(String.raw`\"sub\"`)
+        expect(body).not.toContain(String.raw`\"selected\"`)
+        // No loginHint — it would force account authentication.
+        expect(body).not.toContain(String.raw`\"loginHint\"`)
+        // Hydration script + entry bundle present:
+        expect(body).toMatch(/<script>window\["__authorizeData"\]=JSON\.parse/)
+        expect(body).toContain('/@atproto/oauth-provider/~assets/')
+      } finally {
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => {
+            if (error) {
+              reject(error)
+              return
+            }
+            resolve()
+          })
+        })
+      }
     })
 
     it('resolves client metadata and injects CSS for custom client_id', async () => {

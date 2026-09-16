@@ -87,36 +87,17 @@ function buildInjectedCss(
   } = options
 
   return [
-    // Provider-UI consent page: recolour Tailwind utilities via the
-    // --branding-color-* custom props the UI reads through
-    // `rgb(var(--branding-color-primary))`. Channels are space-separated.
-    `:root { --branding-color-primary: ${primaryChannels}; --branding-color-primary-contrast: ${primaryContrastChannels}; }`,
-    // Body background & primary text. Provider-UI sets these on <body>
-    // via `bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100`,
-    // so class-specific selectors (plus !important for dark-mode) are
-    // needed to override Tailwind's equal-specificity rules.
-    `body { background: ${page.bg} !important; color: ${page.text} !important; }`,
-    `html { background: ${page.bg}; }`,
-    // Consent page's "left strip" header column (md:bg-slate-100
-    // md:dark:bg-slate-800) — paint it a shade lighter than body so
-    // it reads as a distinct surface, matching the demo's own cards.
-    String.raw`.md\:bg-slate-100, .md\:dark\:bg-slate-800 { background-color: ${page.surface} !important; }`,
-    String.raw`.md\:dark\:border-slate-700 { border-color: ${page.inputBorder} !important; }`,
-    `main { background: ${page.surface} !important; border-color: ${page.inputBorder} !important; box-shadow: ${page.surfaceShadow} !important; }`,
-    // Three-tone text hierarchy on the consent page. Provider-UI uses
-    // `text-slate-{100,200,300,400}` + `text-neutral-{400,500}` for
-    // primary / muted / hint text; remap to the theme's three shades.
-    String.raw`.text-slate-900, .dark\:text-slate-100, .text-slate-800, .dark\:text-slate-200, .text-gray-800, .dark\:text-gray-200 { color: ${page.text} !important; }`,
-    String.raw`.text-slate-700, .text-slate-600, .dark\:text-slate-300, .dark\:text-slate-400 { color: ${page.textMuted} !important; }`,
-    String.raw`.text-slate-500, .text-gray-500, .text-neutral-500, .dark\:text-neutral-400, .dark\:text-gray-300, .dark\:text-gray-400 { color: ${page.textHint} !important; }`,
-    // Consent page secondary buttons (Deny access etc.) default to
-    // .bg-gray-300 / .dark:bg-slate-600, which reads as a jarring
-    // slate-grey against the themed card. Tint them to a muted surface
-    // that harmonises with the palette.
-    String.raw`.bg-gray-100, .bg-gray-300, .dark\:bg-slate-600, .bg-gray-200, .dark\:bg-gray-800, .dark\:bg-gray-700 { background-color: ${page.inputBorder} !important; color: ${page.text} !important; border-color: ${page.inputBorder} !important; }`,
-    String.raw`.hover\:bg-gray-200:hover, .dark\:hover\:bg-gray-700:hover { background-color: ${secondarySurfaceHover} !important; }`,
+    // Provider UI 0.10 consumes semantic color roles. Client CSS loads after
+    // the provider stylesheet, so these values also win over its dark-media
+    // defaults without coupling the theme to generated utility-class names.
+    `:root { color-scheme: light; --branding-color-primary: ${primaryChannels}; --branding-color-primary-contrast: ${primaryContrastChannels}; --background: ${page.surface}; --foreground: ${page.text}; --card: ${page.surface}; --card-foreground: ${page.text}; --popover: ${page.surface}; --popover-foreground: ${page.text}; --secondary: ${page.inputBg}; --secondary-foreground: ${page.text}; --muted: ${page.bg}; --muted-foreground: ${page.textMuted}; --accent: ${secondarySurfaceHover}; --accent-foreground: ${page.text}; --border: ${page.inputBorder}; --input: ${page.inputBorder}; --ring: ${page.focusBorder}; --page-bg: ${page.bg}; --card-bg: ${page.surface}; --card-border: ${page.inputBorder}; --input-bg: ${page.inputBg}; --input-border: ${page.inputBorder}; --focus-border: ${page.focusBorder}; --btn-secondary-border: ${page.inputBorder}; }`,
+    `body, html { background: ${page.bg} !important; color: ${page.text} !important; }`,
+    // data-slot is the provider's component contract; unlike its generated
+    // Tailwind utility sequence, it describes the card across UI rebuilds.
+    `[data-slot="card"] { border: 1px solid ${page.inputBorder}; box-shadow: ${page.surfaceShadow}; }`,
+    `[data-slot="card-footer"] { border-color: ${page.inputBorder}; }`,
     // auth-service hand-rolled markup
-    `:root { --page-bg: ${page.bg}; --card-bg: ${page.surface}; --card-border: ${page.inputBorder}; --input-bg: ${page.inputBg}; --input-border: ${page.inputBorder}; --muted-foreground: ${page.textMuted}; --focus-border: ${page.focusBorder}; --btn-secondary-border: ${page.inputBorder}; }`,
+
     `.container { background: ${page.surface}; box-shadow: ${page.surfaceShadow}; }`,
     `h1 { color: ${page.text}; }`,
     `.subtitle { color: ${page.textMuted}; }`,

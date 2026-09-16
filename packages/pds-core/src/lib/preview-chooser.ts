@@ -82,23 +82,20 @@ const FIXTURE_ACCOUNTS: readonly { handle: string; name: string }[] = [
 ] as const
 
 function buildSessions(opts: PreviewChooserFixture): unknown {
-  // Drive the SPA's chooser view: every session has selected=false so
-  // the gate that mounts <ConsentView> never fires. loginRequired=false
-  // because the chooser shows fully-bound accounts; consentRequired is
-  // irrelevant in the chooser view but we set it true so a user click
-  // through would land on the consent step (matching real-flow shape).
+  // Provider UI 0.10.3 mounts the chooser from sessions whose account uses
+  // the current Account contract. Only loginRequired belongs on the session;
+  // selection and consent state are derived by the upstream flow.
   const n = Math.min(MAX_FIXTURE_ACCOUNTS, Math.max(0, opts.numAccounts))
   return FIXTURE_ACCOUNTS.slice(0, n).map((a, idx) => ({
     account: {
-      sub: `did:web:preview-${idx}.example`,
-      aud: 'https://preview.example',
-      preferred_username: a.handle,
+      did: `did:web:preview-${idx}.example`,
+      pds: `did:web:preview-${idx}.example`,
+      deactivated: false,
+      handle: a.handle,
       name: a.name,
       email: `${a.handle.split('.')[0]}@preview.example`,
     },
-    selected: false,
     loginRequired: false,
-    consentRequired: true,
   }))
 }
 
