@@ -504,8 +504,6 @@ Validate desktop and mobile rendering for:
 - custom handle page;
 - upstream consent page;
 - upstream account chooser;
-- the temporary Ma Earth MVP on first-grant consent;
-- the temporary Ma Earth MVP with expanded-scope consent;
 - CSP acceptance and client CSS ordering.
 
 ### Runtime and PDS behavior
