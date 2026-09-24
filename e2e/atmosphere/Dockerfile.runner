@@ -12,6 +12,7 @@ COPY packages/pds-core/package.json packages/pds-core/
 COPY packages/demo/package.json packages/demo/
 RUN pnpm install --frozen-lockfile
 COPY . .
+COPY e2e/atmosphere/prove-private-plc.ts.txt e2e/atmosphere/prove-private-plc.runtime.mts
 COPY e2e/atmosphere/runner-entrypoint.sh /usr/local/bin/epds-e2e-entrypoint
 RUN chmod 0755 /usr/local/bin/epds-e2e-entrypoint
 ENTRYPOINT ["/usr/local/bin/epds-e2e-entrypoint"]
