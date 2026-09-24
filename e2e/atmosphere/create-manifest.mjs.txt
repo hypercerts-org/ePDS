@@ -1,0 +1,30 @@
+#!/usr/bin/env node
+import { writeFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
+
+const [path, project, subnet] = process.argv.slice(2)
+if (!path || !project || !subnet) {
+  throw new Error('usage: create-manifest.mjs <path> <project> <subnet>')
+}
+if (!/^epds-e2e-[a-z0-9-]+$/.test(project)) {
+  throw new Error('project must use the epds-e2e- prefix')
+}
+const manifest = {
+  version: 1,
+  project,
+  domain: 'atmosbox.test',
+  subnet,
+  plc: 'https://plc.atmosbox.test',
+  applications: ['epds-e2e'],
+  pds: [
+    {
+      id: 'pds1',
+      hostname: 'pds1.atmosbox.test',
+      url: 'https://pds1.atmosbox.test',
+      users: [],
+    },
+  ],
+}
+await writeFile(resolve(path), JSON.stringify(manifest, null, 2) + '\n', {
+  mode: 0o600,
+})

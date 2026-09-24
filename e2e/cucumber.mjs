@@ -2,19 +2,17 @@
 //
 // Two profiles are exported:
 //
-//   default         — the normal PR-CI run against a Railway preview
-//                     environment. Excludes scenarios that the Railway
-//                     topology cannot satisfy (see per-tag notes below).
+//   default         — the standard PR-CI run against the private Atmosphere
+//                     in a Box stack. Excludes session-reuse scenarios, which
+//                     run in their own compatible-hostname profile below.
 //
 //   session-reuse   — only the HYPER-268 @session-reuse scenarios. Intended
 //                     for runs against a docker-compose (or equivalently-
 //                     topologised) stack where auth-service is a subdomain
 //                     of pds-core (AUTH_HOSTNAME ends with .<PDS_HOSTNAME>),
 //                     so device-session cookies are sharable across the two
-//                     services. Railway preview envs can't satisfy this
-//                     (random hostnames under the .up.railway.app public
-//                     suffix), so these scenarios are excluded from the
-//                     default profile.
+//                     services. These scenarios are excluded from the default profile and run
+//                     separately against the managed private stack.
 //
 // Invoke via `pnpm test:e2e` (default) or `pnpm test:e2e -p session-reuse`.
 //
