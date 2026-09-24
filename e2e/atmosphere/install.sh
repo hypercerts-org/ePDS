@@ -25,37 +25,10 @@ print(network.network_address + 2, network.network_address + 3)
 PY
 )
 
+python3 "$SCRIPT_DIR/validate_template.py" --register "$SANDBOX_ROOT/stacks/components.json"
 python3 - "$SANDBOX_ROOT" <<'PY'
-import json, pathlib, sys
+import pathlib, sys
 root = pathlib.Path(sys.argv[1])
-registry = root / 'stacks/components.json'
-items = json.loads(registry.read_text())
-expected = [
-    ('networking', 'compose/networking.yaml', None),
-    ('plc', 'compose/plc.yaml', None),
-    ('pds', 'compose/pds.yaml', None),
-    ('runner', 'compose/runner.yaml', None),
-    ('vanillajs-oauth-web-app', 'stacks/vanillajs-oauth-web-app.yaml', 'vanillajs-oauth-web-app'),
-]
-if len(items) < len(expected):
-    raise SystemExit('Pinned sandbox registry is missing expected components')
-for item, (component_id, file, app) in zip(items, expected):
-    if item.get('id') != component_id or item.get('file') != file:
-        raise SystemExit('Pinned sandbox registry schema/order changed')
-    if app is None:
-        if set(item) != {'id', 'file'}:
-            raise SystemExit('Pinned sandbox built-in registry schema changed')
-    elif item.get('application') != app or item.get('definition') != f'stacks/{app}.definition.json' or set(item) != {'id', 'file', 'application', 'definition'}:
-        raise SystemExit('Pinned sandbox managed-app registry schema changed')
-
-entry = {'id': 'epds-e2e', 'file': 'stacks/epds-e2e.yaml', 'application': 'epds-e2e', 'definition': 'stacks/epds-e2e.definition.json'}
-matches = [item for item in items if item.get('id') == 'epds-e2e']
-if matches and matches != [entry]:
-    raise SystemExit('Existing epds-e2e registry entry does not match this template')
-if not matches:
-    items.append(entry)
-registry.write_text(json.dumps(items, indent=2) + '\n')
-
 networking = root / 'compose/networking.yaml'
 source = networking.read_text()
 dns_mount = '      - ./compose/e2e-handles-dns:/config/zones:ro,z\n'

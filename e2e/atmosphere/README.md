@@ -114,13 +114,29 @@ and a read-only public PLC absence check.
 The local orchestrator defaults to running the default profile followed by
 `session-reuse`; set `EPDS_E2E_PROFILE=default` to run only the required CI
 profile. Both profiles use a fresh job-local PDS/PLC stack. The latest default
-profile passed 83 scenarios. The latest session-reuse profile passed 19 of 20;
+profile passed 83 of 83 scenarios and 544 of 544 steps. It had zero skipped,
+pending, or failed scenarios. Tag counts from the retained JUnit and feature
+tags:
+
+| Tag                   | Tagged scenarios | Executed and passed |       Excluded by profile | Runtime skipped, pending, or failed |
+| --------------------- | ---------------: | ------------------: | ------------------------: | ----------------------------------: |
+| `@otp-expiry`         |                2 |                   2 |                         0 |                                   0 |
+| `@par-callback-error` |                1 |                   1 |                         0 |                                   0 |
+| `@untrusted-client`   |               12 |                  10 | 2 (`@pending`, `@manual`) |                                   0 |
+
+The latest session-reuse profile passed 19 of 20;
 after confirming identity for a second client, the browser remained on that
 untrusted client's consent page instead of reaching `/welcome`. Scoped logs
 showed normal delegation to PDS consent for the untrusted client, and no
 supported template-only setting was found to change that behavior. The
 session-reuse failure is retained in its local JUnit report and is not a
 required CI gate while it fails.
+
+Before building, the runner executes focused mutation tests for the template
+validator. The validator checks canonical route hosts, private PLC URLs on core
+and both demo clients, absence of host-published ports, the internal network,
+and the pinned sandbox registry schema. The same checks run against the
+rendered Compose config before any services start.
 
 ## Cleanup and troubleshooting
 
