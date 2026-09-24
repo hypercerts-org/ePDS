@@ -214,7 +214,7 @@ console.log("Runner report artifact mount: writable");
 suite_start=$(now)
 PROOF_CONTAINER="${PROJECT}-private-plc-proof"
 docker compose --profile e2e run --name "$PROOF_CONTAINER" --no-deps epds-e2e-runner \
-  sh -c "sed -e 's#\\.\\./support/mailpit\\.js#/app/e2e/support/mailpit.js#' -e 's#\\.\\./support/flows\\.js#/app/e2e/support/flows.js#' e2e/atmosphere/prove-private-plc.ts.txt > /tmp/prove-private-plc.runtime.mts && node --import tsx/esm /tmp/prove-private-plc.runtime.mts"
+  node --import tsx/esm e2e/atmosphere/prove-private-plc.runtime.mts
 docker cp "$PROOF_CONTAINER:/tmp/private-plc-proof.json" "$TEMP_ROOT/private-plc-proof.json" >/dev/null
 docker rm "$PROOF_CONTAINER" >/dev/null
 DID=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).did)" "$TEMP_ROOT/private-plc-proof.json")
