@@ -1,9 +1,0 @@
-{
-  "name": "epds-e2e-lexicon-authority",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "@atproto/crypto": "0.5.5",
-    "@atproto/repo": "0.10.14"
-  }
-}

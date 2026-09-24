@@ -4,34 +4,30 @@
 import copy
 import unittest
 
-from validate_template import (
-    EPDS_ENTRY,
-    REGISTRY_PREFIX,
-    TemplateContractError,
-    validate_compose,
-    validate_definition,
-    validate_registry,
-)
+from validate_template import TemplateContractError, validate_compose, validate_definition
 
 
 def valid_definition():
     hosts = {
         "pds": ("epds-core", "epds", 3000),
+        "pds-accounts": ("epds-core", "*.epds", 3000),
         "auth": ("epds-auth", "auth.epds", 3001),
-        "lexicon-authority": ("epds-lexicon-authority", "lexicons", 3005),
+        "authority": ("epds-lexicon-authority", "authority", 3000),
+        "authority-accounts": ("epds-lexicon-authority", "*.authority", 3000),
         "trusted-demo": ("epds-demo", "trusted-demo.atmosbox.internal", 3002),
-        "untrusted-demo": (
-            "epds-demo-untrusted",
-            "untrusted-demo.atmosbox.internal",
-            3002,
-        ),
+        "untrusted-demo": ("epds-demo-untrusted", "untrusted-demo.atmosbox.internal", 3002),
         "mailpit": ("epds-mailpit", "mailpit", 8025),
     }
     return {
         "routes": [
             {"id": key, "service": service, "hostname": host, "port": port}
             for key, (service, host, port) in hosts.items()
-        ]
+        ],
+        "authority": {"name": "epds-lexicon-authority"},
+        "txt": [
+            {"owner": "_lexicon.hypercerts.org"},
+            {"owner": "_lexicon.certified.app"},
+        ],
     }
 
 
@@ -46,26 +42,10 @@ def valid_compose():
                 }
             },
             "epds-demo": {"environment": {"PLC_DIRECTORY_URL": private_plc}},
-            "epds-demo-untrusted": {
-                "environment": {"PLC_DIRECTORY_URL": private_plc}
-            },
+            "epds-demo-untrusted": {"environment": {"PLC_DIRECTORY_URL": private_plc}},
         },
         "networks": {"atmosinabox": {"internal": True}},
     }
-
-
-def valid_registry():
-    items = []
-    for component_id, file_path, application in REGISTRY_PREFIX:
-        item = {"id": component_id, "file": file_path}
-        if application:
-            item.update(
-                application=application,
-                definition=f"stacks/{application}.definition.json",
-            )
-        items.append(item)
-    items.append(EPDS_ENTRY.copy())
-    return items
 
 
 class TemplateValidatorTests(unittest.TestCase):
@@ -73,17 +53,21 @@ class TemplateValidatorTests(unittest.TestCase):
         validate_definition(valid_definition())
         validate_compose(valid_compose())
 
-    def test_rejects_missing_canonical_route_host(self):
+    def test_rejects_missing_wildcard_handle_route(self):
         definition = valid_definition()
-        definition["routes"][0]["hostname"] = ""
-        with self.assertRaisesRegex(TemplateContractError, "route contract"):
+        definition["routes"].pop(1)
+        with self.assertRaisesRegex(TemplateContractError, "pds-accounts"):
+            validate_definition(definition)
+
+    def test_rejects_missing_lexicon_txt_record(self):
+        definition = valid_definition()
+        definition["txt"].pop()
+        with self.assertRaisesRegex(TemplateContractError, "TXT"):
             validate_definition(definition)
 
     def test_rejects_public_plc_url_on_either_demo(self):
         config = valid_compose()
-        config["services"]["epds-demo"]["environment"]["PLC_DIRECTORY_URL"] = (
-            "https://plc.directory"
-        )
+        config["services"]["epds-demo"]["environment"]["PLC_DIRECTORY_URL"] = "https://plc.directory"
         with self.assertRaisesRegex(TemplateContractError, "Private PLC URL"):
             validate_compose(config)
 
@@ -92,12 +76,6 @@ class TemplateValidatorTests(unittest.TestCase):
         config["services"]["epds-core"]["ports"] = ["3000:3000"]
         with self.assertRaisesRegex(TemplateContractError, "Host-published ports"):
             validate_compose(config)
-
-    def test_rejects_changed_registry_schema(self):
-        registry = copy.deepcopy(valid_registry())
-        registry[0]["unexpected"] = "schema drift"
-        with self.assertRaisesRegex(TemplateContractError, "registry schema/order"):
-            validate_registry(registry)
 
 
 if __name__ == "__main__":
