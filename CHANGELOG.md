@@ -1,5 +1,28 @@
 # ePDS
 
+## 0.9.0
+
+### Who should read this release
+
+- **End users:**
+  - [Update sign-in and approval screens while keeping account switching in email sign-in and preserving ePDS branding.](#v0.9.0-update-sign-in-and-approval-screens-while-keeping-account)
+- **Client app developers:**
+  - [Update sign-in and approval screens while keeping account switching in email sign-in and preserving ePDS branding.](#v0.9.0-update-sign-in-and-approval-screens-while-keeping-account)
+- **Operators:**
+  - [Update sign-in and approval screens while keeping account switching in email sign-in and preserving ePDS branding.](#v0.9.0-update-sign-in-and-approval-screens-while-keeping-account)
+
+### Minor Changes
+
+- <a id="v0.9.0-update-sign-in-and-approval-screens-while-keeping-account"></a> [#251](https://github.com/hypercerts-org/ePDS/pull/251) [`afe6be7`](https://github.com/hypercerts-org/ePDS/commit/afe6be7daac04193a2a59fe3cf934ee659e74768) Thanks [@Kzoeps](https://github.com/Kzoeps)! - Update sign-in and approval screens while keeping account switching in email sign-in and preserving ePDS branding.
+
+  **Affects:** End users, Client app developers, Operators
+
+  **End users:** Selecting “Another account” continues to open the email sign-in form instead of the server's password form. Authorization and account-selection screens now use consistent ePDS colors, surfaces, and responsive controls instead of partially falling back to upstream styling.
+
+  **Client app developers:** Review consent and account-picker branding against the updated screens. Update custom `branding.css` to target provider semantic variables and `data-slot` component attributes; CSS targeting old gray/slate utility classes may no longer match. The demo themes illustrate the supported provider UI 0.10 approach. Unresolved supported handles now return `HandleNotFound`, and OAuth/account-management request bodies over 100 KiB return HTTP 413.
+
+  **Operators:** This upgrades PDS to 0.5.34 and shared safe-fetch to 0.4.0. Rebuild both core and auth images, verify startup with their bundled Node/Undici versions, and validate outbound identity/service resolution against the stricter URL policy before rollout. No new upstream database migrations were found in the assessed release range; rehearse rollback against copied data rather than assuming runtime compatibility.
+
 ## 0.8.0
 
 ### Who should read this release
