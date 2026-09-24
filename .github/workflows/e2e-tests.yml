@@ -76,9 +76,35 @@ jobs:
 
       - name: Run against private Atmosphere in a Box
         env:
+          EPDS_E2E_PROJECT: epds-e2e-${{ github.run_id }}-${{ github.run_attempt }}
           EPDS_E2E_PROFILE: default
           EPDS_E2E_REPORT_DIR: ${{ github.workspace }}/reports
         run: bash e2e/atmosphere/run.sh
+
+      - name: Final scoped Docker cleanup
+        if: always()
+        env:
+          EPDS_E2E_PROJECT: epds-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+            echo "Docker is unavailable; the e2e runner's scoped cleanup trap handled any created resources."
+            exit 0
+          fi
+          project_label="label=com.docker.compose.project=$EPDS_E2E_PROJECT"
+          mapfile -t containers < <(docker ps --all --quiet --filter "$project_label")
+          if ((${#containers[@]})); then
+            docker rm --force "${containers[@]}"
+          fi
+          mapfile -t networks < <(docker network ls --quiet --filter "$project_label")
+          if ((${#networks[@]})); then
+            docker network rm "${networks[@]}"
+          fi
+          mapfile -t volumes < <(docker volume ls --quiet --filter "$project_label")
+          if ((${#volumes[@]})); then
+            docker volume rm "${volumes[@]}"
+          fi
+          echo "Scoped cleanup completed for $EPDS_E2E_PROJECT."
 
       - name: Publish default profile report
         if: ${{ !cancelled() }}

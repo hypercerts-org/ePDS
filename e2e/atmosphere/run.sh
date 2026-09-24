@@ -97,6 +97,8 @@ PY
 }
 trap cleanup EXIT INT TERM
 
+python3 "$SCRIPT_DIR/test_validate_template.py"
+
 choose_subnet() {
   local occupied_routes occupied_networks
   occupied_networks=$(docker network ls -q | xargs -r docker network inspect \
@@ -144,20 +146,10 @@ echo "Template install seconds: $(( $(now) - install_start ))"
 cd "$SANDBOX_ROOT"
 deno task sandbox create --manifest job-manifest.json
 deno task sandbox check
-  docker compose -f compose.yaml config --quiet
-docker compose -f compose.yaml config --format json | python3 -c '
-import json,sys
-config=json.load(sys.stdin)
-services=config["services"]
-published=[name for name,service in services.items() if service.get("ports")]
-if published:
-    raise SystemExit("Unexpected host-published service ports")
-if "epds-lexicon-authority" not in services:
-    raise SystemExit("Local Lexicon authority service is missing")
-if not config["networks"]["atmosinabox"].get("internal"):
-    raise SystemExit("Sandbox application network must remain internal")
-print("Compose boundary: no host ports; internal application network; local Lexicon authority present")
-'
+docker compose -f compose.yaml config --quiet
+docker compose -f compose.yaml config --format json \
+  | python3 "$SCRIPT_DIR/validate_template.py" \
+      --definition "$SANDBOX_ROOT/stacks/epds-e2e.definition.json" --compose -
 
 (cd "$SANDBOX_ROOT/e2e-source" && ./scripts/stamp-version.sh >/dev/null)
 

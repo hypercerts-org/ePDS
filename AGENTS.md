@@ -26,6 +26,7 @@ pnpm format                # format all files with Prettier
 pnpm format:check          # check formatting (CI)
 pnpm lint                  # lint all files with ESLint
 pnpm lint:fix              # lint and auto-fix where possible
+EPDS_E2E_PROJECT=epds-e2e-local EPDS_E2E_PROFILE=default bash e2e/atmosphere/run.sh
 ```
 
 ## Before Pushing
