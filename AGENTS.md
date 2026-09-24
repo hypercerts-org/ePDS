@@ -100,36 +100,31 @@ for API commands.
 
 ### End-to-end tests in CI
 
-The e2e suite lives in `e2e/` and its feature files in `features/`. Normally
-the `E2E tests` workflow (`.github/workflows/e2e-tests.yml`) runs itself off
-Railway's `deployment_status` webhook — no action needed on an ordinary PR.
+The `E2E tests` workflow runs on relevant pull requests, pushes to `main`, and
+manual dispatch. It checks out the PR head SHA, clones the pinned Atmosphere
+in a Box revision, registers the repository-owned template, and runs ePDS on a
+job-local private PLC. It does not wait for Railway deployments or require
+public service URLs. The workflow retains HTML/JUnit reports and cleans up
+only its job-scoped Compose project.
 
-To manually trigger it against a Railway environment (for e2e-only changes
-that don't cause a rebuild, or to re-run without a new commit), **always
-pass both `--ref` and `-f env_name`**:
+To run the same environment locally, install Docker Compose v2, Node.js 24,
+npm, Deno 2.8.3, Python 3, and the ePDS pnpm dependencies, then run:
 
 ```bash
-# Against a PR environment:
-gh workflow run e2e-tests.yml \
-  --ref <your-branch> \
-  -f env_name="ePDS / ePDS-pr-<N>"
-
-# Against the persistent pr-base environment (post-merge backstop):
-gh workflow run e2e-tests.yml \
-  --ref main \
-  -f env_name="ePDS / pr-base"
+EPDS_E2E_PROJECT=epds-e2e-local bash e2e/atmosphere/run.sh
 ```
 
-`--ref` controls which version of the feature files, step definitions, and
-workflow YAML get checked out. Without it, `gh workflow run` defaults to
-`main` and you'll silently test old code against the right environment.
-See [`e2e/README.md`](e2e/README.md#running-the-ci-e2e-job-against-a-railway-environment)
-for details (env-name formats, URL derivation, how to handle missing Railway
-domains).
+The required CI job runs the default profile. The default profile passed 83
+scenarios in its latest verified run. The session-reuse profile was verified
+separately at 19/20 scenarios; one returning-user scenario remained on the
+untrusted second client's consent page after confirming identity. It is not
+a required workflow job while that baseline failure remains. Consult
+[`e2e/atmosphere/README.md`](e2e/atmosphere/README.md) for the exact behavior
+and test network boundaries.
 
-The e2e suite uses two demo OAuth clients (trusted and untrusted) for
-trust-gated scenarios. See [`e2e/README.md`](e2e/README.md#two-demo-clients)
-for the full setup, tagging conventions, and step-definition patterns.
+The two demo clients support trust-gated scenarios. See
+[`e2e/README.md`](e2e/README.md#two-demo-clients) for the configuration and
+tag conventions.
 
 ### Writing Tests
 

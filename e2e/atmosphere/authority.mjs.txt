@@ -1,0 +1,122 @@
+#!/usr/bin/env node
+import { createServer } from 'node:http'
+import { readFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { createRequire } from 'node:module'
+
+const requireFromAuthority = createRequire(
+  '/opt/lexicon-authority/package.json',
+)
+const [
+  { Secp256k1Keypair, formatMultikey },
+  { Repo, MemoryBlockstore, getRecords },
+] = await Promise.all([
+  import(pathToFileURL(requireFromAuthority.resolve('@atproto/crypto'))),
+  import(pathToFileURL(requireFromAuthority.resolve('@atproto/repo'))),
+])
+
+const host = process.env.LEXICON_AUTHORITY_HOST
+const port = Number(process.env.LEXICON_AUTHORITY_PORT ?? '3005')
+if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
+  throw new Error(
+    'LEXICON_AUTHORITY_HOST and a valid LEXICON_AUTHORITY_PORT are required',
+  )
+}
+
+const did = `did:web:${host}`
+const fixtureRoot = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
+const nsids = ['org.hypercerts.authWrite', 'app.certified.authWrite']
+const schemas = await Promise.all(
+  nsids.map(async (nsid) => {
+    const schema = JSON.parse(
+      await readFile(join(fixtureRoot, ...nsid.split('.')) + '.json', 'utf8'),
+    )
+    if (schema.id !== nsid) {
+      throw new Error(`Fixture ID does not match expected NSID: ${nsid}`)
+    }
+    return schema
+  }),
+)
+
+const keypair = await Secp256k1Keypair.create()
+const keyId = `${did}#atproto`
+const repo = await Repo.create(
+  new MemoryBlockstore(),
+  did,
+  keypair,
+  schemas.map((schema) => ({
+    collection: 'com.atproto.lexicon.schema',
+    rkey: schema.id,
+    record: { $type: 'com.atproto.lexicon.schema', ...schema },
+  })),
+)
+const didDocument = {
+  '@context': ['https://www.w3.org/ns/did/v1'],
+  id: did,
+  verificationMethod: [
+    {
+      id: keyId,
+      type: 'Multikey',
+      controller: did,
+      publicKeyMultibase: formatMultikey(
+        keypair.jwtAlg,
+        keypair.publicKeyBytes(),
+      ),
+    },
+  ],
+  authentication: [keyId],
+  assertionMethod: [keyId],
+  service: [
+    {
+      id: `${did}#atproto_pds`,
+      type: 'AtprotoPersonalDataServer',
+      serviceEndpoint: `https://${host}`,
+    },
+  ],
+}
+
+const server = createServer(async (request, response) => {
+  const url = new URL(request.url ?? '/', `http://${host}`)
+  if (request.method === 'GET' && url.pathname === '/health') {
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end('{"ready":true}')
+    return
+  }
+  if (request.method === 'GET' && url.pathname === '/.well-known/did.json') {
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(JSON.stringify(didDocument))
+    return
+  }
+  if (
+    request.method !== 'GET' ||
+    url.pathname !== '/xrpc/com.atproto.sync.getRecord'
+  ) {
+    response.writeHead(404)
+    response.end()
+    return
+  }
+
+  const params = {
+    did: url.searchParams.get('did'),
+    collection: url.searchParams.get('collection'),
+    rkey: url.searchParams.get('rkey'),
+  }
+  if (
+    params.did !== did ||
+    params.collection !== 'com.atproto.lexicon.schema' ||
+    !nsids.includes(params.rkey)
+  ) {
+    response.writeHead(404, { 'content-type': 'application/json' })
+    response.end('{"error":"RecordNotFound"}')
+    return
+  }
+
+  const car = Buffer.concat(
+    await Array.fromAsync(getRecords(repo.storage, repo.cid, [params])),
+  )
+  response.writeHead(200, { 'content-type': 'application/vnd.ipld.car' })
+  response.end(car)
+})
+
+server.listen(port, '0.0.0.0')
