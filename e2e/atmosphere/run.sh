@@ -4,8 +4,6 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SOURCE_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 PIN=${EPDS_AIB_PIN:-e3640ee15a97501a0d5d01fdfcd21dde73d46be9}
-TEMP_ROOT=$(mktemp -d "${RUNNER_TEMP:-/tmp}/epds-aib-e2e.XXXXXX")
-SANDBOX_ROOT="$TEMP_ROOT/atmosphereinabox"
 REPORT_ROOT="$SOURCE_ROOT/reports"
 PROFILE=${EPDS_E2E_PROFILE:-both}
 SCENARIO_NAME=${EPDS_E2E_SCENARIO_NAME:-}
@@ -21,6 +19,12 @@ if [[ -n "${EPDS_E2E_REPORT_DIR:-}" ]]; then
   REPORT_ROOT=$EPDS_E2E_REPORT_DIR
 fi
 PROJECT=${EPDS_E2E_PROJECT:-"epds-e2e-${GITHUB_RUN_ID:-local}-$(date +%s)-$$"}
+if [[ ! "$PROJECT" =~ ^epds-e2e-[a-z0-9][a-z0-9_-]*$ ]]; then
+  echo "EPDS_E2E_PROJECT must start with epds-e2e- and use lowercase Compose-safe characters." >&2
+  exit 2
+fi
+TEMP_ROOT=$(mktemp -d "${RUNNER_TEMP:-/tmp}/epds-aib-e2e.XXXXXX")
+SANDBOX_ROOT="$TEMP_ROOT/atmosphereinabox"
 SUBNET=''
 
 mkdir -p "$REPORT_ROOT"
@@ -210,7 +214,7 @@ console.log("Runner report artifact mount: writable");
 suite_start=$(now)
 PROOF_CONTAINER="${PROJECT}-private-plc-proof"
 docker compose --profile e2e run --name "$PROOF_CONTAINER" --no-deps epds-e2e-runner \
-  sh -c 'cp e2e/atmosphere/prove-private-plc.ts.txt e2e/atmosphere/prove-private-plc.runtime.ts && node --import tsx/esm e2e/atmosphere/prove-private-plc.runtime.ts'
+  sh -c "sed -e 's#\\.\\./support/mailpit\\.js#/app/e2e/support/mailpit.js#' -e 's#\\.\\./support/flows\\.js#/app/e2e/support/flows.js#' e2e/atmosphere/prove-private-plc.ts.txt > /tmp/prove-private-plc.runtime.ts && node --import tsx/esm /tmp/prove-private-plc.runtime.ts"
 docker cp "$PROOF_CONTAINER:/tmp/private-plc-proof.json" "$TEMP_ROOT/private-plc-proof.json" >/dev/null
 docker rm "$PROOF_CONTAINER" >/dev/null
 DID=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).did)" "$TEMP_ROOT/private-plc-proof.json")
