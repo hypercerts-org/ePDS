@@ -14,6 +14,7 @@ import { Webhook } from 'svix'
 import { createLogger } from '@certified-app/shared'
 
 const logger = createLogger('auth:email-webhook')
+const PROVIDER = { id: 'resend', displayName: 'Resend' } as const
 
 export const RESEND_WEBHOOK_PATH = '/webhooks/resend'
 
@@ -154,7 +155,7 @@ function verifyResendWebhook(
     payload = verifier.verify(req.body, headers)
   } catch (err) {
     logger.warn(
-      { err, provider: 'resend', eventId: headers['svix-id'] },
+      { err, provider: PROVIDER.id, eventId: headers['svix-id'] },
       'Rejected email webhook with invalid signature',
     )
     return { ok: false, error: 'Invalid webhook signature' }
@@ -162,7 +163,7 @@ function verifyResendWebhook(
 
   if (!isResendEvent(payload)) {
     logger.warn(
-      { provider: 'resend', eventId: headers['svix-id'] },
+      { provider: PROVIDER.id, eventId: headers['svix-id'] },
       'Rejected invalid email webhook payload',
     )
     return { ok: false, error: 'Invalid webhook payload' }
@@ -225,7 +226,7 @@ function logResendEvent(
   otpCharset: OtpCharset,
 ): void {
   const fields = {
-    provider: 'resend',
+    provider: PROVIDER.id,
     eventId: svixId,
     eventType: NORMALIZED_EVENT_TYPES[event.type],
     occurredAt: event.created_at,
@@ -233,7 +234,7 @@ function logResendEvent(
     email: event.data.to[0],
     subject: redactOtpFromSubject(event.data.subject, otpLength, otpCharset),
   }
-  const message = 'Received email event'
+  const message = `Received email event '${fields.eventType}' from ${PROVIDER.displayName}`
   if ((WARNING_RESEND_EVENT_TYPES as readonly string[]).includes(event.type)) {
     logger.warn(fields, message)
   } else {
@@ -268,7 +269,7 @@ export function createResendWebhookRouter(
       if (!isLoggedResendEvent(result.event)) {
         logger.debug(
           {
-            provider: 'resend',
+            provider: PROVIDER.id,
             eventId,
             eventType: result.event.type.slice('email.'.length),
           },
@@ -281,7 +282,7 @@ export function createResendWebhookRouter(
       const eventFromAddress = parseSingleEmailAddress(result.event.data.from)
       if (eventFromAddress !== expectedFromAddress) {
         logger.debug(
-          { provider: 'resend', eventId },
+          { provider: PROVIDER.id, eventId },
           'Ignored email webhook for another sender',
         )
         res.status(200).json({ received: true, ignored: true })

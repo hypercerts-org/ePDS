@@ -500,7 +500,9 @@ describe('renderLoginPage handle login button', () => {
 // tests pin its structure so accidental refactors (removing the guard,
 // moving it after the fetch, resetting the flag unconditionally on
 // success) fail loudly.
-function renderDefault(): string {
+type LoginPageOpts = Parameters<typeof renderLoginPage>[0]
+
+function renderDefault(overrides: Partial<LoginPageOpts> = {}): string {
   return renderLoginPage({
     flowId: 'flow-1',
     clientId: 'https://example.com/client-metadata.json',
@@ -518,8 +520,99 @@ function renderDefault(): string {
     otpLength: 6,
     otpCharset: 'numeric',
     heartbeatEnabled: false,
+    ...overrides,
   })
 }
+
+describe('renderLoginPage sign-in error copy', () => {
+  it.each([
+    ['Invalid OTP', "That code didn't work."],
+    ['OTP expired', 'That code has expired.'],
+    ['Too many attempts', 'Too many tries — that code is no longer usable.'],
+  ])('rewrites better-auth %s as end-user copy', (raw, display) => {
+    const html = renderDefault()
+    expect(html).toContain(`case '${raw}':`)
+    expect(html).toContain(display)
+  })
+
+  it('passes an unrecognised error through verbatim', () => {
+    // A failure that names itself can be diagnosed from a screenshot;
+    // one collapsed into a generic apology cannot.
+    const html = renderDefault()
+    expect(html).toMatch(/default:\s*return raw;/)
+  })
+
+  it('keys the expired branch off the raw reason, not the display copy', () => {
+    // otpErrorText() owns the wording. If the branch matched the
+    // rewritten string instead, editing that copy could silently
+    // reroute which recovery action the user is offered.
+    const html = renderDefault()
+    expect(html).toContain('test(result.rawError || result.error)')
+    expect(html).toContain('rawError: raw')
+    expect(html).not.toMatch(
+      /isExpired = \/expir\|too long\/i\.test\(result\.error\)/,
+    )
+  })
+
+  it('separates the message from its inline action', () => {
+    // Without this the banner reads "Invalid OTP Send a new code".
+    const html = renderDefault()
+    expect(html).toMatch(/\/\[\.!\?\]\$\/\.test\(msg\) \? ' ' : '\. '/)
+  })
+})
+
+describe('renderLoginPage email form readiness gate', () => {
+  it('renders the email OTP form without a readiness dataset marker', () => {
+    const html = renderDefault()
+    expect(html).toContain('<form id="form-send-otp">')
+    expect(html).not.toContain('data-epds-login-ready')
+    expect(html).not.toContain('epdsLoginReady')
+  })
+
+  it('renders the email submit button disabled with the existing label', () => {
+    const html = renderDefault()
+    expect(html).toMatch(
+      /<button type="submit" class="btn-primary" disabled>Continue<\/button>/,
+    )
+  })
+
+  it('enables the button after handler setup', () => {
+    const html = renderDefault()
+    // The submit binding is the handler the button actually depends on,
+    // so assert against it directly — anchoring only on the last click
+    // handler would still pass if the submit binding moved below the
+    // enable. The click check stays as a second assertion so the enable
+    // is also pinned as the last thing handler setup does.
+    const submitHandlerIdx = html.indexOf(
+      "sendOtpForm.addEventListener('submit'",
+    )
+    const lastClickHandlerIdx = html.lastIndexOf("addEventListener('click'")
+    const enableIdx = html.indexOf('sendOtpBtn.disabled = false;')
+
+    expect(submitHandlerIdx).toBeGreaterThan(0)
+    expect(lastClickHandlerIdx).toBeGreaterThan(0)
+    expect(enableIdx).toBeGreaterThan(submitHandlerIdx)
+    expect(enableIdx).toBeGreaterThan(lastClickHandlerIdx)
+  })
+
+  it('does not use a blind timer for readiness', () => {
+    const html = renderDefault()
+    // Scoped to the gap between the submit binding and the enable,
+    // rather than the whole page: the page legitimately uses setInterval
+    // elsewhere for the PAR heartbeat. What matters is that the enable is
+    // driven by handler setup completing, not by a timer.
+    const submitHandlerIdx = html.indexOf(
+      "sendOtpForm.addEventListener('submit'",
+    )
+    const enableIdx = html.indexOf('sendOtpBtn.disabled = false;')
+
+    expect(submitHandlerIdx).toBeGreaterThan(0)
+    expect(enableIdx).toBeGreaterThan(submitHandlerIdx)
+    expect(html.slice(submitHandlerIdx, enableIdx)).not.toMatch(
+      /set(?:Timeout|Interval)\s*\(/,
+    )
+  })
+})
 
 describe('renderLoginPage OTP verify-form double-submit latch (regression)', () => {
   it('declares the verifying flag at IIFE scope so input/paste/submit handlers share it', () => {
@@ -618,14 +711,53 @@ describe('renderLoginPage inline Resend action on expired OTP', () => {
     expect(html).toContain("document.getElementById('btn-resend').click()")
   })
 
-  it('falls back to the plain showError on non-expired errors', () => {
+  it('renders exactly one flash region, inside the active step', () => {
+    // One element, so there is only ever one aria-live region for a
+    // screen reader to track; it is reparented between the two slots
+    // on step transitions rather than duplicated.
+    const emailStep = renderDefault()
+    expect(emailStep.match(/id="error-msg"/g)).toHaveLength(1)
+    expect(emailStep).toMatch(/flash-slot-email"><div id="error-msg"/)
+
+    const otpStep = renderDefault({
+      loginHint: 'a@b.com',
+      initialStep: 'otp',
+      otpAlreadySent: true,
+    })
+    expect(otpStep.match(/id="error-msg"/g)).toHaveLength(1)
+    expect(otpStep).toMatch(/flash-slot-otp"><div id="error-msg"/)
+  })
+
+  it('places the OTP flash slot between the boxes and Verify', () => {
     const html = renderDefault()
-    // The non-expired branch must NOT route through
-    // showErrorWithAction (otherwise an "Invalid code" message
-    // would carry an inappropriate "Send a new code" link).
+    // Position is the point of the slot: a rejected code must read at
+    // the input the user just filled, not above the subtitle.
+    const boxes = html.indexOf('id="otp-boxes"')
+    const slot = html.indexOf('id="flash-slot-otp"')
+    const verify = html.indexOf('>Verify<')
+    expect(boxes).toBeGreaterThan(-1)
+    expect(slot).toBeGreaterThan(boxes)
+    expect(verify).toBeGreaterThan(slot)
+  })
+
+  it('offers an inline resend on any rejected code', () => {
+    const html = renderDefault()
+    // "Invalid OTP" is not reliably a typo — better-auth also throws it
+    // when no stored code exists at all, which is the terminal state
+    // after a lockout, after the code was consumed in another tab, and
+    // after expiry cleanup. Retyping cannot recover any of those, so
+    // the action must not be withheld from the plain-invalid branch.
     expect(html).toMatch(
-      /if \(isExpired\) \{[\s\S]*?\} else \{[\s\S]*?showError\(result\.error\);\s*\}/,
+      /else if \(!parLikelyDead\(\)\)[\s\S]*?showErrorWithAction\(\s*result\.error,\s*'Send a new code'/,
     )
+  })
+
+  it('withholds the inline resend once the flow is dead', () => {
+    const html = renderDefault()
+    // refreshResendVisibility() hides the standalone Resend button when
+    // the PAR is dead; an inline one would re-offer a withdrawn action.
+    // The bare else is that path — plain message, no CTA.
+    expect(html).toMatch(/\} else \{\s*showError\(result\.error\);\s*\}/)
   })
 })
 
@@ -723,6 +855,28 @@ describe('renderLoginPage flow-aborted notice + reactive abort gates', () => {
     expect(branchSlice).toContain('showFlowAbortedNotice();')
   })
 
+  it('tells the user on resend that earlier codes are dead', () => {
+    const html = renderDefault()
+    // Resending invalidates every earlier OTP, and a user who got as
+    // far as resending may have mail sitting in spam. Both facts are
+    // noise for the majority who sign in on the first code, so they
+    // live in the resend confirmation rather than in permanently
+    // visible page copy — which is what makes this worth pinning: a
+    // refactor that "tidies" the message back to a bare
+    // acknowledgement silently loses both.
+    const handlerStart = html.indexOf("'btn-resend').addEventListener")
+    expect(handlerStart).toBeGreaterThan(0)
+    const handlerEnd = html.indexOf(
+      "'btn-back').addEventListener",
+      handlerStart,
+    )
+    const handlerBody = html.slice(handlerStart, handlerEnd)
+    expect(handlerBody).toContain('earlier ones no longer work')
+    expect(handlerBody).toContain('spam folder')
+    // The success branch must not regress to a bare acknowledgement.
+    expect(handlerBody).not.toContain("showSuccess('Code resent!')")
+  })
+
   it('gates the Resend click on abortIfFlowDead', () => {
     const html = renderDefault()
     // The Resend click handler must call abortIfFlowDead and
@@ -761,5 +915,147 @@ describe('renderLoginPage flow-aborted notice + reactive abort gates', () => {
     const verifyIdx = handlerBody.indexOf('verifyOtp(currentEmail, otp)')
     expect(gateIdx).toBeGreaterThan(0)
     expect(verifyIdx).toBeGreaterThan(gateIdx)
+  })
+})
+
+// The segmented OTP grid used to strip whitespace only, so a code copied
+// with surrounding punctuation, or a letter typed into a digits-only code,
+// reached the server verbatim and failed verification. It also never
+// upper-cased, while alphanumeric codes are generated as A-Z0-9 and the
+// other two OTP forms upper-case on the way in — so a desktop user typing
+// lowercase (where `autocapitalize` does nothing) submitted a code the
+// server would always reject. These pin the shared charset filter.
+describe('renderLoginPage OTP grid charset filter', () => {
+  it('emits the numeric filter from the shared helper', () => {
+    const html = renderDefault({ otpCharset: 'numeric' })
+    expect(html).toContain(`var otpCharFilter = ${/\D/g.toString()};`)
+  })
+
+  it('emits the alphanumeric filter from the shared helper', () => {
+    const html = renderDefault({ otpCharset: 'alphanumeric' })
+    expect(html).toContain(`var otpCharFilter = ${/[^A-Za-z0-9]/g.toString()};`)
+  })
+
+  it('upper-cases only under the alphanumeric policy', () => {
+    expect(renderDefault({ otpCharset: 'alphanumeric' })).toContain(
+      "otpCharset === 'alphanumeric' ? cleaned.toUpperCase() : cleaned",
+    )
+  })
+
+  it('routes the input handler through the filter, not a whitespace-only strip', () => {
+    const html = renderDefault()
+    expect(html).toContain('var v = filterOtpChars(box.value);')
+    // The old whitespace-only strip is a strict subset of every charset
+    // filter; leaving one behind would mean a handler was missed.
+    expect(html).not.toMatch(/replace\(\/\\s\/g, ''\)/)
+  })
+
+  it('routes the paste handler through the filter before slicing to the free boxes', () => {
+    const html = renderDefault()
+    expect(html).toContain(
+      'var cleaned = filterOtpChars(data).slice(0, otpBoxes.length - idx);',
+    )
+  })
+
+  it('defines the filter before the box handlers that call it', () => {
+    const html = renderDefault()
+    const defIdx = html.indexOf('function filterOtpChars(s)')
+    const inputIdx = html.indexOf('var v = filterOtpChars(box.value);')
+    const pasteIdx = html.indexOf('var cleaned = filterOtpChars(data)')
+    expect(defIdx).toBeGreaterThan(0)
+    expect(inputIdx).toBeGreaterThan(defIdx)
+    expect(pasteIdx).toBeGreaterThan(defIdx)
+  })
+
+  it('declares otpCharset once, above the filter that reads it', () => {
+    const html = renderDefault()
+    expect(html.match(/var otpCharset =/g)).toHaveLength(1)
+    expect(html.match(/var otpLength =/g)).toHaveLength(1)
+    // filterOtpChars is only ever called from event handlers, but keeping
+    // the declaration above it removes any reliance on var hoisting.
+    expect(html.indexOf('var otpCharset =')).toBeLessThan(
+      html.indexOf('function filterOtpChars(s)'),
+    )
+  })
+})
+
+describe('renderLoginPage link-affordance convention', () => {
+  // The sign-in page styles four kinds of clickable text. Before this
+  // suite they diverged: .recovery-link was underlined while the
+  // .btn-secondary buttons beside it were not, and .flash-action
+  // REMOVED its underline on hover while .recovery-link kept it.
+  //
+  // The convention pinned here:
+  //   STANDALONE actions (.btn-secondary, .recovery-link) sit in their
+  //     own row, so position and spacing already read as actionable —
+  //     no underline.
+  //   IN-SENTENCE actions (.flash-action, .terms-link) are surrounded
+  //     by prose and inherit its colour, so the underline is their only
+  //     affordance — always underlined.
+  //   Hover darkens to #1A130F everywhere and never toggles the
+  //     underline, in either direction.
+  //
+  // Assertions match whole declaration blocks so a rule that merely
+  // mentions the property elsewhere cannot satisfy them.
+
+  function ruleFor(html: string, selector: string): string {
+    const idx = html.indexOf(`\n    ${selector} {`)
+    expect(idx, `no rule found for "${selector}"`).toBeGreaterThan(0)
+    const open = html.indexOf('{', idx)
+    const close = html.indexOf('}', open)
+    expect(close).toBeGreaterThan(open)
+    return html.slice(open + 1, close)
+  }
+
+  const STANDALONE = ['.btn-secondary', '.recovery-link']
+  const IN_SENTENCE = ['.flash-action', '.terms-link']
+
+  it.each(STANDALONE)(
+    'renders %s without an underline (standalone action)',
+    (selector) => {
+      const rule = ruleFor(renderDefault(), selector)
+      expect(rule).toContain('text-decoration: none')
+      expect(rule).not.toContain('text-decoration: underline')
+    },
+  )
+
+  it.each(IN_SENTENCE)(
+    'renders %s underlined (in-sentence action)',
+    (selector) => {
+      const rule = ruleFor(renderDefault(), selector)
+      expect(rule).toContain('text-decoration: underline')
+    },
+  )
+
+  it.each([...STANDALONE, ...IN_SENTENCE])(
+    'darkens %s on hover without touching its underline',
+    (selector) => {
+      const rule = ruleFor(renderDefault(), `${selector}:hover`)
+      expect(rule).toContain('color: #1A130F')
+      // A disappearing (or appearing) underline under the cursor is
+      // disorienting — hover must never change text-decoration.
+      expect(rule).not.toContain('text-decoration')
+    },
+  )
+
+  it.each([...STANDALONE, ...IN_SENTENCE])(
+    'gives %s a visible focus ring for keyboard users',
+    (selector) => {
+      const rule = ruleFor(renderDefault(), `${selector}:focus-visible`)
+      expect(rule).toContain('outline: 2px solid var(--focus-border')
+      expect(rule).toContain('outline-offset: 2px')
+    },
+  )
+
+  it('drives both standalone actions from the overridable --muted-foreground token', () => {
+    // Trusted clients retheme via branding.css. If one standalone
+    // action hardcoded its colour and the other read the token, an
+    // override would split the cluster apart again.
+    const html = renderDefault()
+    for (const selector of STANDALONE) {
+      expect(ruleFor(html, selector)).toContain(
+        'color: var(--muted-foreground)',
+      )
+    }
   })
 })

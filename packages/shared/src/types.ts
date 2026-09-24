@@ -17,7 +17,6 @@ export interface AuthConfig {
   hostname: string
   port: number
   sessionSecret: string
-  csrfSecret: string
   pdsHostname: string
   pdsPublicUrl: string
   verificationLink: EpdsLinkConfig

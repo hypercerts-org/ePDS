@@ -17,7 +17,7 @@
 import { Router, type Request, type Response } from 'express'
 import type { AuthServiceContext } from '../context.js'
 import { createLogger, escapeHtml, maskEmail } from '@certified-app/shared'
-import { buildOtpInputProps } from '../otp-input.js'
+import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
 import { resolveClientBranding } from '../lib/client-metadata.js'
 import {
   renderOptionalStyleTag,
@@ -340,7 +340,7 @@ export function renderRecoveryForm(opts: {
     <div class="container">
       <h1>Account Recovery</h1>
       <p class="subtitle">Enter the backup email address associated with your account.</p>
-      ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
+      ${opts.error ? '<p class="error" role="alert">' + escapeHtml(opts.error) + '</p>' : ''}
       <form method="POST" action="/auth/recover">
         <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
         <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
@@ -348,6 +348,7 @@ export function renderRecoveryForm(opts: {
         <div class="field">
           <label for="email">Backup email address</label>
           <input type="email" id="email" name="email" required autofocus
+                 autocomplete="email"
                  placeholder="backup@example.com">
         </div>
         <button type="submit" class="btn-primary">Send recovery code</button>
@@ -411,6 +412,7 @@ export function renderRecoveryOtpForm(opts: {
     ? `/oauth/authorize?request_uri=${encodeURIComponent(requestUriForBack)}`
     : '/oauth/authorize'
   const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
+  const inputFilter = buildOtpInputFilter(opts.otpCharset)
   // Forward the heartbeat-disabled flag through Resend (POST
   // /auth/recover) so the re-rendered OTP form keeps it disabled.
   // Verify (POST /auth/recover/verify) doesn't re-render this form,
@@ -434,7 +436,7 @@ export function renderRecoveryOtpForm(opts: {
     <div class="container">
       <h1>Enter recovery code</h1>
       <p id="code-help" class="subtitle">If a backup email matches, we sent a ${opts.otpLength}-${opts.otpCharset === 'alphanumeric' ? 'character' : 'digit'} code to <strong>${escapeHtml(maskedEmail)}</strong></p>
-      ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
+      ${opts.error ? '<p class="error" role="alert">' + escapeHtml(opts.error) + '</p>' : ''}
       <form method="POST" action="/auth/recover/verify">
         <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
         <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
@@ -451,7 +453,7 @@ export function renderRecoveryOtpForm(opts: {
                  autocapitalize="${inputProps.autocapitalize}"
                  placeholder="${inputProps.placeholder}"
                  class="otp-input"
-                  oninput="this.value=this.value.replace(/[\\s-]/g,'')"
+                 oninput="this.value=this.value.replace(${inputFilter.toString()},'')${opts.otpCharset === 'alphanumeric' ? '.toUpperCase()' : ''}"
                  style="letter-spacing: ${Math.max(2, Math.round(32 / opts.otpLength))}px">
         </div>
         <button type="submit" class="btn-primary">Verify</button>
@@ -461,7 +463,7 @@ export function renderRecoveryOtpForm(opts: {
         <input type="hidden" name="request_uri" value="${escapeHtml(opts.requestUri)}">
         <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
         ${noHeartbeatField}
-        <button type="submit" class="btn-secondary">Resend code</button>
+        <button type="submit" class="btn-secondary">Send a new code</button>
       </form>
       <a href="${backHref}" class="btn-secondary">Back to sign in</a>
     </div>
@@ -511,6 +513,12 @@ const CSS = `
   .otp-input { font-size: 28px !important; text-align: center; font-family: 'SF Mono', Menlo, Consolas, monospace !important; padding: 14px !important; }
   .btn-primary { width: 100%; padding: 12px; background: #0f1828; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; }
   .btn-primary:hover { background: #1a2a40; }
-  .btn-secondary { display: inline-block; margin-top: 12px; color: #0f1828; background: none; border: none; font-size: 14px; cursor: pointer; text-decoration: underline; }
+  .btn-primary:focus-visible { outline: 2px solid #0f1828; outline-offset: 2px; }
+  /* Standalone action in its own row — see the link-affordance convention
+     documented in login-page.ts. No underline, darkens on hover. "Resend
+     code" here and on the sign-in page must not render differently. */
+  .btn-secondary { display: inline-block; margin-top: 12px; color: #0f1828; background: none; border: none; font-size: 14px; cursor: pointer; text-decoration: none; border-radius: 4px; }
+  .btn-secondary:hover { color: #000; }
+  .btn-secondary:focus-visible { outline: 2px solid #0f1828; outline-offset: 2px; }
   .error { color: #dc3545; background: #fdf0f0; padding: 12px; border-radius: 8px; margin: 12px 0; }
 `

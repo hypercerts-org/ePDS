@@ -25,6 +25,15 @@ describe('buildChooserEnrichmentScript (HYPER-268)', () => {
     )
   })
 
+  it('indexes current Account identifiers with legacy fallbacks', () => {
+    const script = buildChooserEnrichmentScript()
+
+    expect(script).toContain('var handle = a.handle || a.preferred_username;')
+    expect(script).toContain('var did = a.did || a.sub;')
+    expect(script).toContain("if (handle) byHandle[handle] = a.email || '';")
+    expect(script).toContain("if (did) byDid[did] = a.email || '';")
+  })
+
   it('is deterministic', () => {
     expect(buildChooserEnrichmentScript()).toBe(buildChooserEnrichmentScript())
   })
@@ -507,9 +516,13 @@ describe('buildChooserEnrichmentScript sign-up hide + another-account rebind', (
     // Capture-phase is essential — React's delegated root-level click
     // listener fires in bubble phase, so a bubble listener on the button
     // would run AFTER React swaps to upstream's stock sign-in component.
-    expect(script).toContain(
-      '\'[role="button"][aria-label="Login to account that is not listed"]\'',
-    )
+    // oauth-provider-ui 0.8 changed the copy, so the script matches both
+    // the current and previous aria-label / visible-text variants.
+    expect(script).toContain('Sign in to an account that is not listed')
+    expect(script).toContain('Login to account that is not listed')
+    expect(script).toContain('Select another account')
+    expect(script).toContain('Another account')
+    expect(script).toContain('[role="button"][aria-label="')
     expect(script).toContain('e.preventDefault()')
     expect(script).toContain('e.stopImmediatePropagation()')
     expect(script).toContain('window.location.href')

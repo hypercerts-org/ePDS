@@ -67,6 +67,9 @@ export function createChooseHandleRouter(
       clientId: string | null
     }
     email: string
+    /** Whether this sign-in proved control of `email`; see
+     *  CallbackParams.email_verified. */
+    emailVerified: boolean
   } | null> {
     // Guard 1: auth_flow cookie
     const flowId = req.cookies[AUTH_FLOW_COOKIE] as string | undefined
@@ -144,7 +147,16 @@ export function createChooseHandleRouter(
       return null
     }
 
-    return { flowId, flow, email: session.user.email.toLowerCase() }
+    // Carried alongside the email so the signed callback can state
+    // whether this sign-in actually proved control of that address.
+    // better-auth sets emailVerified when the emailed one-time code is
+    // verified. See CallbackParams.email_verified.
+    return {
+      flowId,
+      flow,
+      email: session.user.email.toLowerCase(),
+      emailVerified: session.user.emailVerified === true,
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -209,7 +221,7 @@ export function createChooseHandleRouter(
     }
 
     const KNOWN_ERROR_MESSAGES: Record<string, string> = {
-      handle_taken: 'That handle was just taken — please choose another.',
+      handle_taken: 'That handle is not available — please choose another.',
     }
     const rawError = req.query.error as string | undefined
     const error = rawError
@@ -245,7 +257,7 @@ export function createChooseHandleRouter(
     const result = await getFlowAndSession(req, res)
     if (!result) return
 
-    const { flowId, flow, email } = result
+    const { flowId, flow, email, emailVerified } = result
 
     // Guard: reject flows with handleMode='random' — they should skip the picker entirely
     if (flow.handleMode === 'random') {
@@ -380,7 +392,7 @@ export function createChooseHandleRouter(
         .send(
           renderChooseHandlePage(
             handleDomain,
-            'That handle is already taken.',
+            'That handle is not available.',
             res.locals.csrfToken,
             showRandomButton,
             branding.customCss,
@@ -404,6 +416,8 @@ export function createChooseHandleRouter(
       approved: '1',
       new_account: '1',
       handle: normalizedLocal,
+      epds_handle_mode: flow.handleMode ?? '',
+      email_verified: emailVerified ? '1' : '0',
     }
     if (flow.clientId) callbackParams.client_id = flow.clientId
     const { sig, ts } = signCallback(
@@ -497,8 +511,12 @@ export function renderChooseHandlePage(
   customFaviconUrl?: string | null,
   customFaviconUrlDark?: string | null,
 ): string {
+  // role=alert only on the populated branch: it is static at render
+  // time, so the default assertive announcement is what we want. The
+  // empty placeholder is never written to by this page's script, so
+  // it needs no live-region semantics.
   const errorHtml = error
-    ? `<div class="error" id="error-msg">${escapeHtml(error)}</div>`
+    ? `<div class="error" id="error-msg" role="alert">${escapeHtml(error)}</div>`
     : `<div class="error" id="error-msg" style="display:none;"></div>`
 
   return `<!DOCTYPE html>
@@ -530,15 +548,17 @@ export function renderChooseHandlePage(
     }
     .status { min-height: 20px; font-size: 14px; margin-top: 6px; }
     .status.available { color: #28a745; }
-    .status.taken { color: #dc3545; }
+    .status.unavailable { color: #dc3545; }
     .status.checking { color: #888; }
     .status.format-error { color: #dc3545; }
     .error { color: #dc3545; background: #fdf0f0; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
     .btn-primary { width: 100%; padding: 12px; background: #0f1828; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; margin-top: 8px; }
     .btn-primary:hover:not(:disabled) { background: #1a2a40; }
+    .btn-primary:focus-visible { outline: 2px solid #0f1828; outline-offset: 2px; }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
     .btn-secondary { width: 100%; padding: 10px; background: white; color: #0f1828; border: 1px solid #0f1828; border-radius: 8px; font-size: 15px; font-weight: 500; cursor: pointer; margin-top: 8px; }
     .btn-secondary:hover:not(:disabled) { background: #f0f2f5; }
+    .btn-secondary:focus-visible { outline: 2px solid #0f1828; outline-offset: 2px; }
     .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
   </style>${renderOptionalStyleTag(customCss)}
 </head>
@@ -565,10 +585,15 @@ export function renderChooseHandlePage(
               spellcheck="false"
               minlength="5"
               maxlength="20"
+              aria-describedby="handle-status"
             >
             <span class="handle-suffix">.${escapeHtml(handleDomain)}</span>
           </div>
-          <div class="status" id="handle-status"></div>
+          <!-- Availability feedback is rewritten on every debounced
+               keystroke, so it must announce politely rather than
+               interrupting the user mid-type. Without this, screen
+               reader users get no availability feedback at all. -->
+          <div class="status" id="handle-status" role="status" aria-live="polite"></div>
         </div>
         ${showRandomButton ? `<button type="button" id="random-btn" class="btn-secondary">Generate random handle</button>` : ''}
         <button type="submit" id="submit-btn" class="btn-primary">Create</button>
@@ -587,8 +612,8 @@ export function renderChooseHandlePage(
       var debounceTimer = null;
       var currentAbort = null;
 
-      // isAvailable: null = unknown, true = confirmed available, false = confirmed taken.
-      // submitBtn is disabled only when handle is confirmed taken or unavailable.
+      // isAvailable: null = unknown, true = confirmed available, false = confirmed unavailable.
+      // submitBtn is disabled only when the handle is confirmed unavailable.
       var isAvailable = null;
 
       function setStatus(text, cls) {
@@ -626,14 +651,14 @@ export function renderChooseHandlePage(
               setStatus('\u2713 Available!', 'available');
             } else {
               isAvailable = false;
-              setStatus('\u2717 Already taken.', 'taken');
+              setStatus('\u2717 Not available.', 'unavailable');
             }
             updateSubmit();
           })
           .catch(function(err) {
             if (err.name === 'AbortError') return; // silently ignore cancelled requests
             currentAbort = null;
-            // Network/timeout error: unknown state — don't block if handle isn't confirmed taken
+            // Network/timeout error: unknown state — don't block if the handle isn't confirmed unavailable
             isAvailable = null;
             setStatus('Could not check availability.', 'format-error');
             updateSubmit();
@@ -714,7 +739,7 @@ export function renderChooseHandlePage(
                 setStatus('Could not check availability.', 'format-error');
                 randomBtn.disabled = false;
               } else {
-                // Genuinely taken — retry with a new random value
+                // Genuinely unavailable — retry with a new random value
                 tryRandomHandle(attemptsLeft - 1);
               }
             })

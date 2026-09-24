@@ -32,10 +32,16 @@ describe('getTheme', () => {
     const theme = getTheme()
 
     expect(theme?.page.primary).toBe('#8b5cf6')
-    expect(theme?.injectedCss).toContain(
-      ':root { --branding-color-primary: 139 92 246; --branding-color-primary-contrast: 26 16 51; }',
-    )
-    expect(theme?.injectedCss).toContain(String.raw`.md\:bg-slate-100`)
+    expect(theme?.injectedCss).toContain('--branding-color-primary: 139 92 246')
+    expect(theme?.injectedCss).toContain('--background: #251845')
+    expect(theme?.injectedCss).toContain('--card: #251845')
+    expect(theme?.injectedCss).toContain('--secondary: #1a1033')
+    expect(theme?.injectedCss).toContain('--muted: #1a1033')
+    expect(theme?.injectedCss).toContain('--border: #3d2a5c')
+    expect(theme?.injectedCss).toContain('[data-slot="card"]')
+    expect(theme?.injectedCss).not.toContain(String.raw`.md\:bg-slate-100`)
+    expect(theme?.injectedCss).not.toContain('.text-slate-')
+    expect(theme?.injectedCss).not.toContain('.bg-gray-')
     expect(theme?.injectedCss).toContain(
       '.account-info { background: #2d1a4f; color: #c4b5fd; }',
     )

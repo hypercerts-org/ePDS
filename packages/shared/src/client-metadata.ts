@@ -168,10 +168,18 @@ export async function resolveClientMetadata(
   try {
     parsedUrl = new URL(clientId)
   } catch {
-    return { client_name: clientId }
+    // Malformed clientId — return empty metadata so the caller's
+    // fallback chain (client_name || extractDomain(clientId) ||
+    // 'an application') doesn't end up surfacing the literal raw
+    // string ("Sign in to not-a-url") in page titles and copy.
+    // The caller's extractDomain will also fail; the final
+    // fallback to "an application" wins.
+    return {}
   }
   if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
-    return { client_name: clientId }
+    // Same shape as the unparseable case: don't surface the raw
+    // schemeless or non-http value to end users.
+    return {}
   }
 
   if (!options.noCache) {
@@ -240,7 +248,9 @@ function fallback(clientId: string, skipCache: boolean): ClientMetadata {
 function extractDomain(urlStr: string): string | null {
   try {
     const url = new URL(urlStr)
-    return url.hostname
+    return url.protocol === 'https:' || url.protocol === 'http:'
+      ? url.hostname
+      : null
   } catch {
     return null
   }

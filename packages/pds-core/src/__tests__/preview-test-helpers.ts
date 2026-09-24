@@ -5,9 +5,16 @@
  * about new-code duplication and gives the suites a single place to
  * grow the mock when the handler signature changes.
  */
-import { vi } from 'vitest'
+import { vi, type Mock } from 'vitest'
 
-export function mockLogger() {
+// Explicit return type: under NodeNext module resolution the inferred type
+// referenced @vitest/spy by a non-portable path (TS2742). Naming the Mock
+// fields keeps the emitted .d.ts self-contained.
+export function mockLogger(): {
+  info: Mock
+  warn: Mock
+  debug: Mock
+} {
   return { info: vi.fn(), warn: vi.fn(), debug: vi.fn() }
 }
 

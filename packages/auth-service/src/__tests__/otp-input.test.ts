@@ -9,7 +9,11 @@
  * 5. Alphanumeric pattern accepts both letters and digits
  */
 import { describe, it, expect } from 'vitest'
-import { buildOtpInputProps } from '../otp-input.js'
+import {
+  buildOtpInputFilter,
+  buildOtpInputProps,
+  resolvePreviewOtpCharset,
+} from '../otp-input.js'
 
 describe('Recovery flow: OTP input props', () => {
   it('numeric charset produces digit-only pattern and zero placeholder', () => {
@@ -61,5 +65,31 @@ describe('Recovery flow: OTP input props', () => {
     expect(re.test('ABCDEFGH')).toBe(true)
     expect(re.test('abcdefgh')).toBe(false) // lowercase rejected
     expect(re.test('A1B2C3D')).toBe(false) // one short
+  })
+})
+
+describe('Server-rendered OTP character filter', () => {
+  it('removes unsupported characters under the numeric policy', () => {
+    expect('a1-!'.replace(buildOtpInputFilter('numeric'), '')).toBe('1')
+  })
+
+  it('preserves letters and digits under the alphanumeric policy', () => {
+    expect('a1-!'.replace(buildOtpInputFilter('alphanumeric'), '')).toBe('a1')
+  })
+})
+
+describe('Recovery preview: OTP charset override', () => {
+  it.each(['numeric', 'alphanumeric'] as const)(
+    'uses a supported %s override',
+    (requested) => {
+      expect(resolvePreviewOtpCharset(requested, 'numeric')).toBe(requested)
+    },
+  )
+
+  it('falls back to the configured policy for unsupported values', () => {
+    expect(resolvePreviewOtpCharset('unsupported', 'alphanumeric')).toBe(
+      'alphanumeric',
+    )
+    expect(resolvePreviewOtpCharset(undefined, 'numeric')).toBe('numeric')
   })
 })

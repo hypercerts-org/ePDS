@@ -57,6 +57,10 @@ const AUTH_FLOW_COOKIE = 'epds_auth_flow'
  * the same `params.handle ?? ''` shape; the sentinel is pinned by
  * tests in packages/shared/src/__tests__/crypto.test.ts.
  *
+ * `epds_handle_mode` is signed too rather than appended afterwards, so
+ * the browser cannot flip the chooser/consent presentation mode on the
+ * hop to pds-core without invalidating the signature.
+ *
  * Exported so it can be unit-tested without standing up the full
  * /auth/complete route.
  */
@@ -65,6 +69,16 @@ export function buildEpdsCallbackUrl(args: {
   flowClientId: string | null
   email: string
   isNewAccount: boolean
+  flowHandleMode?: string | null
+  /**
+   * Whether this sign-in actually proved control of `email` — read
+   * from the better-auth session, which sets it when the emailed
+   * one-time code is verified. pds-core records email confirmation
+   * from this and nothing else, so it must reflect what the
+   * authenticating flow really established, not what the current
+   * flow happens to be. See CallbackParams.email_verified.
+   */
+  emailVerified: boolean
   pdsPublicUrl: string
   epdsCallbackSecret: string
 }): string {
@@ -73,11 +87,45 @@ export function buildEpdsCallbackUrl(args: {
     email: args.email,
     approved: '1',
     new_account: args.isNewAccount ? '1' : '0',
+    email_verified: args.emailVerified ? '1' : '0',
   }
   if (args.flowClientId) callbackParams.client_id = args.flowClientId
+  if (args.flowHandleMode) callbackParams.epds_handle_mode = args.flowHandleMode
   const { sig, ts } = signCallback(callbackParams, args.epdsCallbackSecret)
   const params = new URLSearchParams({ ...callbackParams, ts, sig })
   return `${args.pdsPublicUrl}/oauth/epds-callback?${params.toString()}`
+}
+
+async function resolveCompleteIdentity(
+  email: string,
+  flowId: string,
+  ctx: AuthServiceContext,
+  pdsUrl: string,
+  internalSecret: string,
+): Promise<{ email: string; did: string | null; viaRecovery: boolean }> {
+  const did = await getDidByEmail(email, pdsUrl, internalSecret)
+  if (did) return { email, did, viaRecovery: false }
+
+  // Recovery path: session email is a backup email, not a primary. Resolve
+  // the backup-email -> DID mapping (auth-service-owned) and then DID ->
+  // primary email via pds-core's internal API, so the downstream callback
+  // signs the user's real account email, not the recovery address.
+  const recovered = await resolveRecoveryEmail(
+    email,
+    ctx,
+    pdsUrl,
+    internalSecret,
+  )
+  if (!recovered) return { email, did: null, viaRecovery: false }
+
+  logger.info(
+    { flowId, did: recovered.did },
+    'Recovery: translated backup email to primary email via DID',
+  )
+  // Reported so the caller can withhold the email-verified claim: the
+  // returned address is the account's primary, which this sign-in proved
+  // nothing about.
+  return { email: recovered.email, did: recovered.did, viaRecovery: true }
 }
 
 export function createCompleteRouter(
@@ -127,9 +175,14 @@ export function createCompleteRouter(
    */
   async function redirectNewUserRandomMode(
     res: Response,
-    flow: { requestUri: string; clientId: string | null },
+    flow: {
+      requestUri: string
+      clientId: string | null
+      handleMode: string | null
+    },
     email: string,
     flowId: string,
+    emailVerified: boolean,
   ): Promise<void> {
     const ping = await pingParRequest(flow.requestUri, pdsUrl, internalSecret)
     if (!ping.ok) {
@@ -143,6 +196,8 @@ export function createCompleteRouter(
       flowClientId: flow.clientId,
       email,
       isNewAccount: true,
+      flowHandleMode: flow.handleMode,
+      emailVerified,
       pdsPublicUrl: ctx.config.pdsPublicUrl,
       epdsCallbackSecret: ctx.config.epdsCallbackSecret,
     })
@@ -204,31 +259,28 @@ export function createCompleteRouter(
       return
     }
 
-    let email = session.user.email.toLowerCase()
+    const sessionEmail = session.user.email.toLowerCase()
+
+    // Whether this sign-in proved control of the address the user
+    // actually authenticated with. better-auth sets emailVerified when
+    // the emailed one-time code is verified, so it is the authoritative
+    // answer for `sessionEmail`.
+    const sessionEmailVerified: boolean = session.user.emailVerified === true
 
     // Step 4: Check whether this is a new user (no PDS account for email).
-    let did = await getDidByEmail(email, pdsUrl, internalSecret)
+    const { email, did, viaRecovery } = await resolveCompleteIdentity(
+      sessionEmail,
+      flowId,
+      ctx,
+      pdsUrl,
+      internalSecret,
+    )
 
-    // Recovery path: session email is a backup email, not a primary. Resolve
-    // the backup-email → DID mapping (auth-service-owned) and then DID →
-    // primary email via pds-core's internal API, so the downstream callback
-    // signs the user's real account email, not the recovery address.
-    if (!did) {
-      const recovered = await resolveRecoveryEmail(
-        email,
-        ctx,
-        pdsUrl,
-        internalSecret,
-      )
-      if (recovered) {
-        logger.info(
-          { flowId, did: recovered.did },
-          'Recovery: translated backup email to primary email via DID',
-        )
-        email = recovered.email
-        did = recovered.did
-      }
-    }
+    // Recovery rebinds `email` from the proved backup address to the
+    // account's primary. The user proved control of the backup, not the
+    // primary, so recovering access is not evidence about the address
+    // being signed here — withhold the claim.
+    const emailVerified = sessionEmailVerified && !viaRecovery
 
     const isNewAccount = !did
 
@@ -236,7 +288,7 @@ export function createCompleteRouter(
       // Step 5a: skip the handle picker, let pds-core call
       // generateRandomHandle() (signalled by the absent `handle`
       // field in the signed callback).
-      await redirectNewUserRandomMode(res, flow, email, flowId)
+      await redirectNewUserRandomMode(res, flow, email, flowId, emailVerified)
       return
     }
 
@@ -264,6 +316,8 @@ export function createCompleteRouter(
       flowClientId: flow.clientId,
       email,
       isNewAccount: false,
+      flowHandleMode: flow.handleMode,
+      emailVerified,
       pdsPublicUrl: ctx.config.pdsPublicUrl,
       epdsCallbackSecret: ctx.config.epdsCallbackSecret,
     })

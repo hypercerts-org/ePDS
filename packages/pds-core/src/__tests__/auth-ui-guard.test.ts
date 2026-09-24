@@ -778,11 +778,11 @@ describe('createAuthUiGuard', () => {
   // ---------------------------------------------------------------------------
 
   // Helper: build a binding fixture good enough for the guard's matchesHint
-  // logic. Only `account.sub` and `account.preferred_username` are read.
-  function binding(sub: string, pu: string) {
+  // logic. Only `account.did` and `account.handle` are read.
+  function binding(did: string, handle: string) {
     return {
-      account: { sub, preferred_username: pu },
-    } as unknown as { account: { sub: string; preferred_username: string } }
+      account: { did, handle },
+    } as unknown as { account: { did: string; handle: string } }
   }
 
   // urn-prefixed request_uri so loadStoredPar actually attempts the read
@@ -878,7 +878,7 @@ describe('createAuthUiGuard', () => {
   // one stale and one fresh. The checkLoginRequired predicate marks
   // only `did:plc:stale` as loginRequired.
   const onlyStaleIsLoginRequired = (b: unknown): boolean =>
-    (b as { account: { sub: string } }).account.sub === 'did:plc:stale'
+    (b as { account: { did: string } }).account.did === 'did:plc:stale'
   const TWO_BINDINGS = [
     binding('did:plc:stale', 'stale.example'),
     binding('did:plc:fresh', 'fresh.example'),
