@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the ePDS managed-app contract without revealing rendered env values."""
+"""Validate ePDS invariants that are outside AiaB's managed-stack schema."""
 
 from __future__ import annotations
 
@@ -10,27 +10,12 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-REGISTRY_PREFIX = (
-    ("networking", "compose/networking.yaml", None),
-    ("plc", "compose/plc.yaml", None),
-    ("pds", "compose/pds.yaml", None),
-    ("runner", "compose/runner.yaml", None),
-    (
-        "vanillajs-oauth-web-app",
-        "stacks/vanillajs-oauth-web-app.yaml",
-        "vanillajs-oauth-web-app",
-    ),
-)
-EPDS_ENTRY = {
-    "id": "epds-e2e",
-    "file": "stacks/epds-e2e.yaml",
-    "application": "epds-e2e",
-    "definition": "stacks/epds-e2e.definition.json",
-}
 REQUIRED_ROUTES = {
     "pds": ("epds-core", "epds", 3000),
+    "pds-accounts": ("epds-core", "*.epds", 3000),
     "auth": ("epds-auth", "auth.epds", 3001),
-    "lexicon-authority": ("epds-lexicon-authority", "lexicons", 3005),
+    "authority": ("epds-lexicon-authority", "authority", 3000),
+    "authority-accounts": ("epds-lexicon-authority", "*.authority", 3000),
     "trusted-demo": ("epds-demo", "trusted-demo.atmosbox.internal", 3002),
     "untrusted-demo": (
         "epds-demo-untrusted",
@@ -47,42 +32,7 @@ REQUIRED_PLC_SERVICES = {
 
 
 class TemplateContractError(ValueError):
-    """Raised when a rendered ePDS stack violates the private test boundary."""
-
-
-def validate_registry(items: object) -> list[dict[str, object]]:
-    if not isinstance(items, list) or len(items) < len(REGISTRY_PREFIX):
-        raise TemplateContractError("Pinned sandbox registry is missing components")
-
-    for index, (component_id, file_path, application) in enumerate(REGISTRY_PREFIX):
-        item = items[index]
-        expected_keys = {"id", "file"}
-        if application is not None:
-            expected_keys |= {"application", "definition"}
-        if (
-            not isinstance(item, dict)
-            or item.get("id") != component_id
-            or item.get("file") != file_path
-            or set(item) != expected_keys
-        ):
-            raise TemplateContractError("Pinned sandbox registry schema/order changed")
-        if application is not None and (
-            item.get("application") != application
-            or item.get("definition") != f"stacks/{application}.definition.json"
-        ):
-            raise TemplateContractError("Pinned sandbox managed-app schema changed")
-
-    matches = [item for item in items if isinstance(item, dict) and item.get("id") == "epds-e2e"]
-    if len(matches) > 1 or (matches and matches[0] != EPDS_ENTRY):
-        raise TemplateContractError("Existing epds-e2e registry entry changed")
-    return items
-
-
-def register_template(registry_path: Path) -> None:
-    items = validate_registry(json.loads(registry_path.read_text(encoding="utf-8")))
-    if not any(item.get("id") == EPDS_ENTRY["id"] for item in items):
-        items.append(EPDS_ENTRY.copy())
-    registry_path.write_text(json.dumps(items, indent=2) + "\n", encoding="utf-8")
+    """Raised when the ePDS private-stack boundary is missing."""
 
 
 def validate_definition(definition: object) -> None:
@@ -94,12 +44,19 @@ def validate_definition(definition: object) -> None:
         actual_host = None if route is None else route.get("host") or route.get("hostname")
         if (
             route is None
-            or not actual_host
             or actual_host != expected_host
             or route.get("service") != service
             or route.get("port") != port
         ):
             raise TemplateContractError(f"Managed route contract is missing or changed: {route_id}")
+
+    authority = definition.get("authority")
+    if not isinstance(authority, dict) or authority.get("name") != "epds-lexicon-authority":
+        raise TemplateContractError("Managed lexicon authority is missing")
+    txt = definition.get("txt")
+    owners = {entry.get("owner") for entry in txt or [] if isinstance(entry, dict)}
+    if owners != {"_lexicon.hypercerts.org", "_lexicon.certified.app"}:
+        raise TemplateContractError("Private lexicon TXT declarations are missing")
 
 
 def _environment(service: object, name: str) -> str | None:
@@ -149,13 +106,10 @@ def validate_compose(config: object) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--register", type=Path)
     parser.add_argument("--definition", type=Path)
     parser.add_argument("--compose", nargs="?", const="-")
     args = parser.parse_args()
 
-    if args.register:
-        register_template(args.register)
     if args.definition:
         validate_definition(json.loads(args.definition.read_text(encoding="utf-8")))
     if args.compose is not None:

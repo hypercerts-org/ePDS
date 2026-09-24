@@ -1,4 +1,0 @@
-*.epds.@@SANDBOX_DOMAIN@@ {
-  tls internal
-  reverse_proxy epds-core:3000
-}

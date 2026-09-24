@@ -35,25 +35,34 @@ services:
       start_period: 20s
 
   epds-lexicon-authority:
-    image: epds-e2e-lexicon-authority
-    build:
-      context: ./e2e-source
-      dockerfile: e2e/atmosphere/Dockerfile.authority
-    command: ['node', '/app/e2e/atmosphere/authority.mjs']
+    image: ghcr.io/bluesky-social/pds:0.4@sha256:05e164855fa1a3cf251c002210c46f8c86e7ae27bddc7a96045da25483840826
+    init: true
     environment:
-      LEXICON_AUTHORITY_HOST: lexicons.${SANDBOX_DOMAIN}
-      LEXICON_AUTHORITY_PORT: '3005'
+      LOG_LEVEL: warn
+      NODE_EXTRA_CA_CERTS: /ca/root.crt
+      PDS_PORT: '3000'
+      PDS_DATA_DIRECTORY: /data
+      PDS_ACTOR_STORE_DIRECTORY: /data/actors
+      PDS_BLOBSTORE_DISK_LOCATION: /data/blobs
+      PDS_BLOBSTORE_DISK_TMP_LOCATION: /data/blob-tmp
+      PDS_DEV_MODE: 'true'
+      PDS_DISABLE_SSRF_PROTECTION: 'true'
+      PDS_RATE_LIMITS_ENABLED: 'false'
+      PDS_INVITE_REQUIRED: 'false'
+      PDS_CRAWLERS: ''
     volumes:
-      - ./e2e-source/e2e/atmosphere/authority.mjs.txt:/app/e2e/atmosphere/authority.mjs:ro,z
-      - ./e2e-source/e2e/atmosphere/fixtures:/app/e2e/atmosphere/fixtures:ro,z
+      - epds-lexicon-authority-data:/data
     networks: [atmosinabox]
+    depends_on:
+      plc:
+        condition: service_healthy
     healthcheck:
       test:
         [
           'CMD',
           'node',
           '-e',
-          "fetch('http://127.0.0.1:3005/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+          "fetch('http://127.0.0.1:3000/xrpc/_health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
         ]
       interval: 5s
       timeout: 3s
@@ -100,7 +109,6 @@ services:
       dockerfile: Dockerfile.demo
     environment:
       AUTH_ENDPOINT: https://auth.epds.${SANDBOX_DOMAIN}/oauth/authorize
-      EPDS_CLIENT_PRIVATE_JWK: ${TRUSTED_DEMO_JWK:?}
       EPDS_CLIENT_THEME: amber
       NODE_EXTRA_CA_CERTS: /ca/root.crt
       PLC_DIRECTORY_URL: https://plc.${SANDBOX_DOMAIN}
@@ -128,7 +136,6 @@ services:
       dockerfile: Dockerfile.demo
     environment:
       AUTH_ENDPOINT: https://auth.epds.${SANDBOX_DOMAIN}/oauth/authorize
-      EPDS_CLIENT_PRIVATE_JWK: ${UNTRUSTED_DEMO_JWK:?}
       NODE_EXTRA_CA_CERTS: /ca/root.crt
       PLC_DIRECTORY_URL: https://plc.${SANDBOX_DOMAIN}
       PDS_INTERNAL_URL: http://epds-core:3000
@@ -153,7 +160,6 @@ services:
   epds-mailpit:
     image: axllent/mailpit:v1.29.3
     environment:
-      MP_UI_AUTH: ${MAILPIT_USER:?}:${MAILPIT_PASS:?}
       MP_MAX_MESSAGES: '5000'
     networks: [atmosinabox]
     healthcheck:
@@ -171,12 +177,15 @@ services:
       HOME: /tmp/epds-e2e-home
       E2E_PDS_URL: https://epds.${SANDBOX_DOMAIN}
       E2E_AUTH_URL: https://auth.epds.${SANDBOX_DOMAIN}
+      E2E_LEXICON_AUTHORITY_URL: https://authority.${SANDBOX_DOMAIN}
       E2E_DEMO_URL: https://trusted-demo.atmosbox.internal
       E2E_DEMO_UNTRUSTED_URL: https://untrusted-demo.atmosbox.internal
       E2E_MAILPIT_URL: https://mailpit.${SANDBOX_DOMAIN}
+      # Mailpit is available only on Atmosphere's internal network. These
+      # non-secret values enable scenarios whose client always sends basic auth.
+      E2E_MAILPIT_USER: e2e
+      E2E_MAILPIT_PASS: e2e
       E2E_PLC_URL: https://plc.${SANDBOX_DOMAIN}
-      E2E_MAILPIT_USER: ${MAILPIT_USER:?}
-      E2E_MAILPIT_PASS: ${MAILPIT_PASS:?}
       E2E_HEADLESS: 'true'
       NODE_EXTRA_CA_CERTS: /ca/root.crt
       NODE_ENV: development
@@ -197,3 +206,4 @@ services:
 volumes:
   epds-core-data: {}
   epds-auth-data: {}
+  epds-lexicon-authority-data: {}
