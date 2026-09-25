@@ -32,14 +32,18 @@ and the ePDS pnpm dependencies. The runner performs both profiles by default,
 checks that the created DID resolves only through the job-local PLC, retains
 HTML/JUnit reports under `reports/`, and cleans up the named project.
 
-### Railway release validation
+### Railway promotion-PR validation
 
-The `E2E tests` workflow also validates Railway release branches. A push to
-`dev` follows the `main` → `dev` promotion and targets `ePDS / dev`; a push to
-`production` follows the `dev` → `production` promotion and targets `ePDS /
-production`. The job waits for Railway to report a successful deployment of the
-pushed SHA, then runs the suite against that environment. This does not use
-AiaB or provision a separate stack.
+For a same-repository PR targeting `dev` or `production`, the `E2E tests`
+workflow clones Railway's `pr-base` environment as
+`pr-<number>-e2e-<target>`. It reconnects pds-core, auth, and both demo services
+to the PR branch, waits for the PR SHA to deploy, then runs the suite against
+the clone. Mailpit is inherited from `pr-base`. The workflow deletes precisely
+that generated environment after uploading its report.
+
+This job requires a repository `RAILWAY_TOKEN` secret for a project-scoped token
+that can create, configure, inspect, and delete ePDS environments. Fork PRs do
+not receive that secret and run only the private AiaB job.
 
 ### Run against another stack
 
@@ -220,11 +224,12 @@ or scenarios and loads step definitions via `--import`.
 ## Running the CI e2e job
 
 The `E2E tests` workflow runs on relevant pull requests, pushes to `main`,
-and manual dispatch. It checks out the PR head SHA, clones the pinned
+and manual dispatch. Its private job checks out the PR head SHA, clones the pinned
 Atmosphere in a Box commit, builds the checked-out ePDS source into a fresh
 private stack, and runs the default profile against that stack. It does not
 discover Railway previews or require public service URLs, Railway credentials,
-or writes to public PLC.
+or writes to public PLC. PRs targeting `dev` or `production` also receive the
+separate cloned-Railway validation described above.
 
 Each provisioning and verification operation is a named workflow step: template
 validation, clone and registration, topology creation, image build, service
