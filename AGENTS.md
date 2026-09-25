@@ -112,9 +112,10 @@ For same-repository PRs targeting `dev` or `production`, a separate job clones
 Railway's `pr-base` reference environment as `pr-<number>-e2e-<target>`. It
 connects pds-core, auth, and both demo services to the PR branch, waits for the
 head SHA to deploy, runs E2E against the clone, and deletes that exact
-environment. Mailpit comes from `pr-base`, so the suite has its complete
-topology. It requires a project-scoped `RAILWAY_TOKEN` Actions secret with
-environment management access; fork PRs run only the private AiaB job.
+environment. Mailpit and the private Atmosphere PLC come from `pr-base`, so the
+suite has its complete topology. It requires a project-scoped `RAILWAY_TOKEN`
+Actions secret with environment management access; fork PRs run only the private
+AiaB job.
 
 `.github/workflows/e2e-tests.yml` is the trigger and path-gate dispatcher. The
 private AiaB job lives in `e2e-atmosphere.yml`; the disposable Railway

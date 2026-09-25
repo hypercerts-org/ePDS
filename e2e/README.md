@@ -39,7 +39,8 @@ For a same-repository PR targeting `dev` or `production`, the `E2E tests`
 workflow clones Railway's `pr-base` environment as
 `pr-<number>-e2e-<target>`. It reconnects pds-core, auth, and both demo services
 to the PR branch, waits for the PR SHA to deploy, then runs the suite against
-the clone. Mailpit is inherited from `pr-base`. The workflow deletes precisely
+the clone. Mailpit and a private PLC, backed by PostgreSQL, are inherited from
+`pr-base`; the PLC uses the pinned Atmosphere in a Box image. The workflow deletes precisely
 that generated environment after uploading its report.
 
 This job requires a repository `RAILWAY_TOKEN` secret for a project-scoped token
