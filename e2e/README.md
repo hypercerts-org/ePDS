@@ -217,6 +217,13 @@ private stack, and runs the default profile against that stack. It does not
 discover Railway previews or require public service URLs, Railway credentials,
 or writes to public PLC.
 
+Each provisioning and verification operation is a named workflow step: template
+validation, clone and registration, topology creation, image build, service
+startup, fixture seeding, access projection validation, private-service probes,
+private-PLC proof, Cucumber, report copying, failure logs, and scoped cleanup.
+This keeps the GitHub Actions log useful when a specific infrastructure stage
+fails. `e2e/atmosphere/run.sh` remains the local equivalent.
+
 To run the same workflow manually, select **E2E tests** in GitHub Actions and
 choose **Run workflow**. There are no environment-name inputs. Locally, run
 `bash e2e/atmosphere/run.sh`; see its README for prerequisites, network and

@@ -55,6 +55,11 @@ AiaB owns provisioning. CI owns the runner image, test command, reports, and
 cleanup. The harness uses `sandbox access --json` as a non-secret connection
 projection, then invokes the normal test container with Docker Compose.
 
+The GitHub workflow performs clone, registration, provisioning, fixture seed,
+access validation, health checks, private-PLC proof, Cucumber, report copying,
+and cleanup in separate named steps. `run.sh` provides the same sequence for
+local use.
+
 Generated state, generated secrets, private CA keys, authority state, and the
 private PLC proof file are never copied to `reports/`. Cleanup targets only the
 project named by `EPDS_E2E_PROJECT`; the workflow repeats label-scoped cleanup
