@@ -116,6 +116,11 @@ environment. Mailpit comes from `pr-base`, so the suite has its complete
 topology. It requires a project-scoped `RAILWAY_TOKEN` Actions secret with
 environment management access; fork PRs run only the private AiaB job.
 
+`.github/workflows/e2e-tests.yml` is the trigger and path-gate dispatcher. The
+private AiaB job lives in `e2e-atmosphere.yml`; the disposable Railway
+promotion-PR job lives in `e2e-railway.yml`. Keep environment-specific steps in
+those reusable workflows.
+
 To run the same environment locally, install Docker Compose v2, Node.js 24,
 npm, Deno 2.8.3, Python 3, and the ePDS pnpm dependencies, then run:
 

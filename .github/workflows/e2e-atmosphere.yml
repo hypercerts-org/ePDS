@@ -1,0 +1,234 @@
+name: E2E tests — Atmosphere in a Box
+
+on:
+  workflow_call:
+
+jobs:
+  run:
+    name: run
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 90
+    permissions:
+      actions: read
+      pull-requests: read
+      checks: write
+    env:
+      EPDS_AIB_PIN: 26cf1f60f81b491b065dfc830efd27aba8b89a54
+      EPDS_E2E_PROJECT: epds-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+      SANDBOX_DOMAIN: atmosbox.test
+    steps:
+      # Build and test the PR head source rather than GitHub's synthetic
+      # merge commit, matching the SHA associated with the check result.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 24
+
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: 2.8.3
+
+      - name: Seed empty e2e report
+        run: |
+          mkdir -p reports
+          printf '%s' \
+            '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<testsuites name="e2e" tests="0" failures="0" errors="0" time="0">' \
+            '<testsuite name="placeholder (overwritten by cucumber)" tests="0" failures="0" errors="0" skipped="0" time="0"/>' \
+            '</testsuites>' \
+            > reports/e2e.junit.xml
+
+      - name: Prepare private e2e workspace
+        run: |
+          set -euo pipefail
+          aib_root="$RUNNER_TEMP/atmosphereinabox"
+          docker_config="$RUNNER_TEMP/epds-e2e-docker-config"
+          printf 'AIB_ROOT=%s\n' "$aib_root" >> "$GITHUB_ENV"
+          printf 'DOCKER_CONFIG=%s\n' "$docker_config" >> "$GITHUB_ENV"
+          mkdir -m 0700 -p "$docker_config"
+          printf 'E2E_RUNNER_UID=%s\n' "$(id -u)" >> "$GITHUB_ENV"
+          printf 'E2E_RUNNER_GID=%s\n' "$(id -g)" >> "$GITHUB_ENV"
+
+      - name: Validate repository-owned stack template
+        run: python3 e2e/atmosphere/test_validate_template.py
+
+      - name: Clone pinned Atmosphere in a Box
+        run: |
+          set -euo pipefail
+          git clone --quiet --filter=blob:none \
+            https://tangled.org/kandake.africa/atmosphereinabox.git "$AIB_ROOT"
+          git -C "$AIB_ROOT" checkout --quiet --detach "$EPDS_AIB_PIN"
+          git -C "$AIB_ROOT" rev-parse HEAD
+
+      - name: Install Atmosphere in a Box dependencies
+        working-directory: ${{ runner.temp }}/atmosphereinabox
+        run: deno task install
+
+      - name: Register ePDS stack in Atmosphere in a Box
+        run: bash e2e/atmosphere/install.sh "$AIB_ROOT"
+
+      - name: Create private zero-PDS topology
+        working-directory: ${{ runner.temp }}/atmosphereinabox
+        run: >-
+          deno task sandbox create --pds 0 --users-per-pds 0
+          --project "$EPDS_E2E_PROJECT" --subnet auto --app epds-e2e
+
+      - name: Validate rendered private topology
+        working-directory: ${{ runner.temp }}/atmosphereinabox
+        run: |
+          set -euo pipefail
+          deno task sandbox check
+          docker compose --project-name "$EPDS_E2E_PROJECT" config --quiet
+          docker compose --project-name "$EPDS_E2E_PROJECT" config --format json \
+            | python3 "$GITHUB_WORKSPACE/e2e/atmosphere/validate_template.py" \
+                --definition "$AIB_ROOT/stacks/epds-e2e.definition.json" --compose -
+
+      - name: Build ePDS images before private runtime execution
+        working-directory: ${{ runner.temp }}/atmosphereinabox
+        run: |
+          set -euo pipefail
+          (cd e2e-source && ./scripts/stamp-version.sh >/dev/null)
+          docker compose --project-name "$EPDS_E2E_PROJECT" --profile e2e build
+          docker compose --project-name "$EPDS_E2E_PROJECT" --profile e2e run --rm --no-deps \
+            epds-e2e-runner pnpm --version
+
+      - name: Start private services
+        working-directory: ${{ runner.temp }}/atmosphereinabox
+        run: deno task sandbox up --wait-timeout 300
+
+      - name: Seed and verify local lexicon fixtures
+        working-directory: ${{ runner.temp }}/atmosphereinabox
+        run: deno task sandbox seed
+
+      - name: Validate private access projection
+        working-directory: ${{ runner.temp }}/atmosphereinabox
+        run: |
+          set -euo pipefail
+          deno task sandbox access --json > "$RUNNER_TEMP/atmosphere-access.json"
+          node e2e-source/e2e/atmosphere/validate-access.mjs \
+            "$RUNNER_TEMP/atmosphere-access.json" "$EPDS_E2E_PROJECT"
+
+      - name: Probe private services from the E2E runner
+        working-directory: ${{ runner.temp }}/atmosphereinabox
+        run: |
+          docker compose --project-name "$EPDS_E2E_PROJECT" --profile e2e run --rm --no-deps \
+            epds-e2e-runner node -e '
+          (async () => {
+            const checks = [
+              ["PLC", `${process.env.E2E_PLC_URL}/_health`],
+              ["PDS", `${process.env.E2E_PDS_URL}/health`],
+              ["auth", `${process.env.E2E_AUTH_URL}/health`],
+              ["Lexicon authority", `${process.env.E2E_LEXICON_AUTHORITY_URL}/xrpc/_health`],
+              ["trusted demo", process.env.E2E_DEMO_URL],
+              ["untrusted demo", process.env.E2E_DEMO_UNTRUSTED_URL],
+              ["Mailpit", `${process.env.E2E_MAILPIT_URL}/readyz`],
+            ]
+            for (const [name, url] of checks) {
+              const response = await fetch(url)
+              if (!response.ok) throw new Error(`${name} health returned ${response.status}`)
+              console.log(`${name}: ${response.status}`)
+            }
+          })().catch((error) => { console.error(error.message); process.exit(1) })
+          '
+
+      - name: Confirm private-PDS test configuration
+        working-directory: ${{ runner.temp }}/atmosphereinabox
+        run: >-
+          docker compose --project-name "$EPDS_E2E_PROJECT" exec -T epds-core
+          sh -c 'test "${PDS_DISABLE_SSRF_PROTECTION:-}" = true'
+
+      - name: Confirm runner can write reports
+        working-directory: ${{ runner.temp }}/atmosphereinabox
+        run: |
+          docker compose --project-name "$EPDS_E2E_PROJECT" --profile e2e run --rm --no-deps \
+            epds-e2e-runner node -e '
+          const fs = require("node:fs")
+          const path = "/app/reports/.write-check"
+          fs.writeFileSync(path, "ok")
+          fs.rmSync(path)
+          '
+
+      - name: Prove e2e DID resolves only on the private PLC
+        working-directory: ${{ runner.temp }}/atmosphereinabox
+        run: |
+          set -euo pipefail
+          proof_container="${EPDS_E2E_PROJECT}-private-plc-proof"
+          docker compose --project-name "$EPDS_E2E_PROJECT" --profile e2e run \
+            --name "$proof_container" --no-deps epds-e2e-runner \
+            node --import tsx/esm e2e/atmosphere/prove-private-plc.runtime.mts
+          docker cp "$proof_container:/tmp/private-plc-proof.json" \
+            "$RUNNER_TEMP/private-plc-proof.json"
+          docker rm "$proof_container"
+          did=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).did)' \
+            "$RUNNER_TEMP/private-plc-proof.json")
+          public_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            "https://plc.directory/$did")
+          rm -f "$RUNNER_TEMP/private-plc-proof.json"
+          if [[ "$public_status" != 404 ]]; then
+            echo "Public PLC lookup for the e2e proof DID returned $public_status (expected 404)." >&2
+            exit 1
+          fi
+
+      - name: Run default Cucumber profile
+        working-directory: ${{ runner.temp }}/atmosphereinabox
+        run: >-
+          docker compose --project-name "$EPDS_E2E_PROJECT" --profile e2e run --rm --no-deps
+          epds-e2e-runner pnpm test:e2e:headless
+
+      - name: Copy e2e reports from private stack
+        if: always()
+        run: |
+          if [[ -d "$AIB_ROOT/reports" ]]; then
+            tar -C "$AIB_ROOT/reports" --exclude='./private-plc-proof.json' \
+              -cf - . | tar -C reports -xf -
+          fi
+
+      - name: Capture private-stack logs on failure
+        if: failure()
+        working-directory: ${{ runner.temp }}/atmosphereinabox
+        run: |
+          docker compose --project-name "$EPDS_E2E_PROJECT" logs --no-color \
+            > "$GITHUB_WORKSPACE/reports/private-stack.log" 2>&1 || true
+
+      - name: Final scoped Docker cleanup
+        if: always()
+        run: |
+          set -euo pipefail
+          if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+            echo "Docker is unavailable; the e2e runner's scoped cleanup trap handled any created resources."
+            exit 0
+          fi
+          project_label="label=com.docker.compose.project=$EPDS_E2E_PROJECT"
+          mapfile -t containers < <(docker ps --all --quiet --filter "$project_label")
+          if ((${#containers[@]})); then
+            docker rm --force "${containers[@]}"
+          fi
+          mapfile -t networks < <(docker network ls --quiet --filter "$project_label")
+          if ((${#networks[@]})); then
+            docker network rm "${networks[@]}"
+          fi
+          mapfile -t volumes < <(docker volume ls --quiet --filter "$project_label")
+          if ((${#volumes[@]})); then
+            docker volume rm "${volumes[@]}"
+          fi
+          echo "Scoped cleanup completed for $EPDS_E2E_PROJECT."
+
+      - name: Publish default profile report
+        if: ${{ !cancelled() }}
+        uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3.0.0
+        with:
+          name: e2e cucumber report
+          path: reports/e2e.junit.xml
+          reporter: java-junit
+          fail-on-error: false
+
+      - name: Upload e2e reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: e2e-report
+          path: reports/
+          retention-days: 2
