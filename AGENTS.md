@@ -102,18 +102,25 @@ for API commands.
 
 ### End-to-end tests in CI
 
-The `E2E tests` workflow runs on relevant pull requests, pushes to `main`, and
-manual dispatch. It checks out the PR head SHA, clones the pinned Atmosphere
-in a Box revision, registers the repository-owned template, and runs ePDS on a
-job-local private PLC. It does not wait for Railway deployments or require
-public service URLs. The workflow retains HTML/JUnit reports and cleans up
-only its job-scoped Compose project.
+The `E2E tests` workflow runs the private Atmosphere in a Box stack on relevant
+pull requests, pushes to `main`, and manual dispatch. It checks out the PR head
+SHA, clones the pinned revision, registers the repository-owned template, and
+runs ePDS on a job-local private PLC. It does not wait for Railway deployments
+or require public service URLs.
+
+Railway release validation is a branch-specific job in the same workflow.
+Pushes to `dev` (the `main` → `dev` promotion) target `ePDS / dev`; pushes to
+`production` (the `dev` → `production` promotion) target `ePDS / production`.
+The job waits for Railway's deployment record for the pushed SHA to succeed,
+then runs the E2E suite against that environment's public service URLs. The
+workflow retains HTML/JUnit reports and cleans up only its job-scoped Compose
+project.
 
 To run the same environment locally, install Docker Compose v2, Node.js 24,
 npm, Deno 2.8.3, Python 3, and the ePDS pnpm dependencies, then run:
 
 ```bash
-EPDS_E2E_PROJECT=epds-e2e-local bash e2e/atmosphere/run.sh
+EPDS_E2E_PROJECT=epds-e2e-local pnpm test:e2e:atmosphere
 ```
 
 The required CI job runs the default profile. The default profile passed 83

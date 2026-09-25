@@ -3,7 +3,7 @@ name: E2E tests
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, dev, production]
   workflow_dispatch:
 
 concurrency:
@@ -42,6 +42,7 @@ jobs:
     needs: gate
     if: >-
       always() &&
+      (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref_name == 'main')) &&
       (needs.gate.outputs.relevant == 'true' || github.event_name != 'pull_request')
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 90
@@ -267,5 +268,155 @@ jobs:
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: e2e-report
+          path: reports/
+          retention-days: 2
+
+  railway-release:
+    name: railway release
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref_name == 'dev' || github.ref_name == 'production')
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+    steps:
+      # Test the pushed SHA. The wait step below verifies that this exact SHA
+      # reached the Railway environment before the suite starts.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Seed empty e2e report
+        run: |
+          mkdir -p reports
+          printf '%s' \
+            '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<testsuites name="e2e" tests="0" failures="0" errors="0" time="0">' \
+            '<testsuite name="placeholder (overwritten by cucumber)" tests="0" failures="0" errors="0" skipped="0" time="0"/>' \
+            '</testsuites>' \
+            > reports/e2e.junit.xml
+
+      - name: Wait for the pushed SHA to deploy on Railway
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF_NAME" in
+            dev) expected_environment='ePDS / dev' ;;
+            production) expected_environment='ePDS / production' ;;
+            *)
+              echo "::error::Unsupported release branch: $GITHUB_REF_NAME"
+              exit 1
+              ;;
+          esac
+
+          for attempt in $(seq 1 72); do
+            deployment=$(gh api "repos/$GH_REPOSITORY/deployments?sha=$GITHUB_SHA&per_page=100" \
+              --jq "[.[] | select(.creator.login == \"railway-app[bot]\" and .environment == \"$expected_environment\")][0]")
+            if [[ "$deployment" == null ]]; then
+              sleep 5
+              continue
+            fi
+            deployment_id=$(printf '%s' "$deployment" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+            state=$(gh api "repos/$GH_REPOSITORY/deployments/$deployment_id/statuses" --jq '.[0].state')
+            case "$state" in
+              success)
+                echo "Railway deployed $GITHUB_SHA to $expected_environment."
+                exit 0
+                ;;
+              failure|error)
+                echo "::error::Railway deployment $deployment_id for $GITHUB_SHA ended as $state."
+                exit 1
+                ;;
+            esac
+            sleep 5
+          done
+
+          echo "::error::Railway did not deploy $GITHUB_SHA to $expected_environment within six minutes."
+          exit 1
+
+      - name: Configure deployed Railway target
+        id: target
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF_NAME" in
+            dev)
+              environment_slug=dev
+              release_target=staging
+              ;;
+            production)
+              environment_slug=production
+              release_target=production
+              ;;
+            *)
+              echo "::error::Unsupported release branch: $GITHUB_REF_NAME"
+              exit 1
+              ;;
+          esac
+          printf 'target=%s\n' "$release_target" >> "$GITHUB_OUTPUT"
+          printf 'pds_url=https://certified-apppds-core-%s.up.railway.app\n' "$environment_slug" >> "$GITHUB_OUTPUT"
+          printf 'auth_url=https://certified-appauth-service-%s.up.railway.app\n' "$environment_slug" >> "$GITHUB_OUTPUT"
+          printf 'demo_url=https://certified-appdemo-%s.up.railway.app\n' "$environment_slug" >> "$GITHUB_OUTPUT"
+          printf 'demo_untrusted_url=https://certified-appdemo-untrusted-%s.up.railway.app\n' "$environment_slug" >> "$GITHUB_OUTPUT"
+          printf 'mailpit_url=https://mailpit-%s.up.railway.app\n' "$environment_slug" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for deployed Railway services
+        env:
+          PDS_URL: ${{ steps.target.outputs.pds_url }}
+          AUTH_URL: ${{ steps.target.outputs.auth_url }}
+          DEMO_URL: ${{ steps.target.outputs.demo_url }}
+          DEMO_UNTRUSTED_URL: ${{ steps.target.outputs.demo_untrusted_url }}
+          MAILPIT_URL: ${{ steps.target.outputs.mailpit_url }}
+        run: |
+          set -euo pipefail
+          for url in "$PDS_URL/health" "$AUTH_URL/health" "$DEMO_URL" "$DEMO_UNTRUSTED_URL" "$MAILPIT_URL/readyz"; do
+            curl --fail --retry 30 --retry-all-errors --retry-delay 5 --max-time 20 "$url" >/dev/null
+          done
+
+      - name: Run E2E against deployed Railway services
+        env:
+          E2E_PDS_URL: ${{ steps.target.outputs.pds_url }}
+          E2E_AUTH_URL: ${{ steps.target.outputs.auth_url }}
+          E2E_DEMO_URL: ${{ steps.target.outputs.demo_url }}
+          E2E_DEMO_UNTRUSTED_URL: ${{ steps.target.outputs.demo_untrusted_url }}
+          E2E_MAILPIT_URL: ${{ steps.target.outputs.mailpit_url }}
+          E2E_MAILPIT_USER: ${{ secrets.E2E_MAILPIT_USER }}
+          E2E_MAILPIT_PASS: ${{ secrets.E2E_MAILPIT_PASS }}
+          E2E_INTERNAL_SECRET: ${{ secrets.E2E_INTERNAL_SECRET }}
+          E2E_HEADLESS: 'true'
+          CUCUMBER_RETRY: '1'
+        run: pnpm test:e2e:headless
+
+      - name: Publish Railway e2e report
+        if: ${{ !cancelled() }}
+        uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3.0.0
+        with:
+          name: railway ${{ steps.target.outputs.target }} e2e report
+          path: reports/e2e.junit.xml
+          reporter: java-junit
+          fail-on-error: false
+
+      - name: Upload Railway e2e reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: railway-${{ steps.target.outputs.target }}-e2e-report
           path: reports/
           retention-days: 2

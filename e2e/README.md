@@ -24,13 +24,22 @@ permission-set lexicon authority, and the Playwright runner on a private
 network with trusted HTTPS:
 
 ```bash
-EPDS_E2E_PROJECT=epds-e2e-local bash e2e/atmosphere/run.sh
+EPDS_E2E_PROJECT=epds-e2e-local pnpm test:e2e:atmosphere
 ```
 
 Prerequisites are Docker Compose v2, Node.js 24, npm, Deno 2.8.3, Python 3,
 and the ePDS pnpm dependencies. The runner performs both profiles by default,
 checks that the created DID resolves only through the job-local PLC, retains
 HTML/JUnit reports under `reports/`, and cleans up the named project.
+
+### Railway release validation
+
+The `E2E tests` workflow also validates Railway release branches. A push to
+`dev` follows the `main` → `dev` promotion and targets `ePDS / dev`; a push to
+`production` follows the `dev` → `production` promotion and targets `ePDS /
+production`. The job waits for Railway to report a successful deployment of the
+pushed SHA, then runs the suite against that environment. This does not use
+AiaB or provision a separate stack.
 
 ### Run against another stack
 
