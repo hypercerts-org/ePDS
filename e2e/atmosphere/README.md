@@ -22,8 +22,10 @@ the ePDS images, starts services, and runs `sandbox seed`. `seed` creates the
 managed local lexicon-authority account, publishes the two schema fixtures, and
 verifies TXT, DID, HTTPS, and record readback before the tests run.
 
-The profile defaults to `both`; CI uses `default`. `session-reuse` remains
-available for its known returning-user baseline. `EPDS_E2E_KEEP_FAILED_STATE=1`
+The profile defaults to `both`; it runs the concurrent default profile, serial
+`otp-expiry` profile, and `session-reuse`. CI runs the concurrent default and
+serial OTP-expiry profiles. `session-reuse` remains available for its known
+returning-user baseline. `EPDS_E2E_KEEP_FAILED_STATE=1`
 preserves the exact temporary sandbox root for investigation after a failure.
 
 ## Provisioned endpoints

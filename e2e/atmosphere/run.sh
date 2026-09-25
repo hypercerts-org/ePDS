@@ -14,8 +14,8 @@ E2E_RUNNER_GID=$(id -g)
 export SANDBOX_DOMAIN E2E_RUNNER_UID E2E_RUNNER_GID
 
 case "$PROFILE" in
-  both|default|session-reuse) ;;
-  *) echo "EPDS_E2E_PROFILE must be both, default, or session-reuse." >&2; exit 2 ;;
+  both|default|otp-expiry|session-reuse) ;;
+  *) echo "EPDS_E2E_PROFILE must be both, default, otp-expiry, or session-reuse." >&2; exit 2 ;;
 esac
 if [[ -n "$SCENARIO_NAME" && "$PROFILE" != session-reuse ]]; then
   echo "EPDS_E2E_SCENARIO_NAME is only supported with EPDS_E2E_PROFILE=session-reuse." >&2
@@ -154,6 +154,10 @@ fi
 
 if [[ "$PROFILE" == both || "$PROFILE" == default ]]; then
   docker compose --project-name "$PROJECT" --profile e2e run --rm --no-deps epds-e2e-runner pnpm test:e2e:headless
+fi
+if [[ "$PROFILE" == both || "$PROFILE" == otp-expiry ]]; then
+  docker compose --project-name "$PROJECT" --profile e2e run --rm --no-deps epds-e2e-runner \
+    pnpm test:e2e:headless --profile otp-expiry
 fi
 if [[ "$PROFILE" == both || "$PROFILE" == session-reuse ]]; then
   if [[ -n "$SCENARIO_NAME" ]]; then
