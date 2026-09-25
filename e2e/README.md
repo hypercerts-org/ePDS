@@ -238,6 +238,13 @@ private-PLC proof, Cucumber, report copying, failure logs, and scoped cleanup.
 This keeps the GitHub Actions log useful when a specific infrastructure stage
 fails. `e2e/atmosphere/run.sh` remains the local equivalent.
 
+The top-level workflow, [`.github/workflows/e2e-tests.yml`](../.github/workflows/e2e-tests.yml),
+contains only the trigger and path gate. It calls
+[`e2e-atmosphere.yml`](../.github/workflows/e2e-atmosphere.yml) for the private
+stack and [`e2e-railway.yml`](../.github/workflows/e2e-railway.yml) for
+promotion-PR validation. Keep changes to each execution environment in its
+respective reusable workflow.
+
 To run the same workflow manually, select **E2E tests** in GitHub Actions and
 choose **Run workflow**. There are no environment-name inputs. Locally, run
 `pnpm test:e2e:atmosphere`; see its README for prerequisites, network and TLS
