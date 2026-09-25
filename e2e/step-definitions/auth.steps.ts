@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { Given, Then, When } from '@cucumber/cucumber'
 import { expect, type Route } from '@playwright/test'
 import { testEnv } from '../support/env.js'
@@ -11,6 +12,10 @@ import { createAccountViaOAuth, pickHandle } from '../support/flows.js'
 import { sharedBrowser } from '../support/hooks.js'
 import { clearMailpit, extractOtp, waitForEmail } from '../support/mailpit.js'
 import { fillOtp } from '../support/otp.js'
+
+function createTestEmail(prefix: string): string {
+  return `${prefix}-${Date.now()}-${randomBytes(6).toString('hex')}@example.com`
+}
 
 function getOtpAlphabet(otpCharset: 'numeric' | 'alphanumeric'): string {
   return otpCharset === 'alphanumeric'
@@ -81,7 +86,7 @@ async function buildIncorrectOtpCode(world: EpdsWorld): Promise<string> {
 Given('a returning user has a PDS account', async function (this: EpdsWorld) {
   if (!testEnv.mailpitPass) return 'pending'
 
-  const email = `returning-${Date.now()}@example.com`
+  const email = createTestEmail('returning')
   await createAccountViaOAuth(this, email)
 
   // Reset browser context to eliminate session cookies from the sign-up
@@ -105,7 +110,7 @@ Given(
   async function (this: EpdsWorld) {
     if (!testEnv.mailpitPass) return 'pending'
 
-    const email = `approved-${Date.now()}@example.com`
+    const email = createTestEmail('approved')
     await createAccountViaOAuth(this, email)
     await resetBrowserContext(this, sharedBrowser)
   },
