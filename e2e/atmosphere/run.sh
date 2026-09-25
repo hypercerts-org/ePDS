@@ -95,41 +95,7 @@ docker compose --project-name "$PROJECT" --profile e2e run --rm --no-deps epds-e
 deno task sandbox up --wait-timeout 300
 deno task sandbox seed
 deno task sandbox access --json > "$TEMP_ROOT/access.json"
-node --input-type=module - "$TEMP_ROOT/access.json" "$PROJECT" <<'EOF'
-import { readFile } from 'node:fs/promises'
-
-const [accessPath, project] = process.argv.slice(2)
-const access = JSON.parse(await readFile(accessPath, 'utf8'))
-const expectedEndpoints = [
-  ['application', 'epds.atmosbox.test', 'exact'],
-  ['application', 'auth.epds.atmosbox.test', 'exact'],
-  ['application', '*.epds.atmosbox.test', 'wildcard'],
-  ['application', 'authority.atmosbox.test', 'exact'],
-  ['application', '*.authority.atmosbox.test', 'wildcard'],
-]
-
-if (
-  access.schemaVersion !== 1 ||
-  access.project !== project ||
-  access.network?.internal !== true ||
-  access.observations?.configuration !== 'current' ||
-  access.trust?.certificateExists !== true
-) {
-  throw new Error('Atmosphere access projection did not describe a current private sandbox')
-}
-for (const [serviceType, hostname, kind] of expectedEndpoints) {
-  if (
-    !access.endpoints?.some(
-      (endpoint) =>
-        endpoint.serviceType === serviceType &&
-        endpoint.hostname === hostname &&
-        endpoint.kind === kind,
-    )
-  ) {
-    throw new Error(`Atmosphere access projection omitted ${hostname}`)
-  }
-}
-EOF
+node "$SCRIPT_DIR/validate-access.mjs" "$TEMP_ROOT/access.json" "$PROJECT"
 
 if [[ "${EPDS_E2E_DIAG_ONLY:-0}" == 1 ]]; then
   echo "Diagnostic-only provisioning complete; e2e proof and profiles were skipped."
