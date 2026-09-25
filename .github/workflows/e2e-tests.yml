@@ -3,7 +3,7 @@ name: E2E tests
 on:
   pull_request:
   push:
-    branches: [main, dev, production]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -271,23 +271,24 @@ jobs:
           path: reports/
           retention-days: 2
 
-  railway-release:
-    name: railway release
+  railway-pr:
+    name: railway ${{ github.base_ref }} e2e
+    needs: gate
     if: >-
-      github.event_name == 'push' &&
-      (github.ref_name == 'dev' || github.ref_name == 'production')
+      always() &&
+      github.event_name == 'pull_request' &&
+      needs.gate.outputs.relevant == 'true' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.base_ref == 'dev' || github.base_ref == 'production')
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
-      actions: read
       checks: write
       contents: read
     steps:
-      # Test the pushed SHA. The wait step below verifies that this exact SHA
-      # reached the Railway environment before the suite starts.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
 
@@ -308,76 +309,129 @@ jobs:
             '</testsuites>' \
             > reports/e2e.junit.xml
 
-      - name: Wait for the pushed SHA to deploy on Railway
+      - name: Install Railway CLI
+        run: npm install --global @railway/cli@5.58.0
+
+      - name: Create Railway e2e environment from pr-base
+        id: environment
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPOSITORY: ${{ github.repository }}
-          GITHUB_REF_NAME: ${{ github.ref_name }}
-          GITHUB_SHA: ${{ github.sha }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          EPDS_RAILWAY_PROJECT_ID: 17980f2b-0913-439f-a53e-472969130b6d
+          EPDS_RAILWAY_PR_BASE_ID: 62e661d4-3938-43e5-8a1c-52dbf8ca3223
+          E2E_ENVIRONMENT: pr-${{ github.event.pull_request.number }}-e2e-${{ github.base_ref }}
         run: |
           set -euo pipefail
-          case "$GITHUB_REF_NAME" in
-            dev) expected_environment='ePDS / dev' ;;
-            production) expected_environment='ePDS / production' ;;
-            *)
-              echo "::error::Unsupported release branch: $GITHUB_REF_NAME"
-              exit 1
-              ;;
-          esac
+          if [[ -z "$RAILWAY_TOKEN" ]]; then
+            echo '::error::Missing RAILWAY_TOKEN. Add a project-scoped Railway token with environment management access.'
+            exit 1
+          fi
 
-          for attempt in $(seq 1 72); do
-            deployment=$(gh api "repos/$GH_REPOSITORY/deployments?sha=$GITHUB_SHA&per_page=100" \
-              --jq "[.[] | select(.creator.login == \"railway-app[bot]\" and .environment == \"$expected_environment\")][0]")
-            if [[ "$deployment" == null ]]; then
-              sleep 5
-              continue
-            fi
-            deployment_id=$(printf '%s' "$deployment" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-            state=$(gh api "repos/$GH_REPOSITORY/deployments/$deployment_id/statuses" --jq '.[0].state')
-            case "$state" in
-              success)
-                echo "Railway deployed $GITHUB_SHA to $expected_environment."
-                exit 0
-                ;;
-              failure|error)
-                echo "::error::Railway deployment $deployment_id for $GITHUB_SHA ended as $state."
-                exit 1
-                ;;
-            esac
-            sleep 5
+          # The link writes only the disposable Actions runner's Railway CLI
+          # context. `environment new` uses that context to select its project.
+          railway link --project "$EPDS_RAILWAY_PROJECT_ID" --environment "$EPDS_RAILWAY_PR_BASE_ID" --json >/dev/null
+          environments=$(railway environment list --json)
+          environment_id=$(printf '%s' "$environments" | E2E_ENVIRONMENT="$E2E_ENVIRONMENT" python3 -c '
+          import json, os, sys
+          matches = [item["id"] for item in json.load(sys.stdin) if item["name"] == os.environ["E2E_ENVIRONMENT"]]
+          print(matches[0] if matches else "")
+          ')
+          if [[ -z "$environment_id" ]]; then
+            railway environment new "$E2E_ENVIRONMENT" --duplicate "$EPDS_RAILWAY_PR_BASE_ID" --json >/dev/null
+            environments=$(railway environment list --json)
+            environment_id=$(printf '%s' "$environments" | E2E_ENVIRONMENT="$E2E_ENVIRONMENT" python3 -c '
+            import json, os, sys
+            matches = [item["id"] for item in json.load(sys.stdin) if item["name"] == os.environ["E2E_ENVIRONMENT"]]
+            if len(matches) != 1: raise SystemExit(f"expected one environment named {os.environ[\"E2E_ENVIRONMENT\"]!r}, found {len(matches)}")
+            print(matches[0])
+            ')
+          fi
+          printf 'name=%s\n' "$E2E_ENVIRONMENT" >> "$GITHUB_OUTPUT"
+          printf 'id=%s\n' "$environment_id" >> "$GITHUB_OUTPUT"
+
+      - name: Connect cloned services to PR source
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          EPDS_RAILWAY_PROJECT_ID: 17980f2b-0913-439f-a53e-472969130b6d
+          E2E_ENVIRONMENT_ID: ${{ steps.environment.outputs.id }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          for service in \
+            16bd3666-68ae-4537-95fb-ac516e60e9c8 \
+            ff7388f9-c9b2-450c-aabd-4f8bbc2a7ddd \
+            f817aa3b-e784-46e1-9984-0975f7445479 \
+            e10dd487-fe62-456c-894a-79fac8fd3872; do
+            railway service source connect --project "$EPDS_RAILWAY_PROJECT_ID" \
+              --environment "$E2E_ENVIRONMENT_ID" --service "$service" \
+              --repo "$REPOSITORY" --branch "$PR_BRANCH" --json >/dev/null
           done
 
-          echo "::error::Railway did not deploy $GITHUB_SHA to $expected_environment within six minutes."
-          exit 1
-
-      - name: Configure deployed Railway target
-        id: target
+      - name: Wait for PR SHA on cloned Railway services
         env:
-          GITHUB_REF_NAME: ${{ github.ref_name }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          EPDS_RAILWAY_PROJECT_ID: 17980f2b-0913-439f-a53e-472969130b6d
+          E2E_ENVIRONMENT_ID: ${{ steps.environment.outputs.id }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          case "$GITHUB_REF_NAME" in
-            dev)
-              environment_slug=dev
-              release_target=staging
-              ;;
-            production)
-              environment_slug=production
-              release_target=production
-              ;;
-            *)
-              echo "::error::Unsupported release branch: $GITHUB_REF_NAME"
+          services=(
+            16bd3666-68ae-4537-95fb-ac516e60e9c8
+            ff7388f9-c9b2-450c-aabd-4f8bbc2a7ddd
+            f817aa3b-e784-46e1-9984-0975f7445479
+            e10dd487-fe62-456c-894a-79fac8fd3872
+          )
+          for service in "${services[@]}"; do
+            for attempt in $(seq 1 72); do
+              deployments=$(railway deployment list --project "$EPDS_RAILWAY_PROJECT_ID" \
+                --environment "$E2E_ENVIRONMENT_ID" --service "$service" --limit 10 --json)
+              status=$(printf '%s' "$deployments" | PR_SHA="$PR_SHA" python3 -c '
+              import json, os, sys
+              for deployment in json.load(sys.stdin):
+                  if deployment.get("meta", {}).get("commitHash") == os.environ["PR_SHA"]:
+                      print(deployment["status"])
+                      break
+              ')
+              case "$status" in
+                SUCCESS) break ;;
+                FAILED|CRASHED)
+                  echo "::error::Railway service $service deployment for $PR_SHA ended as $status."
+                  exit 1
+                  ;;
+                *) sleep 5 ;;
+              esac
+            done
+            if [[ "$status" != SUCCESS ]]; then
+              echo "::error::Railway service $service did not deploy $PR_SHA within six minutes."
               exit 1
-              ;;
-          esac
-          printf 'target=%s\n' "$release_target" >> "$GITHUB_OUTPUT"
-          printf 'pds_url=https://certified-apppds-core-%s.up.railway.app\n' "$environment_slug" >> "$GITHUB_OUTPUT"
-          printf 'auth_url=https://certified-appauth-service-%s.up.railway.app\n' "$environment_slug" >> "$GITHUB_OUTPUT"
-          printf 'demo_url=https://certified-appdemo-%s.up.railway.app\n' "$environment_slug" >> "$GITHUB_OUTPUT"
-          printf 'demo_untrusted_url=https://certified-appdemo-untrusted-%s.up.railway.app\n' "$environment_slug" >> "$GITHUB_OUTPUT"
-          printf 'mailpit_url=https://mailpit-%s.up.railway.app\n' "$environment_slug" >> "$GITHUB_OUTPUT"
+            fi
+          done
 
-      - name: Wait for deployed Railway services
+      - name: Discover cloned Railway service URLs
+        id: target
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          EPDS_RAILWAY_PROJECT_ID: 17980f2b-0913-439f-a53e-472969130b6d
+          E2E_ENVIRONMENT_ID: ${{ steps.environment.outputs.id }}
+        run: |
+          set -euo pipefail
+          service_url() {
+            railway domain list --project "$EPDS_RAILWAY_PROJECT_ID" \
+              --environment "$E2E_ENVIRONMENT_ID" --service "$1" --json | python3 -c '
+            import json, sys
+            domains = json.load(sys.stdin)
+            domain = next((item.get("domain") for item in domains if item.get("domain")), None)
+            if not domain: raise SystemExit("no Railway domain found")
+            print(f"https://{domain}")
+            '
+          }
+          printf 'pds_url=%s\n' "$(service_url 16bd3666-68ae-4537-95fb-ac516e60e9c8)" >> "$GITHUB_OUTPUT"
+          printf 'auth_url=%s\n' "$(service_url ff7388f9-c9b2-450c-aabd-4f8bbc2a7ddd)" >> "$GITHUB_OUTPUT"
+          printf 'demo_url=%s\n' "$(service_url f817aa3b-e784-46e1-9984-0975f7445479)" >> "$GITHUB_OUTPUT"
+          printf 'demo_untrusted_url=%s\n' "$(service_url e10dd487-fe62-456c-894a-79fac8fd3872)" >> "$GITHUB_OUTPUT"
+          printf 'mailpit_url=%s\n' "$(service_url d0349dbd-63fc-40af-ad21-7aa2c761245d)" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for cloned Railway services
         env:
           PDS_URL: ${{ steps.target.outputs.pds_url }}
           AUTH_URL: ${{ steps.target.outputs.auth_url }}
@@ -390,7 +444,7 @@ jobs:
             curl --fail --retry 30 --retry-all-errors --retry-delay 5 --max-time 20 "$url" >/dev/null
           done
 
-      - name: Run E2E against deployed Railway services
+      - name: Run E2E against cloned Railway services
         env:
           E2E_PDS_URL: ${{ steps.target.outputs.pds_url }}
           E2E_AUTH_URL: ${{ steps.target.outputs.auth_url }}
@@ -408,7 +462,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3.0.0
         with:
-          name: railway ${{ steps.target.outputs.target }} e2e report
+          name: railway ${{ github.base_ref }} e2e report
           path: reports/e2e.junit.xml
           reporter: java-junit
           fail-on-error: false
@@ -417,6 +471,13 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: railway-${{ steps.target.outputs.target }}-e2e-report
+          name: railway-${{ github.event.pull_request.number }}-${{ github.base_ref }}-e2e-report
           path: reports/
           retention-days: 2
+
+      - name: Delete cloned Railway e2e environment
+        if: always() && steps.environment.outputs.name != ''
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          E2E_ENVIRONMENT: ${{ steps.environment.outputs.name || format('pr-{0}-e2e-{1}', github.event.pull_request.number, github.base_ref) }}
+        run: railway environment delete "$E2E_ENVIRONMENT" --yes --json

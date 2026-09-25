@@ -163,6 +163,21 @@ Railway deploys automatically on push to the linked branch. Each service's
 relevant changes trigger a rebuild, even though the config files live under
 `packages/*/`.
 
+### Promotion pull request E2E environments
+
+The `E2E tests` GitHub Actions workflow creates an isolated Railway environment
+for same-repository pull requests to `dev` or `production`. It duplicates the
+`pr-base` reference architecture as `pr-<number>-e2e-<target>`, reconnects the
+four application services to the pull request branch, and waits until each has
+deployed the pull request SHA. The E2E suite then runs against the cloned
+public domains, including the Mailpit service inherited from `pr-base`.
+
+The workflow deletes the generated environment after it uploads the report. It
+needs a `RAILWAY_TOKEN` repository Actions secret for a project-scoped Railway
+token with permission to create, configure, inspect, and delete environments.
+Do not print or inspect this token in CI logs. Fork pull requests cannot use
+that credential and run the private Atmosphere in a Box E2E job only.
+
 To manually redeploy:
 
 ```bash

@@ -108,13 +108,13 @@ SHA, clones the pinned revision, registers the repository-owned template, and
 runs ePDS on a job-local private PLC. It does not wait for Railway deployments
 or require public service URLs.
 
-Railway release validation is a branch-specific job in the same workflow.
-Pushes to `dev` (the `main` → `dev` promotion) target `ePDS / dev`; pushes to
-`production` (the `dev` → `production` promotion) target `ePDS / production`.
-The job waits for Railway's deployment record for the pushed SHA to succeed,
-then runs the E2E suite against that environment's public service URLs. The
-workflow retains HTML/JUnit reports and cleans up only its job-scoped Compose
-project.
+For same-repository PRs targeting `dev` or `production`, a separate job clones
+Railway's `pr-base` reference environment as `pr-<number>-e2e-<target>`. It
+connects pds-core, auth, and both demo services to the PR branch, waits for the
+head SHA to deploy, runs E2E against the clone, and deletes that exact
+environment. Mailpit comes from `pr-base`, so the suite has its complete
+topology. It requires a project-scoped `RAILWAY_TOKEN` Actions secret with
+environment management access; fork PRs run only the private AiaB job.
 
 To run the same environment locally, install Docker Compose v2, Node.js 24,
 npm, Deno 2.8.3, Python 3, and the ePDS pnpm dependencies, then run:
