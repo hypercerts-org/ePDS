@@ -226,8 +226,8 @@ fails. `e2e/atmosphere/run.sh` remains the local equivalent.
 
 To run the same workflow manually, select **E2E tests** in GitHub Actions and
 choose **Run workflow**. There are no environment-name inputs. Locally, run
-`bash e2e/atmosphere/run.sh`; see its README for prerequisites, network and
-TLS boundaries, reports, and cleanup behavior.
+`pnpm test:e2e:atmosphere`; see its README for prerequisites, network and TLS
+boundaries, reports, and cleanup behavior.
 
 The default profile intentionally excludes `@session-reuse`. The session-reuse
 profile is run separately against the compatible hostname layout. Its last
