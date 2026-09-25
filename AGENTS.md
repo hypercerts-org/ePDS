@@ -26,6 +26,8 @@ pnpm format                # format all files with Prettier
 pnpm format:check          # check formatting (CI)
 pnpm lint                  # lint all files with ESLint
 pnpm lint:fix              # lint and auto-fix where possible
+EPDS_E2E_PROJECT=epds-e2e-local EPDS_E2E_PROFILE=default pnpm test:e2e:atmosphere
+node e2e/atmosphere/validate-access.mjs <access.json> <project> # validate AiaB's non-secret access projection
 ```
 
 ## Before Pushing
@@ -100,36 +102,46 @@ for API commands.
 
 ### End-to-end tests in CI
 
-The e2e suite lives in `e2e/` and its feature files in `features/`. Normally
-the `E2E tests` workflow (`.github/workflows/e2e-tests.yml`) runs itself off
-Railway's `deployment_status` webhook — no action needed on an ordinary PR.
+The `E2E tests` workflow runs the private Atmosphere in a Box stack on relevant
+pull requests, pushes to `main`, and manual dispatch. It checks out the PR head
+SHA, clones the pinned revision, registers the repository-owned template, and
+runs ePDS on a job-local private PLC. It does not wait for Railway deployments
+or require public service URLs.
 
-To manually trigger it against a Railway environment (for e2e-only changes
-that don't cause a rebuild, or to re-run without a new commit), **always
-pass both `--ref` and `-f env_name`**:
+For same-repository PRs targeting `dev` or `production`, a separate job clones
+Railway's `pr-base` reference environment as `pr-<number>-e2e-<target>`. It
+connects pds-core, auth, and both demo services to the PR branch, waits for the
+head SHA to deploy, runs E2E against the clone, and deletes that exact
+environment. Mailpit and the private Atmosphere PLC come from `pr-base`, so the
+suite has its complete topology. It requires an account- or workspace-scoped
+`RAILWAY_API_TOKEN` Actions secret with environment management access; fork PRs
+run only the private AiaB job.
+
+`.github/workflows/e2e-tests.yml` is the trigger and path-gate dispatcher. The
+private AiaB job lives in `e2e-atmosphere.yml`; the disposable Railway
+promotion-PR job lives in `e2e-railway.yml`. Keep environment-specific steps in
+those reusable workflows.
+
+To run the same environment locally, install Docker Compose v2, Node.js 24,
+npm, Deno 2.8.3, Python 3, and the ePDS pnpm dependencies, then run:
 
 ```bash
-# Against a PR environment:
-gh workflow run e2e-tests.yml \
-  --ref <your-branch> \
-  -f env_name="ePDS / ePDS-pr-<N>"
-
-# Against the persistent pr-base environment (post-merge backstop):
-gh workflow run e2e-tests.yml \
-  --ref main \
-  -f env_name="ePDS / pr-base"
+EPDS_E2E_PROJECT=epds-e2e-local pnpm test:e2e:atmosphere
 ```
 
-`--ref` controls which version of the feature files, step definitions, and
-workflow YAML get checked out. Without it, `gh workflow run` defaults to
-`main` and you'll silently test old code against the right environment.
-See [`e2e/README.md`](e2e/README.md#running-the-ci-e2e-job-against-a-railway-environment)
-for details (env-name formats, URL derivation, how to handle missing Railway
-domains).
+The required CI job runs the concurrent default profile and a separate serial
+`@otp-expiry` profile. The default profile intentionally excludes that tag
+because better-auth's expired-verification cleanup is global to the shared test
+database. The session-reuse profile was verified
+separately at 19/20 scenarios; one returning-user scenario remained on the
+untrusted second client's consent page after confirming identity. It is not
+a required workflow job while that baseline failure remains. Consult
+[`e2e/atmosphere/README.md`](e2e/atmosphere/README.md) for the exact behavior
+and test network boundaries.
 
-The e2e suite uses two demo OAuth clients (trusted and untrusted) for
-trust-gated scenarios. See [`e2e/README.md`](e2e/README.md#two-demo-clients)
-for the full setup, tagging conventions, and step-definition patterns.
+The two demo clients support trust-gated scenarios. See
+[`e2e/README.md`](e2e/README.md#two-demo-clients) for the configuration and
+tag conventions.
 
 ### Writing Tests
 

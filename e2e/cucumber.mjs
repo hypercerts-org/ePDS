@@ -1,37 +1,36 @@
 // Shared config for the cucumber-js e2e runner.
 //
-// Two profiles are exported:
+// Three profiles are exported:
 //
-//   default         — the normal PR-CI run against a Railway preview
-//                     environment. Excludes scenarios that the Railway
-//                     topology cannot satisfy (see per-tag notes below).
+//   default         — the standard PR-CI run against the private Atmosphere
+//                     in a Box stack. Excludes session-reuse and OTP-expiry
+//                     scenarios, which run separately below.
+//
+//   otp-expiry      — only the @otp-expiry scenario. It runs with one worker
+//                     because better-auth's expired-verification cleanup is
+//                     global to the shared database.
 //
 //   session-reuse   — only the HYPER-268 @session-reuse scenarios. Intended
 //                     for runs against a docker-compose (or equivalently-
 //                     topologised) stack where auth-service is a subdomain
 //                     of pds-core (AUTH_HOSTNAME ends with .<PDS_HOSTNAME>),
 //                     so device-session cookies are sharable across the two
-//                     services. Railway preview envs can't satisfy this
-//                     (random hostnames under the .up.railway.app public
-//                     suffix), so these scenarios are excluded from the
-//                     default profile.
+//                     services. These scenarios are excluded from the default
+//                     profile and run separately against the managed private stack.
 //
-// Invoke via `pnpm test:e2e` (default) or `pnpm test:e2e -p session-reuse`.
+// Invoke via `pnpm test:e2e` (default), `pnpm test:e2e -p otp-expiry`, or
+// `pnpm test:e2e -p session-reuse`.
 //
 // Scenarios tagged @untrusted-client drive the untrusted demo OAuth client
 // (see e2e/README.md#two-demo-clients). They are only runnable against
 // environments that provide a second demo — reflect that in the tag
 // expression by excluding the tag when E2E_DEMO_UNTRUSTED_URL is unset.
 //
-// Scenarios tagged @otp-expiry or @par-callback-error call
-// /_internal/test/* hooks (auth-service for @otp-expiry, pds-core for
-// @par-callback-error) which require EPDS_TEST_HOOKS=1 on the server
-// side and the matching EPDS_INTERNAL_SECRET on the client side.
-// Exclude both when E2E_INTERNAL_SECRET is unset so they don't fail
-// at run time on environments that haven't enabled the hooks.
+// Scenarios tagged @otp-expiry or @par-callback-error call /_internal/test/*
+// hooks, which require EPDS_TEST_HOOKS=1 and E2E_INTERNAL_SECRET.
 const hookTagExclusions = process.env.E2E_INTERNAL_SECRET
   ? []
-  : ['not @otp-expiry', 'not @par-callback-error']
+  : ['not @par-callback-error']
 
 const defaultTagExclusions = [
   'not @manual',
@@ -39,6 +38,7 @@ const defaultTagExclusions = [
   'not @pending',
   'not @risk-of-disruption',
   'not @session-reuse',
+  'not @otp-expiry',
   ...(process.env.E2E_DEMO_UNTRUSTED_URL ? [] : ['not @untrusted-client']),
   ...hookTagExclusions,
 ]
@@ -61,6 +61,13 @@ const defaultParallel =
     ? parsedDefaultParallel
     : 3
 
+const otpExpiryTags = process.env.E2E_INTERNAL_SECRET
+  ? [
+      '@otp-expiry',
+      ...defaultTagExclusions.filter((tag) => tag !== 'not @otp-expiry'),
+    ].join(' and ')
+  : '@otp-expiry and not @otp-expiry'
+
 const shared = {
   paths: ['features/**/*.feature'],
   import: ['e2e/step-definitions/**/*.ts', 'e2e/support/**/*.ts'],
@@ -77,6 +84,16 @@ export default () => ({
     format: ['pretty', 'html:reports/e2e.html', 'junit:reports/e2e.junit.xml'],
     parallel: defaultParallel,
     tags: defaultTagExclusions.join(' and '),
+  },
+  'otp-expiry': {
+    ...shared,
+    format: [
+      'pretty',
+      'html:reports/e2e-otp-expiry.html',
+      'junit:reports/e2e-otp-expiry.junit.xml',
+    ],
+    parallel: 1,
+    tags: otpExpiryTags,
   },
   'session-reuse': {
     ...shared,
