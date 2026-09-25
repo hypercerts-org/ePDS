@@ -128,8 +128,10 @@ npm, Deno 2.8.3, Python 3, and the ePDS pnpm dependencies, then run:
 EPDS_E2E_PROJECT=epds-e2e-local pnpm test:e2e:atmosphere
 ```
 
-The required CI job runs the default profile. The default profile passed 83
-scenarios in its latest verified run. The session-reuse profile was verified
+The required CI job runs the concurrent default profile and a separate serial
+`@otp-expiry` profile. The default profile intentionally excludes that tag
+because better-auth's expired-verification cleanup is global to the shared test
+database. The session-reuse profile was verified
 separately at 19/20 scenarios; one returning-user scenario remained on the
 untrusted second client's consent page after confirming identity. It is not
 a required workflow job while that baseline failure remains. Consult

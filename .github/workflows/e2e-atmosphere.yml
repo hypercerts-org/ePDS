@@ -179,6 +179,13 @@ jobs:
           --name "$EPDS_E2E_PROJECT-e2e-runner" --no-deps
           epds-e2e-runner pnpm test:e2e:headless
 
+      - name: Run serial OTP-expiry Cucumber profile
+        working-directory: ${{ runner.temp }}/atmosphereinabox
+        run: >-
+          docker compose --project-name "$EPDS_E2E_PROJECT" --profile e2e run
+          --name "$EPDS_E2E_PROJECT-otp-expiry-runner" --no-deps
+          epds-e2e-runner pnpm test:e2e:headless --profile otp-expiry
+
       - name: Copy e2e reports from private stack
         if: always()
         run: |
@@ -235,7 +242,7 @@ jobs:
         uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3.0.0
         with:
           name: e2e cucumber report
-          path: reports/e2e.junit.xml
+          path: reports/*.junit.xml
           reporter: java-junit
           fail-on-error: false
 

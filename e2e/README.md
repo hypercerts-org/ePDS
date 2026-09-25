@@ -28,7 +28,8 @@ EPDS_E2E_PROJECT=epds-e2e-local pnpm test:e2e:atmosphere
 ```
 
 Prerequisites are Docker Compose v2, Node.js 24, npm, Deno 2.8.3, Python 3,
-and the ePDS pnpm dependencies. The runner performs both profiles by default,
+and the ePDS pnpm dependencies. The local runner's `both` profile performs the
+concurrent default, serial OTP-expiry, and session-reuse profiles,
 checks that the created DID resolves only through the job-local PLC, retains
 HTML/JUnit reports under `reports/`, and cleans up the named project.
 
@@ -231,6 +232,12 @@ discover Railway previews or require public service URLs, Railway credentials,
 or writes to public PLC. PRs targeting `dev` or `production` also receive the
 separate cloned-Railway validation described above.
 
+The private workflow then runs `@otp-expiry` in a separate one-worker profile.
+Better-auth removes expired verification rows globally during unrelated auth
+requests, so a concurrent scenario could otherwise convert the expected
+expired-code response into `Invalid OTP`. The serial profile keeps the
+expired-code assertion deterministic.
+
 Each provisioning and verification operation is a named workflow step: template
 validation, clone and registration, topology creation, image build, service
 startup, fixture seeding, access projection validation, private-service probes,
@@ -254,7 +261,8 @@ choose **Run workflow**. There are no environment-name inputs. Locally, run
 `pnpm test:e2e:atmosphere`; see its README for prerequisites, network and TLS
 boundaries, reports, and cleanup behavior.
 
-The default profile intentionally excludes `@session-reuse`. The session-reuse
+The concurrent default profile intentionally excludes `@session-reuse` and
+`@otp-expiry`. The serial OTP-expiry profile is required in CI. The session-reuse
 profile is run separately against the compatible hostname layout. Its last
 verified run passed 19 of 20 scenarios and had one baseline failure:
 “Signed-in user returning to an already-approved second client auto-approves
