@@ -238,6 +238,10 @@ private-PLC proof, Cucumber, report copying, failure logs, and scoped cleanup.
 This keeps the GitHub Actions log useful when a specific infrastructure stage
 fails. `e2e/atmosphere/run.sh` remains the local equivalent.
 
+When the private job fails, the `e2e-report` artifact also contains
+`private-stack-logs/`: an all-container Compose log, a container inventory, and
+one timestamped log per retained container, including the named Cucumber runner.
+
 The top-level workflow, [`.github/workflows/e2e-tests.yml`](../.github/workflows/e2e-tests.yml),
 contains only the trigger and path gate. It calls
 [`e2e-atmosphere.yml`](../.github/workflows/e2e-atmosphere.yml) for the private

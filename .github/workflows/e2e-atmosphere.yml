@@ -175,7 +175,8 @@ jobs:
       - name: Run default Cucumber profile
         working-directory: ${{ runner.temp }}/atmosphereinabox
         run: >-
-          docker compose --project-name "$EPDS_E2E_PROJECT" --profile e2e run --rm --no-deps
+          docker compose --project-name "$EPDS_E2E_PROJECT" --profile e2e run
+          --name "$EPDS_E2E_PROJECT-e2e-runner" --no-deps
           epds-e2e-runner pnpm test:e2e:headless
 
       - name: Copy e2e reports from private stack
@@ -186,12 +187,25 @@ jobs:
               -cf - . | tar -C reports -xf -
           fi
 
-      - name: Capture private-stack logs on failure
+      - name: Capture private-stack container logs on failure
         if: failure()
         working-directory: ${{ runner.temp }}/atmosphereinabox
         run: |
-          docker compose --project-name "$EPDS_E2E_PROJECT" logs --no-color \
-            > "$GITHUB_WORKSPACE/reports/private-stack.log" 2>&1 || true
+          set -u
+          log_dir="$GITHUB_WORKSPACE/reports/private-stack-logs"
+          mkdir -p "$log_dir"
+          docker compose --project-name "$EPDS_E2E_PROJECT" ps --all --format json \
+            > "$log_dir/compose-containers.jsonl" 2>&1 || true
+          docker compose --project-name "$EPDS_E2E_PROJECT" logs --no-color --timestamps \
+            > "$log_dir/all-containers.log" 2>&1 || true
+          docker ps --all --filter "label=com.docker.compose.project=$EPDS_E2E_PROJECT" \
+            --format '{{.ID}}\t{{.Names}}\t{{.Status}}' > "$log_dir/containers.tsv" || true
+          while IFS=$'\t' read -r container_id container_name _; do
+            [[ -n "$container_id" ]] || continue
+            safe_name="${container_name//[^[:alnum:]._-]/_}"
+            docker logs --timestamps "$container_id" \
+              > "$log_dir/${safe_name}.log" 2>&1 || true
+          done < "$log_dir/containers.tsv"
 
       - name: Final scoped Docker cleanup
         if: always()

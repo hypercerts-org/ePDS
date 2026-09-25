@@ -2,8 +2,8 @@ FROM mcr.microsoft.com/playwright:v1.58.2-noble
 WORKDIR /app
 ENV COREPACK_HOME=/opt/corepack
 RUN apt-get update && apt-get install -y --no-install-recommends libnss3-tools \
-    && rm -rf /var/lib/apt/lists/*
-RUN corepack enable && corepack prepare pnpm@9.15.9 --activate \
+    && rm -rf /var/lib/apt/lists/* \
+    && corepack enable && corepack prepare pnpm@9.15.9 --activate \
     && test "$(corepack pnpm --version)" = "9.15.9"
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/shared/package.json packages/shared/
@@ -11,9 +11,14 @@ COPY packages/auth-service/package.json packages/auth-service/
 COPY packages/pds-core/package.json packages/pds-core/
 COPY packages/demo/package.json packages/demo/
 RUN pnpm install --frozen-lockfile
-COPY . .
+COPY features features
+COPY e2e/cucumber.mjs e2e/cucumber.mjs
+COPY e2e/tsconfig.e2e.json e2e/tsconfig.e2e.json
+COPY e2e/step-definitions e2e/step-definitions
+COPY e2e/support e2e/support
 COPY e2e/atmosphere/prove-private-plc.ts.txt e2e/atmosphere/prove-private-plc.runtime.mts
 COPY e2e/atmosphere/runner-entrypoint.sh /usr/local/bin/epds-e2e-entrypoint
 RUN chmod 0755 /usr/local/bin/epds-e2e-entrypoint
+USER pwuser
 ENTRYPOINT ["/usr/local/bin/epds-e2e-entrypoint"]
 CMD ["pnpm", "test:e2e:headless"]

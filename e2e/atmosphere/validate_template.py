@@ -73,21 +73,31 @@ def _environment(service: object, name: str) -> str | None:
     return None
 
 
-def validate_compose(config: object) -> None:
+def _services(config: object) -> dict[str, object]:
     if not isinstance(config, dict):
         raise TemplateContractError("Rendered Compose config is not an object")
     services = config.get("services")
     if not isinstance(services, dict):
         raise TemplateContractError("Rendered Compose config has no services")
+    return services
+
+
+def _validate_no_host_ports(services: dict[str, object]) -> None:
     for name, service in services.items():
         if isinstance(service, dict) and service.get("ports"):
             raise TemplateContractError(f"Host-published ports are not allowed: {name}")
 
+
+def _validate_internal_network(config: object) -> None:
+    if not isinstance(config, dict):
+        raise TemplateContractError("Rendered Compose config is not an object")
     networks = config.get("networks", {})
     app_network = networks.get("atmosinabox") if isinstance(networks, dict) else None
     if not isinstance(app_network, dict) or app_network.get("internal") is not True:
         raise TemplateContractError("Sandbox application network must remain internal")
 
+
+def _expected_private_plc(services: dict[str, object]) -> str:
     core = services.get("epds-core")
     public_url = _environment(core, "PDS_PUBLIC_URL")
     plc_url = _environment(core, "PDS_DID_PLC_URL")
@@ -97,11 +107,22 @@ def validate_compose(config: object) -> None:
     expected_plc = f"https://plc.{public_host.removeprefix('epds.')}"
     if plc_url != expected_plc or urlparse(plc_url or "").hostname == "plc.directory":
         raise TemplateContractError("Core PDS must use the private sandbox PLC")
+    return expected_plc
 
+
+def _validate_dependent_plc_services(services: dict[str, object], expected_plc: str) -> None:
     for service_name, variable in REQUIRED_PLC_SERVICES.items():
         value = _environment(services.get(service_name), variable)
         if value != expected_plc or urlparse(value or "").hostname == "plc.directory":
             raise TemplateContractError(f"Private PLC URL is missing or changed: {service_name}")
+
+
+def validate_compose(config: object) -> None:
+    services = _services(config)
+    _validate_no_host_ports(services)
+    _validate_internal_network(config)
+    expected_plc = _expected_private_plc(services)
+    _validate_dependent_plc_services(services, expected_plc)
 
 
 def main() -> None:

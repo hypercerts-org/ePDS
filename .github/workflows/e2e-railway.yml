@@ -23,7 +23,7 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Seed empty e2e report
         run: |
@@ -36,7 +36,7 @@ jobs:
             > reports/e2e.junit.xml
 
       - name: Install Railway CLI
-        run: npm install --global @railway/cli@5.58.0
+        run: npm install --global --ignore-scripts @railway/cli@5.58.0
 
       - name: Create Railway e2e environment from pr-base
         id: environment
