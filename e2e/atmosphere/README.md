@@ -13,7 +13,7 @@ Install Docker Compose v2, Node.js 24, Deno 2.8.3, Python 3, and the ePDS pnpm
 dependencies. Docker must be available to the current account.
 
 ```bash
-EPDS_E2E_PROJECT=epds-e2e-local EPDS_E2E_PROFILE=default bash e2e/atmosphere/run.sh
+EPDS_E2E_PROJECT=epds-e2e-local EPDS_E2E_PROFILE=default pnpm test:e2e:atmosphere
 ```
 
 The runner creates a fresh zero-PDS sandbox with `--subnet auto`, copies and
@@ -57,8 +57,8 @@ projection, then invokes the normal test container with Docker Compose.
 
 The GitHub workflow performs clone, registration, provisioning, fixture seed,
 access validation, health checks, private-PLC proof, Cucumber, report copying,
-and cleanup in separate named steps. `run.sh` provides the same sequence for
-local use.
+and cleanup in separate named steps. `pnpm test:e2e:atmosphere` provides the
+same sequence for local use.
 
 Generated state, generated secrets, private CA keys, authority state, and the
 private PLC proof file are never copied to `reports/`. Cleanup targets only the
