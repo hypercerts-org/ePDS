@@ -15,6 +15,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
 
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
 
@@ -41,14 +42,14 @@ jobs:
       - name: Create Railway e2e environment from pr-base
         id: environment
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
           EPDS_RAILWAY_PROJECT_ID: 17980f2b-0913-439f-a53e-472969130b6d
           EPDS_RAILWAY_PR_BASE_ID: 62e661d4-3938-43e5-8a1c-52dbf8ca3223
           E2E_ENVIRONMENT: pr-${{ github.event.pull_request.number }}-e2e-${{ github.base_ref }}
         run: |
           set -euo pipefail
-          if [[ -z "$RAILWAY_TOKEN" ]]; then
-            echo '::error::Missing RAILWAY_TOKEN. Add a project-scoped Railway token with environment management access.'
+          if [[ -z "$RAILWAY_API_TOKEN" ]]; then
+            echo '::error::Missing RAILWAY_API_TOKEN. Add an account- or workspace-scoped Railway token with environment management access.'
             exit 1
           fi
 
@@ -56,27 +57,21 @@ jobs:
           # context. `environment new` uses that context to select its project.
           railway link --project "$EPDS_RAILWAY_PROJECT_ID" --environment "$EPDS_RAILWAY_PR_BASE_ID" --json >/dev/null
           environments=$(railway environment list --json)
-          environment_id=$(printf '%s' "$environments" | E2E_ENVIRONMENT="$E2E_ENVIRONMENT" python3 -c '
-          import json, os, sys
-          matches = [item["id"] for item in json.load(sys.stdin) if item["name"] == os.environ["E2E_ENVIRONMENT"]]
-          print(matches[0] if matches else "")
-          ')
+          environment_id=$(printf '%s' "$environments" | jq -r --arg name "$E2E_ENVIRONMENT" \
+            'first(.[] | select(.name == $name) | .id) // empty')
           if [[ -z "$environment_id" ]]; then
+            printf 'name=%s\n' "$E2E_ENVIRONMENT" >> "$GITHUB_OUTPUT"
             railway environment new "$E2E_ENVIRONMENT" --duplicate "$EPDS_RAILWAY_PR_BASE_ID" --json >/dev/null
             environments=$(railway environment list --json)
-            environment_id=$(printf '%s' "$environments" | E2E_ENVIRONMENT="$E2E_ENVIRONMENT" python3 -c '
-            import json, os, sys
-            matches = [item["id"] for item in json.load(sys.stdin) if item["name"] == os.environ["E2E_ENVIRONMENT"]]
-            if len(matches) != 1: raise SystemExit(f"expected one environment named {os.environ[\"E2E_ENVIRONMENT\"]!r}, found {len(matches)}")
-            print(matches[0])
-            ')
+            environment_id=$(printf '%s' "$environments" | jq -er --arg name "$E2E_ENVIRONMENT" \
+              '[.[] | select(.name == $name) | .id] | if length == 1 then .[0] else error("expected one environment named \($name), found \(length)") end')
           fi
           printf 'name=%s\n' "$E2E_ENVIRONMENT" >> "$GITHUB_OUTPUT"
           printf 'id=%s\n' "$environment_id" >> "$GITHUB_OUTPUT"
 
       - name: Connect cloned services to PR source
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
           EPDS_RAILWAY_PROJECT_ID: 17980f2b-0913-439f-a53e-472969130b6d
           E2E_ENVIRONMENT_ID: ${{ steps.environment.outputs.id }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
@@ -95,7 +90,7 @@ jobs:
 
       - name: Wait for PR SHA on cloned Railway services
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
           EPDS_RAILWAY_PROJECT_ID: 17980f2b-0913-439f-a53e-472969130b6d
           E2E_ENVIRONMENT_ID: ${{ steps.environment.outputs.id }}
           PR_SHA: ${{ github.event.pull_request.head.sha }}
@@ -111,13 +106,8 @@ jobs:
             for attempt in $(seq 1 72); do
               deployments=$(railway deployment list --project "$EPDS_RAILWAY_PROJECT_ID" \
                 --environment "$E2E_ENVIRONMENT_ID" --service "$service" --limit 10 --json)
-              status=$(printf '%s' "$deployments" | PR_SHA="$PR_SHA" python3 -c '
-              import json, os, sys
-              for deployment in json.load(sys.stdin):
-                  if deployment.get("meta", {}).get("commitHash") == os.environ["PR_SHA"]:
-                      print(deployment["status"])
-                      break
-              ')
+              status=$(printf '%s' "$deployments" | jq -r --arg sha "$PR_SHA" \
+                'first(.[] | select(.meta.commitHash? == $sha) | .status) // empty')
               case "$status" in
                 SUCCESS) break ;;
                 FAILED|CRASHED)
@@ -136,20 +126,15 @@ jobs:
       - name: Discover cloned Railway service URLs
         id: target
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
           EPDS_RAILWAY_PROJECT_ID: 17980f2b-0913-439f-a53e-472969130b6d
           E2E_ENVIRONMENT_ID: ${{ steps.environment.outputs.id }}
         run: |
           set -euo pipefail
           service_url() {
             railway domain list --project "$EPDS_RAILWAY_PROJECT_ID" \
-              --environment "$E2E_ENVIRONMENT_ID" --service "$1" --json | python3 -c '
-            import json, sys
-            domains = json.load(sys.stdin)
-            domain = next((item.get("domain") for item in domains if item.get("domain")), None)
-            if not domain: raise SystemExit("no Railway domain found")
-            print(f"https://{domain}")
-            '
+              --environment "$E2E_ENVIRONMENT_ID" --service "$1" --json \
+              | jq -er 'first(.[] | .domain // empty) | "https://\(.)"'
           }
           printf 'pds_url=%s\n' "$(service_url 16bd3666-68ae-4537-95fb-ac516e60e9c8)" >> "$GITHUB_OUTPUT"
           printf 'auth_url=%s\n' "$(service_url ff7388f9-c9b2-450c-aabd-4f8bbc2a7ddd)" >> "$GITHUB_OUTPUT"
@@ -204,6 +189,6 @@ jobs:
       - name: Delete cloned Railway e2e environment
         if: always() && steps.environment.outputs.name != ''
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
           E2E_ENVIRONMENT: ${{ steps.environment.outputs.name || format('pr-{0}-e2e-{1}', github.event.pull_request.number, github.base_ref) }}
         run: railway environment delete "$E2E_ENVIRONMENT" --yes --json

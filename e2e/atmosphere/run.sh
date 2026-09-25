@@ -53,12 +53,14 @@ cleanup() {
   copy_reports
   if [[ -f "$SANDBOX_ROOT/compose.yaml" ]]; then
     if [[ "$result" -ne 0 ]]; then
+      local diagnostic_root="$REPORT_ROOT/private-stack-logs"
+      mkdir -p "$diagnostic_root"
       docker compose --project-name "$PROJECT" -f "$SANDBOX_ROOT/compose.yaml" \
-        ps --all --format json >"$TEMP_ROOT/project-status.jsonl" 2>/dev/null || true
+        ps --all --format json >"$diagnostic_root/compose-containers.jsonl" 2>/dev/null || true
       docker compose --project-name "$PROJECT" -f "$SANDBOX_ROOT/compose.yaml" \
         logs --no-color --tail=100 dns gateway epds-lexicon-authority \
         epds-core epds-auth epds-demo epds-demo-untrusted \
-        >"$TEMP_ROOT/service-errors.log" 2>&1 || true
+        >"$diagnostic_root/service-errors.log" 2>&1 || true
     fi
     if [[ "$result" -ne 0 && "${EPDS_E2E_KEEP_FAILED_STATE:-0}" == 1 ]]; then
       echo "Preserved diagnostic state for scoped project $PROJECT at $TEMP_ROOT"

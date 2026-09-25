@@ -173,8 +173,9 @@ deployed the pull request SHA. The E2E suite then runs against the cloned
 public domains, including the Mailpit service inherited from `pr-base`.
 
 The workflow deletes the generated environment after it uploads the report. It
-needs a `RAILWAY_TOKEN` repository Actions secret for a project-scoped Railway
-token with permission to create, configure, inspect, and delete environments.
+needs a `RAILWAY_API_TOKEN` repository Actions secret for an account- or
+workspace-scoped Railway token with permission to create, configure, inspect,
+and delete environments.
 Do not print or inspect this token in CI logs. Fork pull requests cannot use
 that credential and run the private Atmosphere in a Box E2E job only.
 

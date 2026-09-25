@@ -62,8 +62,11 @@ const defaultParallel =
     : 3
 
 const otpExpiryTags = process.env.E2E_INTERNAL_SECRET
-  ? '@otp-expiry and not @pending'
-  : 'not @otp-expiry'
+  ? [
+      '@otp-expiry',
+      ...defaultTagExclusions.filter((tag) => tag !== 'not @otp-expiry'),
+    ].join(' and ')
+  : '@otp-expiry and not @otp-expiry'
 
 const shared = {
   paths: ['features/**/*.feature'],
