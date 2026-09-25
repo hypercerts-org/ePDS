@@ -8,7 +8,9 @@ on:
 
 concurrency:
   group: e2e-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Railway jobs reuse one disposable environment per PR. Let its cleanup
+  # complete before a replacement run can use that environment.
+  cancel-in-progress: false
 
 jobs:
   # Keep a check run for every PR so branch protection sees an explicit
@@ -42,6 +44,11 @@ jobs:
   atmosphere:
     name: atmosphere
     needs: gate
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+      pull-requests: read
     if: >-
       always() &&
       (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref_name == 'main')) &&
@@ -52,6 +59,11 @@ jobs:
   railway:
     name: railway ${{ github.base_ref }} e2e
     needs: gate
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+      pull-requests: read
     if: >-
       always() &&
       github.event_name == 'pull_request' &&

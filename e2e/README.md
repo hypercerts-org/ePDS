@@ -43,9 +43,10 @@ the clone. Mailpit and a private PLC, backed by PostgreSQL, are inherited from
 `pr-base`; the PLC uses the pinned Atmosphere in a Box image. The workflow deletes precisely
 that generated environment after uploading its report.
 
-This job requires a repository `RAILWAY_TOKEN` secret for a project-scoped token
-that can create, configure, inspect, and delete ePDS environments. Fork PRs do
-not receive that secret and run only the private AiaB job.
+This job requires a repository `RAILWAY_API_TOKEN` secret for an account- or
+workspace-scoped token that can create, configure, inspect, and delete ePDS
+environments. Fork PRs do not receive that secret and run only the private AiaB
+job.
 
 ### Run against another stack
 
