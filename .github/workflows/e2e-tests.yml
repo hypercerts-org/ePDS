@@ -50,8 +50,6 @@ jobs:
       pull-requests: read
       checks: write
     env:
-      AIB_ROOT: ${{ runner.temp }}/atmosphereinabox
-      DOCKER_CONFIG: ${{ runner.temp }}/epds-e2e-docker-config
       EPDS_AIB_PIN: 26cf1f60f81b491b065dfc830efd27aba8b89a54
       EPDS_E2E_PROJECT: epds-e2e-${{ github.run_id }}-${{ github.run_attempt }}
       SANDBOX_DOMAIN: atmosbox.test
@@ -83,7 +81,11 @@ jobs:
       - name: Prepare private e2e workspace
         run: |
           set -euo pipefail
-          mkdir -m 0700 -p "$DOCKER_CONFIG"
+          aib_root="$RUNNER_TEMP/atmosphereinabox"
+          docker_config="$RUNNER_TEMP/epds-e2e-docker-config"
+          printf 'AIB_ROOT=%s\n' "$aib_root" >> "$GITHUB_ENV"
+          printf 'DOCKER_CONFIG=%s\n' "$docker_config" >> "$GITHUB_ENV"
+          mkdir -m 0700 -p "$docker_config"
           printf 'E2E_RUNNER_UID=%s\n' "$(id -u)" >> "$GITHUB_ENV"
           printf 'E2E_RUNNER_GID=%s\n' "$(id -g)" >> "$GITHUB_ENV"
 
