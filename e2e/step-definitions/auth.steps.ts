@@ -1,5 +1,5 @@
 import { Given, Then, When } from '@cucumber/cucumber'
-import { expect, type Route } from '@playwright/test'
+import { expect, type Request, type Route } from '@playwright/test'
 import { testEnv } from '../support/env.js'
 import type { EpdsWorld } from '../support/world.js'
 import {
@@ -968,4 +968,81 @@ Then('the email input is empty and focused', async function (this: EpdsWorld) {
   const input = page.locator('#email')
   await expect(input).toHaveValue('', { timeout: 5_000 })
   await expect(input).toBeFocused({ timeout: 5_000 })
+})
+
+// ---------------------------------------------------------------------------
+// Incomplete-OTP submit guard
+// ---------------------------------------------------------------------------
+
+/**
+ * Fill `digitCount` OTP slots, then try to submit anyway.
+ *
+ * Verify is disabled while the code is incomplete, so a real click cannot
+ * reach the handler — Playwright would just wait for the button to become
+ * actionable. Submitting the form directly bypasses the disabled button and
+ * exercises the JS completeness guard, which is the layer that also covers
+ * Enter and autofill-triggered submits.
+ */
+async function attemptSubmitWithIncompleteOtp(
+  world: EpdsWorld,
+  digitCount: number,
+): Promise<void> {
+  const page = getPage(world)
+  const otpBoxes = page.locator('.otp-box')
+  for (let index = 0; index < digitCount; index += 1) {
+    await otpBoxes.nth(index).fill(String(index + 1))
+  }
+
+  let verifyRequestCount = 0
+  const countVerifyRequest = (request: Request) => {
+    if (request.url().includes('/sign-in/email-otp')) {
+      verifyRequestCount += 1
+    }
+  }
+  page.on('request', countVerifyRequest)
+  try {
+    await page.evaluate(() => {
+      const form = document.getElementById('form-verify-otp')
+      if (form instanceof HTMLFormElement) form.requestSubmit()
+    })
+    await page.waitForTimeout(1_000)
+  } finally {
+    page.off('request', countVerifyRequest)
+  }
+  world.otpVerifyRequestCount = verifyRequestCount
+}
+
+When(
+  'the user tries to submit the OTP form without entering a code',
+  async function (this: EpdsWorld) {
+    await attemptSubmitWithIncompleteOtp(this, 0)
+  },
+)
+
+When(
+  'the user enters two OTP digits and tries to submit the OTP form',
+  async function (this: EpdsWorld) {
+    await attemptSubmitWithIncompleteOtp(this, 2)
+  },
+)
+
+Then('the Verify button is disabled', async function (this: EpdsWorld) {
+  const page = getPage(this)
+  await expect(
+    page.locator('#form-verify-otp button[type=submit]'),
+  ).toBeDisabled({ timeout: 5_000 })
+})
+
+Then('no OTP verification request is sent', function (this: EpdsWorld) {
+  expect(this.otpVerifyRequestCount).toBe(0)
+})
+
+Then('no "Invalid OTP" error is shown', async function (this: EpdsWorld) {
+  const page = getPage(this)
+  const errorText = await page.locator('#error-msg').textContent()
+  if (errorText && /invalid otp/i.test(errorText)) {
+    throw new Error(
+      `Expected no "Invalid OTP" error after incomplete submit but saw: "${errorText}"`,
+    )
+  }
 })
