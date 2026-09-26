@@ -217,6 +217,11 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
         loginHint: '',
         initialStep: 'email',
         otpAlreadySent: false,
+        // Preview pages don't sit behind a real OAuth flow — pass a
+        // recognisable fake request_uri so the recovery link renders
+        // something shaped right without pretending to point at a
+        // live PAR.
+        requestUri: 'urn:ietf:params:oauth:request_uri:preview',
         csrfToken: fakeCsrfToken(),
         authBasePath: '/api/auth',
         pdsPublicUrl: ctx.config.pdsPublicUrl,
@@ -251,6 +256,8 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
         loginHint: FAKE_EMAIL,
         initialStep: 'otp',
         otpAlreadySent: true,
+        // See preview/login note above — fake request_uri.
+        requestUri: 'urn:ietf:params:oauth:request_uri:preview',
         csrfToken: fakeCsrfToken(),
         authBasePath: '/api/auth',
         pdsPublicUrl: ctx.config.pdsPublicUrl,
