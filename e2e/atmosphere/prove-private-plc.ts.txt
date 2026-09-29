@@ -1,0 +1,65 @@
+import { chromium } from '@playwright/test'
+import { writeFile } from 'node:fs/promises'
+import { randomBytes } from 'node:crypto'
+import { countMessages } from '../support/mailpit.js'
+import { createAccountViaOAuth } from '../support/flows.js'
+
+const browser = await chromium.launch({ headless: true })
+const page = await browser.newPage()
+const world = { page } as Parameters<typeof createAccountViaOAuth>[0]
+const email = `private-plc-${randomBytes(8).toString('hex')}@example.com`
+const failedResponses: string[] = []
+page.on('response', (response) => {
+  if (response.status() >= 400) {
+    failedResponses.push(
+      `${response.request().method()} ${new URL(response.url()).pathname} ${response.status()}`,
+    )
+  }
+})
+
+try {
+  let did: string
+  let handle: string | undefined
+  try {
+    const account = await createAccountViaOAuth(world, email)
+    did = account.did
+    handle = account.handle
+  } catch (error) {
+    const pageState = await page.evaluate(() => ({
+      path: location.pathname,
+      error: new URLSearchParams(location.search).get('error'),
+      alert: document.querySelector('[role="alert"]')?.textContent?.trim(),
+    }))
+    let deliveredOtpMessages: number | string
+    try {
+      deliveredOtpMessages = await countMessages(`to:${email}`)
+    } catch {
+      deliveredOtpMessages = 'lookup-failed'
+    }
+    console.error(
+      `Account setup failed: ${JSON.stringify({ ...pageState, failedResponses, deliveredOtpMessages })}`,
+    )
+    throw error
+  }
+  const plcBase = process.env.E2E_PLC_URL
+  if (!plcBase) throw new Error('E2E_PLC_URL is not set')
+  const plcUrl = new URL(`/${encodeURIComponent(did)}`, plcBase)
+  const privateResponse = await fetch(plcUrl)
+  if (!privateResponse.ok) {
+    throw new Error(`Private PLC lookup returned ${privateResponse.status}`)
+  }
+  const outputPath =
+    process.env.E2E_PRIVATE_PLC_PROOF_PATH ?? '/tmp/private-plc-proof.json'
+  await writeFile(
+    outputPath,
+    JSON.stringify(
+      { did, handle, privateStatus: privateResponse.status },
+      null,
+      2,
+    ) + '\n',
+    { mode: 0o600 },
+  )
+} finally {
+  await page.close()
+  await browser.close()
+}

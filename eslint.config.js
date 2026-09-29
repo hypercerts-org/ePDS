@@ -110,6 +110,21 @@ export default tseslint.config(
     },
   },
 
+  // This JavaScript helper is executed directly by the E2E workflow and is
+  // intentionally outside the TypeScript E2E project.
+  {
+    files: ['e2e/atmosphere/validate-access.mjs'],
+    languageOptions: {
+      globals: { console: 'readonly', process: 'readonly' },
+      parserOptions: {
+        projectService: {
+          allowDefaultProject: ['e2e/atmosphere/validate-access.mjs'],
+        },
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+
   // Disable formatting rules that conflict with Prettier
   prettier,
 )

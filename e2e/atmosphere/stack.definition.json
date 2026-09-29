@@ -1,0 +1,180 @@
+{
+  "version": 1,
+  "id": "epds-e2e",
+  "services": [
+    {
+      "service": "epds-core",
+      "environment": [
+        {
+          "name": "EPDS_CALLBACK_SECRET",
+          "source": { "kind": "secret", "secret": "callback-secret" }
+        },
+        {
+          "name": "EPDS_INTERNAL_SECRET",
+          "source": { "kind": "secret", "secret": "internal-secret" }
+        },
+        {
+          "name": "PDS_JWT_SECRET",
+          "source": { "kind": "secret", "secret": "pds-jwt-secret" }
+        },
+        {
+          "name": "PDS_DPOP_SECRET",
+          "source": { "kind": "secret", "secret": "pds-dpop-secret" }
+        },
+        {
+          "name": "PDS_ADMIN_PASSWORD",
+          "source": { "kind": "secret", "secret": "pds-admin-password" }
+        },
+        {
+          "name": "PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX",
+          "source": { "kind": "secret", "secret": "plc-rotation-key" }
+        }
+      ]
+    },
+    {
+      "service": "epds-auth",
+      "environment": [
+        {
+          "name": "EPDS_CALLBACK_SECRET",
+          "source": { "kind": "secret", "secret": "callback-secret" }
+        },
+        {
+          "name": "EPDS_INTERNAL_SECRET",
+          "source": { "kind": "secret", "secret": "internal-secret" }
+        },
+        {
+          "name": "AUTH_SESSION_SECRET",
+          "source": { "kind": "secret", "secret": "auth-session-secret" }
+        },
+        {
+          "name": "PDS_ADMIN_PASSWORD",
+          "source": { "kind": "secret", "secret": "pds-admin-password" }
+        }
+      ]
+    },
+    { "service": "epds-lexicon-authority", "environment": [] },
+    {
+      "service": "epds-demo",
+      "environment": [
+        {
+          "name": "SESSION_SECRET",
+          "source": {
+            "kind": "secret",
+            "secret": "trusted-demo-session-secret"
+          }
+        },
+        {
+          "name": "EPDS_CLIENT_PRIVATE_JWK",
+          "source": { "kind": "secret", "secret": "trusted-demo-jwk" }
+        }
+      ]
+    },
+    {
+      "service": "epds-demo-untrusted",
+      "environment": [
+        {
+          "name": "SESSION_SECRET",
+          "source": {
+            "kind": "secret",
+            "secret": "untrusted-demo-session-secret"
+          }
+        },
+        {
+          "name": "EPDS_CLIENT_PRIVATE_JWK",
+          "source": { "kind": "secret", "secret": "untrusted-demo-jwk" }
+        }
+      ]
+    },
+    { "service": "epds-mailpit", "environment": [] },
+    {
+      "service": "epds-e2e-runner",
+      "environment": [
+        {
+          "name": "E2E_INTERNAL_SECRET",
+          "source": { "kind": "secret", "secret": "internal-secret" }
+        }
+      ]
+    }
+  ],
+  "routes": [
+    { "id": "pds", "service": "epds-core", "host": "epds", "port": 3000 },
+    {
+      "id": "pds-accounts",
+      "service": "epds-core",
+      "host": "*.epds",
+      "port": 3000
+    },
+    { "id": "auth", "service": "epds-auth", "host": "auth.epds", "port": 3001 },
+    {
+      "id": "authority",
+      "service": "epds-lexicon-authority",
+      "host": "authority",
+      "port": 3000
+    },
+    {
+      "id": "authority-accounts",
+      "service": "epds-lexicon-authority",
+      "host": "*.authority",
+      "port": 3000
+    },
+    {
+      "id": "trusted-demo",
+      "service": "epds-demo",
+      "hostname": "trusted-demo.atmosbox.internal",
+      "port": 3002
+    },
+    {
+      "id": "untrusted-demo",
+      "service": "epds-demo-untrusted",
+      "hostname": "untrusted-demo.atmosbox.internal",
+      "port": 3002
+    },
+    {
+      "id": "mailpit",
+      "service": "epds-mailpit",
+      "host": "mailpit",
+      "port": 8025
+    }
+  ],
+  "txt": [
+    {
+      "owner": "_lexicon.hypercerts.org",
+      "value": { "kind": "authority", "authority": "epds-lexicon-authority" }
+    },
+    {
+      "owner": "_lexicon.certified.app",
+      "value": { "kind": "authority", "authority": "epds-lexicon-authority" }
+    }
+  ],
+  "authority": {
+    "name": "epds-lexicon-authority",
+    "route": "authority",
+    "account": {
+      "name": "schemas",
+      "email": "schemas@authority.atmosbox.test"
+    },
+    "fixtures": [
+      {
+        "nsid": "org.hypercerts.authWrite",
+        "file": "e2e-source/e2e/atmosphere/fixtures/org/hypercerts/authWrite.json"
+      },
+      {
+        "nsid": "app.certified.authWrite",
+        "file": "e2e-source/e2e/atmosphere/fixtures/app/certified/authWrite.json"
+      }
+    ]
+  },
+  "secrets": [
+    { "id": "callback-secret", "bytes": 32 },
+    { "id": "internal-secret", "bytes": 32 },
+    { "id": "auth-session-secret", "bytes": 32 },
+    { "id": "pds-jwt-secret", "bytes": 32 },
+    { "id": "pds-dpop-secret", "bytes": 32 },
+    { "id": "pds-admin-password", "bytes": 32 },
+    { "id": "plc-rotation-key", "bytes": 32 },
+    { "id": "trusted-demo-session-secret", "bytes": 32 },
+    { "id": "untrusted-demo-session-secret", "bytes": 32 },
+    { "id": "trusted-demo-jwk", "jwk": "ES256" },
+    { "id": "untrusted-demo-jwk", "jwk": "ES256" }
+  ]
+}

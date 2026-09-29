@@ -1,0 +1,209 @@
+services:
+  epds-core:
+    image: epds-e2e-core
+    build:
+      context: ./e2e-source
+      dockerfile: Dockerfile.pds
+    environment:
+      AUTH_HOSTNAME: auth.epds.${SANDBOX_DOMAIN}
+      EPDS_TEST_HOOKS: '1'
+      EPDS_ALLOW_PRIVATE_IPS: 'true'
+      NODE_ENV: development
+      NODE_EXTRA_CA_CERTS: /ca/root.crt
+      PDS_BSKY_APP_VIEW_URL: ''
+      PDS_CRAWLERS: ''
+      PDS_BLOBSTORE_DISK_LOCATION: /data/blobs
+      PDS_DID_PLC_URL: https://plc.${SANDBOX_DOMAIN}
+      PDS_DISABLE_SSRF_PROTECTION: 'true'
+      PDS_HOSTNAME: epds.${SANDBOX_DOMAIN}
+      PDS_PORT: '3000'
+      PDS_PUBLIC_URL: https://epds.${SANDBOX_DOMAIN}
+      PDS_OAUTH_TRUSTED_CLIENTS: https://trusted-demo.atmosbox.internal/client-metadata.json
+      PDS_SIGNUP_ALLOW_CONSENT_SKIP: 'true'
+      PDS_DATA_DIRECTORY: /data
+      PDS_EMAIL_SMTP_URL: smtp://epds-mailpit:1025
+      PDS_EMAIL_FROM_ADDRESS: noreply@epds.atmosbox.test
+      PDS_INVITE_REQUIRED: 'false'
+    volumes:
+      - epds-core-data:/data
+    networks: [atmosinabox]
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://127.0.0.1:3000/health']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+
+  epds-lexicon-authority:
+    image: ghcr.io/bluesky-social/pds:0.4@sha256:05e164855fa1a3cf251c002210c46f8c86e7ae27bddc7a96045da25483840826
+    init: true
+    environment:
+      LOG_LEVEL: warn
+      NODE_EXTRA_CA_CERTS: /ca/root.crt
+      PDS_PORT: '3000'
+      PDS_DATA_DIRECTORY: /data
+      PDS_ACTOR_STORE_DIRECTORY: /data/actors
+      PDS_BLOBSTORE_DISK_LOCATION: /data/blobs
+      PDS_BLOBSTORE_DISK_TMP_LOCATION: /data/blob-tmp
+      PDS_DEV_MODE: 'true'
+      PDS_DISABLE_SSRF_PROTECTION: 'true'
+      PDS_RATE_LIMITS_ENABLED: 'false'
+      PDS_INVITE_REQUIRED: 'false'
+      PDS_CRAWLERS: ''
+    volumes:
+      - epds-lexicon-authority-data:/data
+    networks: [atmosinabox]
+    depends_on:
+      plc:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/xrpc/_health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  epds-auth:
+    build:
+      context: ./e2e-source
+      dockerfile: Dockerfile.auth
+    environment:
+      AUTH_HOSTNAME: auth.epds.${SANDBOX_DOMAIN}
+      AUTH_PORT: '3001'
+      DB_LOCATION: /data/epds.sqlite
+      EMAIL_PROVIDER: smtp
+      EPDS_DISABLE_RATE_LIMIT: 'true'
+      EPDS_TEST_HOOKS: '1'
+      AUTH_PREVIEW_ROUTES: '1'
+      EPDS_ALLOW_PRIVATE_IPS: 'true'
+      NODE_ENV: development
+      NODE_EXTRA_CA_CERTS: /ca/root.crt
+      PDS_HOSTNAME: epds.${SANDBOX_DOMAIN}
+      PDS_INTERNAL_URL: http://epds-core:3000
+      PDS_PUBLIC_URL: https://epds.${SANDBOX_DOMAIN}
+      PDS_OAUTH_TRUSTED_CLIENTS: https://trusted-demo.atmosbox.internal/client-metadata.json
+      SMTP_FROM: noreply@epds.atmosbox.test
+      SMTP_FROM_NAME: ePDS E2E
+      SMTP_HOST: epds-mailpit
+      SMTP_PASS: ''
+      SMTP_PORT: '1025'
+      SMTP_USER: ''
+    volumes:
+      - epds-auth-data:/data
+    networks: [atmosinabox]
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://127.0.0.1:3001/health']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+
+  epds-demo:
+    build:
+      context: ./e2e-source
+      dockerfile: Dockerfile.demo
+    environment:
+      AUTH_ENDPOINT: https://auth.epds.${SANDBOX_DOMAIN}/oauth/authorize
+      EPDS_CLIENT_THEME: amber
+      NODE_EXTRA_CA_CERTS: /ca/root.crt
+      PLC_DIRECTORY_URL: https://plc.${SANDBOX_DOMAIN}
+      PDS_INTERNAL_URL: http://epds-core:3000
+      PDS_URL: https://epds.${SANDBOX_DOMAIN}
+      PUBLIC_URL: https://trusted-demo.atmosbox.internal
+      EPDS_SKIP_CONSENT_ON_SIGNUP: 'true'
+    networks: [atmosinabox]
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3002/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+
+  epds-demo-untrusted:
+    build:
+      context: ./e2e-source
+      dockerfile: Dockerfile.demo
+    environment:
+      AUTH_ENDPOINT: https://auth.epds.${SANDBOX_DOMAIN}/oauth/authorize
+      NODE_EXTRA_CA_CERTS: /ca/root.crt
+      PLC_DIRECTORY_URL: https://plc.${SANDBOX_DOMAIN}
+      PDS_INTERNAL_URL: http://epds-core:3000
+      PDS_URL: https://epds.${SANDBOX_DOMAIN}
+      PUBLIC_URL: https://untrusted-demo.atmosbox.internal
+      EPDS_SKIP_CONSENT_ON_SIGNUP: ''
+      EPDS_CLIENT_THEME: ''
+    networks: [atmosinabox]
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3002/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+
+  epds-mailpit:
+    image: axllent/mailpit:v1.29.3
+    environment:
+      MP_MAX_MESSAGES: '5000'
+    networks: [atmosinabox]
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://127.0.0.1:8025/readyz']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  epds-e2e-runner:
+    user: '${E2E_RUNNER_UID:?}:${E2E_RUNNER_GID:?}'
+    build:
+      context: ./e2e-source
+      dockerfile: e2e/atmosphere/Dockerfile.runner
+    environment:
+      HOME: /tmp/epds-e2e-home
+      E2E_PDS_URL: https://epds.${SANDBOX_DOMAIN}
+      E2E_AUTH_URL: https://auth.epds.${SANDBOX_DOMAIN}
+      E2E_LEXICON_AUTHORITY_URL: https://authority.${SANDBOX_DOMAIN}
+      E2E_DEMO_URL: https://trusted-demo.atmosbox.internal
+      E2E_DEMO_UNTRUSTED_URL: https://untrusted-demo.atmosbox.internal
+      E2E_MAILPIT_URL: https://mailpit.${SANDBOX_DOMAIN}
+      # Mailpit is available only on Atmosphere's internal network. These
+      # non-secret values enable scenarios whose client always sends basic auth.
+      E2E_MAILPIT_USER: e2e
+      E2E_MAILPIT_PASS: e2e
+      E2E_PLC_URL: https://plc.${SANDBOX_DOMAIN}
+      E2E_HEADLESS: 'true'
+      NODE_EXTRA_CA_CERTS: /ca/root.crt
+      NODE_ENV: development
+      CUCUMBER_RETRY: '0'
+      E2E_PRIVATE_PLC_PROOF_PATH: /tmp/private-plc-proof.json
+    volumes:
+      - ./reports:/app/reports:rw,z
+    networks: [atmosinabox]
+    profiles: [e2e]
+    depends_on:
+      epds-core: { condition: service_healthy }
+      epds-auth: { condition: service_healthy }
+      epds-lexicon-authority: { condition: service_healthy }
+      epds-demo: { condition: service_healthy }
+      epds-demo-untrusted: { condition: service_healthy }
+      epds-mailpit: { condition: service_healthy }
+
+volumes:
+  epds-core-data: {}
+  epds-auth-data: {}
+  epds-lexicon-authority-data: {}
