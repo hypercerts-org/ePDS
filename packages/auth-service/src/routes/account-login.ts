@@ -25,6 +25,7 @@ import {
   renderEmailTypoGuardMarkup,
   renderEmailTypoGuardScript,
 } from '../lib/email-typo-guard.js'
+import { pickOtpVerifyErrorMessage } from '../lib/otp-verify-error.js'
 
 const logger = createLogger('auth:account-login')
 
@@ -121,17 +122,13 @@ export function createAccountLoginRouter(
       return
     } catch (err: unknown) {
       logger.warn({ err, email }, 'OTP verification failed')
-      const errMsg =
-        err instanceof Error && err.message.includes('invalid')
-          ? 'Invalid or expired code. Please try again.'
-          : 'Verification failed. Please try again.'
       res.type('html').send(
         renderOtpForm({
           email,
           csrfToken: res.locals.csrfToken,
           otpLength: ctx.config.otpLength,
           otpCharset: ctx.config.otpCharset,
-          error: errMsg,
+          error: pickOtpVerifyErrorMessage(err),
         }),
       )
     }
