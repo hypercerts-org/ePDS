@@ -76,10 +76,19 @@ export function createRecoveryRouter(
     const requestUri = req.query.request_uri as string | undefined
 
     if (!requestUri) {
+      // The user landed here without an active sign-in flow —
+      // typically a stale link or direct visit. The technical
+      // "Missing request_uri parameter" tells them nothing
+      // actionable; surface the honest, useful message instead.
       res
         .status(400)
         .type('html')
-        .send(renderError('Missing request_uri parameter'))
+        .send(
+          renderError(
+            'Account recovery has to be started from the sign-in page. Please sign in again from the app you came from.',
+            { title: 'No active sign-in' },
+          ),
+        )
       return
     }
 

@@ -168,10 +168,19 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     const clientId = req.query.client_id as string | undefined
     const loginHint = req.query.login_hint as string | undefined
     if (!requestUri) {
+      // The user landed here without an active sign-in flow —
+      // typically a stale link or direct visit. The technical
+      // "Missing request_uri parameter" tells them nothing
+      // actionable; surface the honest, useful message instead.
       res
         .status(400)
         .type('html')
-        .send(renderError('Missing request_uri parameter'))
+        .send(
+          renderError(
+            'Sign-in has to be started from the app you are signing into. Please return to that app and try again.',
+            { title: 'No active sign-in' },
+          ),
+        )
       return
     }
 
