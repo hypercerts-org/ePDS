@@ -143,6 +143,11 @@ The two demo clients support trust-gated scenarios. See
 [`e2e/README.md`](e2e/README.md#two-demo-clients) for the configuration and
 tag conventions.
 
+Cucumber tags are selectors for grouping or filtering scenarios, not
+per-scenario identifiers. Add a tag only when it is reused by multiple
+scenarios as a meaningful group or consumed by CI/tooling. Do not invent a
+one-off tag merely to describe a scenario; use its name and comments instead.
+
 ### Writing Tests
 
 Before designing or writing new tests, read

@@ -630,9 +630,13 @@ export function renderLoginPage(opts: {
     .otp-box:focus { border-color: var(--focus-border); }
     .otp-actions { display: flex; gap: 32px; justify-content: center; margin-top: 12px; }
     .btn-primary { width: 100%; padding: 15px; background: ${brandColor}; color: white; border: none; border-radius: 9999px; font-size: 15px; font-weight: 500; cursor: pointer; transition: opacity 0.15s; }
-    .btn-primary:hover { opacity: 0.9; }
+    .btn-primary:hover:not(:disabled) { opacity: 0.9; }
     .btn-primary:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; }
-    .btn-primary:disabled { opacity: 0.7; cursor: not-allowed; }
+    /* Verify sits disabled until the code is complete, so this is a resting
+       state the user reads, not just a momentary "Verifying..." flash. Fade
+       it enough to read as inert, but not past the point where the label
+       stops meeting WCAG AA (0.6 keeps white-on-brand at ~4.9:1). */
+    .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
     /* Link-affordance convention (see also .flash-action / .terms-link):
        STANDALONE actions sit in their own row, where position and spacing
        already read as actionable, so they carry no underline. IN-SENTENCE
@@ -743,7 +747,7 @@ export function renderLoginPage(opts: {
              typing — instead of above the subtitle, and places the
              inline Resend action next to it. -->
         <div id="flash-slot-otp">${opts.initialStep === 'otp' ? flashRegionHtml : ''}</div>
-        <button type="submit" class="btn-primary">Verify</button>
+        <button type="submit" class="btn-primary" disabled>Verify</button>
       </form>
       <div class="otp-actions">
         <button type="button" class="btn-secondary" id="btn-resend">Send a new code</button>
@@ -1007,15 +1011,31 @@ export function renderLoginPage(opts: {
         return otpCharset === 'alphanumeric' ? cleaned.toUpperCase() : cleaned;
       }
 
+      // Keep Verify disabled until every slot is filled, so an incomplete
+      // code is visibly un-submittable rather than a click that silently
+      // does nothing. The submit handler keeps its own completeness guard:
+      // Enter, autofill and requestSubmit() can all reach submit without
+      // the button, so this is defence in depth, not a replacement.
+      function syncVerifyButtonState() {
+        var verifyBtn = document.querySelector('#form-verify-otp button[type=submit]');
+        if (!verifyBtn) return;
+        // Never re-enable while a verify is in flight or the flow is dead —
+        // those owners disabled the button for reasons unrelated to length.
+        if (verifying || flowAborted) return;
+        verifyBtn.disabled = hiddenCode.value.length < otpBoxes.length;
+      }
+
       function updateHiddenCode() {
         var v = '';
         for (var i = 0; i < otpBoxes.length; i++) v += otpBoxes[i].value;
         hiddenCode.value = v;
+        syncVerifyButtonState();
       }
 
       function clearOtpBoxes() {
         for (var i = 0; i < otpBoxes.length; i++) otpBoxes[i].value = '';
         hiddenCode.value = '';
+        syncVerifyButtonState();
       }
 
       otpBoxes.forEach(function(box, idx) {
@@ -1349,12 +1369,22 @@ export function renderLoginPage(opts: {
         // first call consumes the code; a second one races the redirect and
         // flashes "Invalid OTP" before the page unloads.
         if (verifying) return;
+        var otp = document.getElementById('code').value.trim();
+        // Don't bother better-auth with an empty / partial submit —
+        // it would flash a misleading "Invalid OTP" (the user typed
+        // nothing, not an invalid code) and burn a rate-limit slot.
+        // Just focus the first empty box and bail.
+        if (otp.length < otpBoxes.length) {
+          for (var i = 0; i < otpBoxes.length; i++) {
+            if (!otpBoxes[i].value) { otpBoxes[i].focus(); break; }
+          }
+          return;
+        }
         verifying = true;
         // Stop pinging the moment a verify is in flight — the redirect
         // is imminent and any further heartbeat is wasted.
         stopHeartbeat();
         clearError();
-        var otp = document.getElementById('code').value.trim();
         var btn = this.querySelector('button[type=submit]');
         btn.disabled = true;
         btn.textContent = 'Verifying...';
@@ -1447,8 +1477,11 @@ export function renderLoginPage(opts: {
           // and we don't want late events to re-open the form mid-navigation.
           if (!result || result.error) {
             verifying = false;
-            btn.disabled = false;
             btn.textContent = 'Verify';
+            // Re-enable only if the code is still complete. The error path
+            // above clears the boxes, so this normally leaves Verify
+            // disabled until the user re-enters a full code.
+            syncVerifyButtonState();
             // Verify failed (typo, expired OTP, etc.) — the form is
             // still live, so resume keeping the PAR alive.
             startHeartbeat();
@@ -1504,6 +1537,11 @@ export function renderLoginPage(opts: {
       var loginHint = ${JSON.stringify(opts.loginHint)};
       var initialStep = ${JSON.stringify(opts.initialStep)};
       var otpAlreadySent = ${JSON.stringify(opts.otpAlreadySent)};
+
+      // Reconcile Verify with whatever is actually in the boxes at load —
+      // a back-navigation or bfcache restore can repopulate them without
+      // firing input, which would otherwise strand the button disabled.
+      updateHiddenCode();
 
       if (initialStep === 'otp' && loginHint) {
         currentEmail = loginHint;

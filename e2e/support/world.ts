@@ -10,6 +10,9 @@ export class EpdsWorld extends World {
   /** OTP code extracted from the most recent email — set by email steps, read by auth steps. */
   otpCode?: string
 
+  /** Number of verification requests observed after an incomplete OTP submit attempt. */
+  otpVerifyRequestCount?: number
+
   /** Subject line of the most recent email — set by email steps. */
   lastEmailSubject?: string
 
