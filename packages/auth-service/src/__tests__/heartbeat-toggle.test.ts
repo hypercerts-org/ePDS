@@ -92,6 +92,7 @@ function renderLoginPageWithHeartbeat(heartbeatEnabled: boolean): string {
     loginHint: '',
     initialStep: 'email',
     otpAlreadySent: false,
+    requestUri: 'urn:ietf:params:oauth:request_uri:req-abc',
     csrfToken: 'csrf',
     authBasePath: '/api/auth',
     pdsPublicUrl: 'https://pds.example.com',
