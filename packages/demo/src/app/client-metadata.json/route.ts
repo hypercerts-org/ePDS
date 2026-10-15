@@ -57,9 +57,8 @@ export async function GET() {
       ? 'Ma Earth'
       : (process.env.EPDS_CLIENT_NAME ?? 'ePDS Demo'),
     client_uri: baseUrl,
-    logo_uri: showMaEarthConsentMvp
-      ? `${baseUrl}/maearth-logo-mvp.svg`
-      : `${baseUrl}/certified-logo.png`,
+    // Use the exact Ma Earth OAuth logo even when no theme is configured.
+    logo_uri: `${baseUrl}/maearth-logo-mvp.svg`,
     redirect_uris: [`${baseUrl}/api/oauth/callback`],
     scope:
       'atproto include:org.hypercerts.authWrite include:app.certified.authWrite',
