@@ -281,6 +281,16 @@ Optional:
 | `EPDS_CLIENT_NAME`  | Display name shown in the demo UI header (default `ePDS Demo`).                                                                                                                                 |
 | `PLC_DIRECTORY_URL` | PLC directory for DID-to-handle resolution (default `https://plc.directory`).                                                                                                                   |
 
+### Temporary Ma Earth branding preview
+
+On the `demo/maearth-branding-preview` branch, any configured client theme
+advertises the Ma Earth light authorization theme instead of the preset's
+colors. Email-entry and OTP screens retain the full wordmark; authorization
+uses a 32px symbol cropped from that same SVG. The metadata supplies an absolute
+client-origin image URL so the authorization server can load the symbol.
+These are review fixtures, not production branding ownership: Ma Earth's final
+per-screen logo rules belong in its own OAuth metadata's `branding.css`.
+
 ## Docker / Caddy
 
 > These variables are for the Caddy reverse-proxy container only (not applicable on Railway).

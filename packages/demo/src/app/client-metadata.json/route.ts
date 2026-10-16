@@ -93,7 +93,9 @@ export async function GET() {
     }),
     ...(theme && {
       branding: {
-        css: theme.injectedCss,
+        css: showMaEarthConsentMvp
+          ? `${theme.injectedCss} :root { --maearth-authorization-logo: url(${JSON.stringify(`${baseUrl}/maearth-symbol-mvp.svg`)}); }`
+          : theme.injectedCss,
         // Same-origin favicons: served from this demo's PUBLIC_URL so they
         // share an origin with `client_id` (auth-service rejects
         // cross-origin favicons because the CSP img-src only widens to

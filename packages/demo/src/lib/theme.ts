@@ -238,10 +238,13 @@ export const MAEARTH_CONSENT_MVP_THEME: Theme = {
     '[data-slot="card-title"] { letter-spacing: -0.01em; }',
     '[data-slot="button"] { min-height: 2.5rem; }',
     '[data-slot="button"].bg-secondary { border-color: #D4C9BC; }',
-    '[data-slot="avatar"]:has(> img[alt="Ma Earth"]) { width: 6rem; height: 2rem; border-radius: 0; }',
+    'img.client-logo { width: 215px !important; height: 44px !important; max-width: 100% !important; max-height: 44px !important; object-fit: contain !important; }',
+    // The metadata route supplies a client-origin URL; relative CSS URLs would
+    // otherwise resolve against the authorization server instead of this demo.
+    '[data-slot="avatar"]:has(> img[alt="Ma Earth"]) { width: 32px; height: 32px; min-width: 32px; max-width: 32px; flex-shrink: 0; border-radius: 0; background: transparent var(--maearth-authorization-logo) center / contain no-repeat; }',
     '[data-slot="avatar"]:has(> img[alt="Ma Earth"])::after { display: none; }',
-    'div:has(> [data-slot="avatar"] > img[alt="Ma Earth"]) { width: 6rem; margin-left: 0; }',
-    '[data-slot="avatar"] > img[alt="Ma Earth"] { width: 100%; height: 100%; object-fit: contain; }',
+    'div:has(> [data-slot="avatar"] > img[alt="Ma Earth"]) { width: 32px; min-width: 32px; max-width: 32px; flex-shrink: 0; margin-left: 0; }',
+    '[data-slot="avatar"] > img[alt="Ma Earth"] { width: 100%; height: 100%; max-width: 100%; max-height: 100%; opacity: 0; }',
   ].join(' '),
 }
 
