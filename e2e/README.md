@@ -9,52 +9,53 @@ and support files live here in `e2e/`.
 
 ## Prerequisites
 
-- Node.js >= 20 and pnpm 9+
+- Node.js >= 22.19 and pnpm 9+
 - A running ePDS stack to test against (see [Setup](#setup))
 - Chromium browser (installed separately — see below)
 
 ## Setup
 
-### 1. Install the Playwright browser
+### Run the private integration stack
+
+For the full local CI-like environment, use the repository-owned
+[Atmosphere in a Box template](atmosphere/README.md). It starts ePDS core,
+auth, trusted and untrusted demos, Mailpit, a private PLC, the local OAuth
+permission-set lexicon authority, and the Playwright runner on a private
+network with trusted HTTPS:
 
 ```bash
-npx playwright install chromium
+EPDS_E2E_PROJECT=epds-e2e-local pnpm test:e2e:atmosphere
 ```
 
-### 2. Configure environment variables
+Prerequisites are Docker Compose v2, Node.js 24, npm, Deno 2.8.3, Python 3,
+and the ePDS pnpm dependencies. The local runner's `both` profile performs the
+concurrent default, serial OTP-expiry, and session-reuse profiles,
+checks that the created DID resolves only through the job-local PLC, retains
+HTML/JUnit reports under `reports/`, and cleans up the named project.
 
-```bash
-cp e2e/.env.example e2e/.env
-```
+### Railway promotion-PR validation
 
-Open `e2e/.env` and fill in the required service URLs. See
-[Environment variables](#environment-variables) for the full reference.
+For a same-repository PR targeting `dev` or `production`, the `E2E tests`
+workflow clones Railway's `pr-base` environment as
+`pr-<number>-e2e-<target>`. It reconnects pds-core, auth, and both demo services
+to the PR branch, waits for the PR SHA to deploy, then runs the suite against
+the clone. Mailpit and a private PLC, backed by PostgreSQL, are inherited from
+`pr-base`; the PLC uses the pinned Atmosphere in a Box image. The workflow deletes precisely
+that generated environment after uploading its report.
 
-### 3. Point the tests at a stack
+This job requires a repository `RAILWAY_API_TOKEN` secret for an account- or
+workspace-scoped token that can create, configure, inspect, and delete ePDS
+environments. Fork PRs do not receive that secret and run only the private AiaB
+job.
 
-The tests run against an already-running ePDS deployment — they do not start
-services themselves. Two options:
+### Run against another stack
 
-**Option A — Live environment**
-
-Point the tests at any deployed ePDS instance by setting the service URLs in
-`e2e/.env`.
-
-**Option B — Local stack**
-Run the services locally with `pnpm dev` (see
-[docs/development.md](../docs/development.md)), then set:
-
-```dotenv
-E2E_PDS_URL=http://localhost:3000
-E2E_AUTH_URL=http://localhost:3001
-E2E_DEMO_URL=http://localhost:3002
-# Optional — only needed for scenarios that exercise the trusted vs.
-# untrusted client distinction. See "Two demo clients" below.
-# E2E_DEMO_UNTRUSTED_URL=http://localhost:3003
-```
-
-For OTP scenarios you also need a local Mailpit instance (see
-[Mailpit](#mailpit)).
+The suite can also target an already-running deployment. Copy
+`e2e/.env.example` to `e2e/.env` and set the service URLs described below.
+For local application development, start services with `pnpm dev` (see
+[docs/development.md](../docs/development.md)) and use `http://localhost`
+URLs. External stacks may omit Mailpit or the untrusted demo; the corresponding
+scenarios are excluded at discovery time when their configuration is absent.
 
 ## Environment variables
 
@@ -73,8 +74,8 @@ For OTP scenarios you also need a local Mailpit instance (see
 
 ## Two demo clients
 
-The e2e suite uses **two** demo OAuth clients deployed as separate Railway
-services in the `ePDS` project:
+The e2e suite uses **two** separately configured demo OAuth clients in the
+private test stack (or equivalent external deployment):
 
 | Service name                    | Role          | Listed in `PDS_OAUTH_TRUSTED_CLIENTS` |
 | ------------------------------- | ------------- | ------------------------------------- |
@@ -92,12 +93,9 @@ code change on the demo.
 
 ### Where the untrusted demo exists
 
-The untrusted demo lives in **`pr-base`** and every PR preview environment
-forked from it (`ePDS-pr-<N>` / `pr-<hash>-<N>`). It does **not** exist in
-the `test`, `production`, or `dev` Railway environments. If you want a
-local untrusted demo for development, you need to start a second instance
-of the demo app yourself with a different `client_id` and point
-`E2E_DEMO_UNTRUSTED_URL` at it.
+The managed private test stack starts the untrusted demo automatically. Other
+environments must provide a second demo instance with a different
+`client_id` and set `E2E_DEMO_UNTRUSTED_URL`.
 
 ### Why two clients
 
@@ -226,72 +224,54 @@ or scenarios and loads step definitions via `--import`.
 - **HTML report** is written to `reports/e2e.html` after each run.
 - Step timeout is 60 seconds to accommodate cold-start latency on remote environments.
 
-## Running the CI e2e job against a Railway environment
+## Running the CI e2e job
 
-The `E2E tests` GitHub Actions workflow (`.github/workflows/e2e-tests.yml`) normally
-runs itself: whenever Railway successfully deploys a PR preview environment, it
-posts a `deployment_status` webhook that triggers the workflow against the
-environment it just deployed. For everyday PR work you don't need to do anything.
+The `E2E tests` workflow runs on relevant pull requests, pushes to `main`,
+and manual dispatch. Its private job checks out the PR head SHA, clones the pinned
+Atmosphere in a Box commit, builds the checked-out ePDS source into a fresh
+private stack, and runs the default profile against that stack. It does not
+discover Railway previews or require public service URLs, Railway credentials,
+or writes to public PLC. PRs targeting `dev` or `production` also receive the
+separate cloned-Railway validation described above.
 
-You do need to trigger it manually in two situations:
+The private workflow then runs `@otp-expiry` in a separate one-worker profile.
+Better-auth removes expired verification rows globally during unrelated auth
+requests, so a concurrent scenario could otherwise convert the expected
+expired-code response into `Invalid OTP`. The serial profile keeps the
+expired-code assertion deterministic.
 
-1. You made an e2e-only change (feature files, step definitions, workflow YAML)
-   that does not cause a Railway rebuild — so no `deployment_status` event fires.
-2. You want to re-run e2e against an existing Railway environment without
-   pushing a new commit (for example, after flakiness or after fixing a
-   misconfigured env var).
+Each provisioning and verification operation is a named workflow step: template
+validation, clone and registration, topology creation, image build, service
+startup, fixture seeding, access projection validation, private-service probes,
+private-PLC proof, Cucumber, report copying, failure logs, and scoped cleanup.
+This keeps the GitHub Actions log useful when a specific infrastructure stage
+fails. `e2e/atmosphere/run.sh` remains the local equivalent.
 
-Use `gh workflow run` with **both** `--ref` and `-f env_name`:
+When the private job fails, the `e2e-report` artifact also contains
+`private-stack-logs/`: an all-container Compose log, a container inventory, and
+one timestamped log per retained container, including the named Cucumber runner.
 
-```bash
-gh workflow run e2e-tests.yml \
-  --ref <your-branch> \
-  -f env_name="ePDS / <railway-env-name>"
-```
+The top-level workflow, [`.github/workflows/e2e-tests.yml`](../.github/workflows/e2e-tests.yml),
+contains only the trigger and path gate. It calls
+[`e2e-atmosphere.yml`](../.github/workflows/e2e-atmosphere.yml) for the private
+stack and [`e2e-railway.yml`](../.github/workflows/e2e-railway.yml) for
+promotion-PR validation. Keep changes to each execution environment in its
+respective reusable workflow.
 
-- `--ref <your-branch>` controls **which version of the workflow file, feature
-  files, and step definitions** get checked out and executed. Without it,
-  `gh workflow run` defaults to the repository's default branch (`main`),
-  so your local changes won't be exercised — the workflow will run against
-  old test code and produce confusing results.
-- `-f env_name="..."` is the display name shown in the Railway PR comment.
-  Use the exact string you see there. Accepted formats:
-  - `ePDS / ePDS-pr-<N>` — standard PR environment name.
-  - `ePDS / pr-<hash>-<N>` — Railway's collision-avoidance fallback, seen
-    after a close/reopen or force-push inside the env-cleanup window.
-    See [Railway discussion](https://station.railway.com/questions/pr-environment-name-format-change-causin-9aaa904f).
-  - `ePDS / pr-base` — the persistent post-merge backstop environment.
+To run the same workflow manually, select **E2E tests** in GitHub Actions and
+choose **Run workflow**. There are no environment-name inputs. Locally, run
+`pnpm test:e2e:atmosphere`; see its README for prerequisites, network and TLS
+boundaries, reports, and cleanup behavior.
 
-Example:
-
-```bash
-gh workflow run e2e-tests.yml \
-  --ref fix/consent-use-upstream-oauth-ui \
-  -f env_name="ePDS / ePDS-pr-21"
-```
-
-After dispatching, watch the run:
-
-```bash
-gh run list --workflow=e2e-tests.yml --event=workflow_dispatch --limit 1
-gh run watch <run-id>
-```
-
-### How service URLs are derived
-
-The workflow derives service URLs from the env name using Railway's standard
-slug rule: strip the `@<scope>/` prefix, replace spaces with `-`, lowercase.
-For an env named `ePDS-pr-21` it expects:
-
-- `certified-apppds-core-epds-pr-21.up.railway.app`
-- `certified-appauth-service-epds-pr-21.up.railway.app`
-- `certified-appdemo-epds-pr-21.up.railway.app`
-- `certified-appdemo-untrusted-epds-pr-21.up.railway.app` (see [Two demo clients](#two-demo-clients))
-- `mailpit-epds-pr-21.up.railway.app`
-
-If any of these return a 404 "Application not found", the service probably
-has no public domain attached in Railway. Generate one in the Railway UI
-(Settings → Networking → Generate Domain) and re-run.
+The concurrent default profile intentionally excludes `@session-reuse` and
+`@otp-expiry`. The serial OTP-expiry profile is required in CI. The session-reuse
+profile is run separately against the compatible hostname layout. Its last
+verified run passed 19 of 20 scenarios and had one baseline failure:
+“Signed-in user returning to an already-approved second client auto-approves
+after confirming identity” remained on the untrusted client's consent page
+instead of returning to `/welcome`. The default profile passed 83 scenarios. The failure is recorded in the
+session-reuse JUnit report from that verification; session-reuse is not a
+required CI job while it fails.
 
 ## Mailpit
 
