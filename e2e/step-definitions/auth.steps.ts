@@ -611,7 +611,7 @@ Then(
 )
 
 Then(
-  'the verification form shows an {string} error',
+  /^the verification form shows (?:an|the) "([^"]*)" error$/,
   async function (this: EpdsWorld, expected: string) {
     const page = getPage(this)
     await expect(page.locator('#error-msg')).toBeVisible({ timeout: 10_000 })
@@ -622,6 +622,20 @@ Then(
     await expect(page.locator('#error-msg')).toContainText(expected, {
       timeout: 10_000,
     })
+  },
+)
+
+When(
+  'the user enters two digits from the old OTP',
+  async function (this: EpdsWorld) {
+    const otpBoxes = getPage(this).locator('.otp-box')
+    await otpBoxes.nth(0).fill('1')
+    await otpBoxes.nth(1).fill('2')
+    // Prove the digits actually landed, so the later empty-box assertion
+    // demonstrates that resend cleared them rather than that they were
+    // never entered.
+    await expect(otpBoxes.nth(0)).toHaveValue('1')
+    await expect(otpBoxes.nth(1)).toHaveValue('2')
   },
 )
 
@@ -662,6 +676,21 @@ Then(
     const message = await waitForEmail(`to:${this.testEmail}`)
     this.lastEmailSubject = message.Subject
     this.otpCode = await extractOtp(message.ID)
+  },
+)
+
+Then(
+  'the OTP entry boxes are empty with the first box focused',
+  async function (this: EpdsWorld) {
+    if (!this.otpCode) {
+      throw new Error('No fresh OTP was captured from the mail trap')
+    }
+    const otpBoxes = getPage(this).locator('.otp-box')
+    await expect(otpBoxes).toHaveCount(this.otpCode.length)
+    for (let index = 0; index < this.otpCode.length; index += 1) {
+      await expect(otpBoxes.nth(index)).toHaveValue('')
+    }
+    await expect(otpBoxes.first()).toBeFocused()
   },
 )
 
@@ -872,7 +901,7 @@ When('the OTP form re-checks PAR liveness', async function (this: EpdsWorld) {
 })
 
 Then(
-  'the Resend code button is no longer offered',
+  'the Send a new code button is no longer offered',
   async function (this: EpdsWorld) {
     const page = getPage(this)
     await expect(page.locator('#btn-resend')).toBeHidden({ timeout: 5_000 })
@@ -929,3 +958,14 @@ Then(
     })
   },
 )
+
+// ---------------------------------------------------------------------------
+// "Use different email" UX
+// ---------------------------------------------------------------------------
+
+Then('the email input is empty and focused', async function (this: EpdsWorld) {
+  const page = getPage(this)
+  const input = page.locator('#email')
+  await expect(input).toHaveValue('', { timeout: 5_000 })
+  await expect(input).toBeFocused({ timeout: 5_000 })
+})

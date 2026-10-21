@@ -3,7 +3,7 @@
 # with output: "standalone" and then runs the self-contained server.
 
 # -- Base --
-FROM node:20-alpine AS base
+FROM node:22-alpine AS base
 RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 WORKDIR /app
 
@@ -35,7 +35,7 @@ RUN /tmp/resolve-version.sh && \
     pnpm --filter @certified-app/demo build
 
 # -- Production --
-FROM node:20-alpine
+FROM node:22-alpine
 RUN addgroup -g 1001 appuser && adduser -u 1001 -G appuser -D appuser
 WORKDIR /app
 

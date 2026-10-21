@@ -5,7 +5,6 @@ export interface AuthServiceConfig {
   hostname: string
   port: number
   sessionSecret: string
-  csrfSecret: string
   /** Shared HMAC-SHA256 secret for signing epds-callback redirect URLs. */
   epdsCallbackSecret: string
   pdsHostname: string

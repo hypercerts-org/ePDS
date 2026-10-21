@@ -1,18 +1,25 @@
 {
   "name": "@certified-app/pds-core",
   "private": true,
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "build": "tsc --build",
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "backfill:email-confirmed": "node dist/backfill-email-confirmed.js",
+    "backfill:email-confirmed:dev": "tsx src/backfill-email-confirmed.ts"
   },
   "dependencies": {
     "@atproto/crypto": "^0.4.5",
-    "@atproto/oauth-provider": "^0.15.9",
-    "@atproto/oauth-provider-ui": "^0.4.3",
-    "@atproto/pds": "^0.4.209",
+    "@atproto/oauth-provider": "0.22.8",
+    "@atproto/oauth-provider-ui": "0.10.3",
+    "@atproto/pds": "0.5.34",
+    "@atproto/syntax": "^0.7.2",
     "@certified-app/shared": "workspace:*",
     "@did-plc/lib": "^0.0.4",
     "dotenv": "^16.3.1",
@@ -21,7 +28,7 @@
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
-    "@types/node": "^20.11.0",
+    "@types/node": "^22.0.0",
     "@types/serialize-javascript": "^5.0.4",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"

@@ -17,9 +17,14 @@ import { Router, type Request, type Response } from 'express'
 import { escapeHtml, maskEmail, createLogger } from '@certified-app/shared'
 import { fromNodeHeaders } from 'better-auth/node'
 import type { AuthServiceContext } from '../context.js'
-import { buildOtpInputProps } from '../otp-input.js'
+import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
 import type { BetterAuthInstance } from '../better-auth.js'
 import { POWERED_BY_CSS, POWERED_BY_HTML } from '../lib/page-helpers.js'
+import {
+  EMAIL_TYPO_GUARD_CSS,
+  renderEmailTypoGuardMarkup,
+  renderEmailTypoGuardScript,
+} from '../lib/email-typo-guard.js'
 
 const logger = createLogger('auth:account-login')
 
@@ -151,19 +156,22 @@ function renderLoginForm(opts: { csrfToken: string; error?: string }): string {
     <div class="container">
       <h1>Account Settings</h1>
       <p class="subtitle">Sign in to manage your account</p>
-      ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
-      <form method="POST" action="/account/send-otp">
+      ${opts.error ? '<p class="error" role="alert">' + escapeHtml(opts.error) + '</p>' : ''}
+      <form id="form-account-send-otp" method="POST" action="/account/send-otp">
         <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
         <div class="field">
           <label for="email">Email address</label>
           <input type="email" id="email" name="email" required autofocus
+                 autocomplete="email"
                  placeholder="you@example.com">
         </div>
+        ${renderEmailTypoGuardMarkup()}
         <button type="submit" class="btn-primary">Continue with email</button>
       </form>
     </div>
     ${POWERED_BY_HTML}
   </div>
+  ${renderEmailTypoGuardScript('form-account-send-otp', 'email')}
 </body>
 </html>`
 }
@@ -177,6 +185,7 @@ function renderOtpForm(opts: {
 }): string {
   const maskedEmail = maskEmail(opts.email)
   const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
+  const inputFilter = buildOtpInputFilter(opts.otpCharset)
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -193,7 +202,7 @@ function renderOtpForm(opts: {
     <div class="container">
       <h1>Enter your code</h1>
       <p id="otp-help" class="subtitle">We sent a ${opts.otpLength}-${opts.otpCharset === 'alphanumeric' ? 'character' : 'digit'} code to <strong>${escapeHtml(maskedEmail)}</strong></p>
-      ${opts.error ? '<p class="error">' + escapeHtml(opts.error) + '</p>' : ''}
+      ${opts.error ? '<p class="error" role="alert">' + escapeHtml(opts.error) + '</p>' : ''}
       <form method="POST" action="/account/verify-otp">
         <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
         <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
@@ -208,6 +217,7 @@ function renderOtpForm(opts: {
                  autocapitalize="${inputProps.autocapitalize}"
                  placeholder="${inputProps.placeholder}"
                  class="otp-input"
+                 oninput="this.value=this.value.replace(${inputFilter.toString()},'')${opts.otpCharset === 'alphanumeric' ? '.toUpperCase()' : ''}"
                  style="letter-spacing: ${Math.max(2, Math.round(32 / opts.otpLength))}px">
         </div>
         <button type="submit" class="btn-primary">Verify</button>
@@ -215,7 +225,7 @@ function renderOtpForm(opts: {
       <form method="POST" action="/account/send-otp" style="margin-top: 12px;">
         <input type="hidden" name="csrf" value="${escapeHtml(opts.csrfToken)}">
         <input type="hidden" name="email" value="${escapeHtml(opts.email)}">
-        <button type="submit" class="btn-secondary">Resend code</button>
+        <button type="submit" class="btn-secondary">Send a new code</button>
       </form>
     </div>
     ${POWERED_BY_HTML}
@@ -236,9 +246,16 @@ const CSS = `
   .field label { display: block; font-size: 14px; font-weight: 500; color: #333; margin-bottom: 6px; }
   .field input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; outline: none; }
   .field input:focus { border-color: #0f1828; }
+  ${EMAIL_TYPO_GUARD_CSS}
   .otp-input { font-size: 28px !important; text-align: center; font-family: 'SF Mono', Menlo, Consolas, monospace !important; padding: 14px !important; }
   .btn-primary { width: 100%; padding: 12px; background: #0f1828; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; }
   .btn-primary:hover { background: #1a2a40; }
-  .btn-secondary { display: inline-block; color: #0f1828; background: none; border: none; font-size: 14px; cursor: pointer; text-decoration: underline; }
+  .btn-primary:focus-visible { outline: 2px solid #0f1828; outline-offset: 2px; }
+  /* Standalone action in its own row — see the link-affordance convention
+     documented in login-page.ts. No underline, darkens on hover. "Resend
+     code" here and on the sign-in page must not render differently. */
+  .btn-secondary { display: inline-block; color: #0f1828; background: none; border: none; font-size: 14px; cursor: pointer; text-decoration: none; border-radius: 4px; }
+  .btn-secondary:hover { color: #000; }
+  .btn-secondary:focus-visible { outline: 2px solid #0f1828; outline-offset: 2px; }
   .error { color: #dc3545; background: #fdf0f0; padding: 12px; border-radius: 8px; margin: 12px 0; }
 `

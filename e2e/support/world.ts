@@ -19,6 +19,18 @@ export class EpdsWorld extends World {
   /** Generated unique email for the current scenario — set by "unique test email" steps. */
   testEmail?: string
 
+  /** Mistyped address entered by an email-domain suggestion scenario. */
+  emailTypoOriginal?: string
+
+  /** Corrected address offered by the email-domain suggestion. */
+  emailTypoSuggestion?: string
+
+  /** Number of code-send requests observed after the typo guard was armed. */
+  otpSendRequestCount?: number
+
+  /** Email in the most recent observed code-send request. */
+  lastOtpRequestEmail?: string
+
   /** Generated unique backup email for backup-email scenarios — set by "unique backup email" steps. */
   backupEmail?: string
 

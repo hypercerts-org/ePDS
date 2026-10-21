@@ -21,7 +21,7 @@ import { fillOtp } from '../support/otp.js'
 // A short, stable fragment from the demo's branding.css. Any substring that
 // only the injected CSS would produce works — we pick the dark body bg since
 // it's also what makes the visual difference in the comparison scenario.
-const INJECTED_CSS_SIGNATURE = 'body { background: #1a1208'
+const INJECTED_CSS_SIGNATURE = 'body, html { background: #1a1208'
 
 // Default page background the auth-service login-page renders when no
 // branding CSS is injected — the `--page-bg` CSS var's default value.

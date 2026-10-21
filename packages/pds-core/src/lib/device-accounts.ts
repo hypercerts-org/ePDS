@@ -11,17 +11,14 @@
  * return null — never partial data — so callers don't accidentally trust
  * a stale half-state.
  */
-import type {
-  DeviceAccount,
-  DeviceId,
-  OAuthProvider,
-} from '@atproto/oauth-provider'
+import type { DeviceAccount, DeviceId } from '@atproto/oauth-provider/store'
+import type { OAuthProvider } from '@atproto/oauth-provider/provider'
 import {
   DEVICE_ID_BYTES_LENGTH,
   DEVICE_ID_PREFIX,
   SESSION_ID_BYTES_LENGTH,
   SESSION_ID_PREFIX,
-} from '@atproto/oauth-provider'
+} from '@atproto/oauth-provider/constants'
 import type { Logger } from 'pino'
 
 const DEVICE_ID_RE = new RegExp(

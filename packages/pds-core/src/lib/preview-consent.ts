@@ -53,22 +53,22 @@ import {
   type ResponseLike,
 } from './preview-shared.js'
 
+const PREVIEW_ACCOUNT_DID = 'did:web:preview.example'
+
 function buildSessions(): unknown {
-  // Fixture session that drives the SPA straight to the consent screen:
-  // `selected && !loginRequired && consentRequired` is the exact gate in
-  // authorize-view.tsx that mounts <ConsentView>.
+  // Provider UI 0.10.3 selects the consent account through
+  // AuthorizeData.selectedDid, then resolves it against Session.account.did.
   return [
     {
       account: {
-        sub: 'did:web:preview.example',
-        aud: 'https://preview.example',
-        preferred_username: 'alice.preview.example',
+        did: PREVIEW_ACCOUNT_DID,
+        pds: PREVIEW_ACCOUNT_DID,
+        deactivated: false,
+        handle: 'alice.preview.example',
         name: 'Alice Preview',
         email: 'alice@preview.example',
       },
-      selected: true,
       loginRequired: false,
-      consentRequired: true,
     },
   ]
 }
@@ -146,6 +146,7 @@ export function createPreviewConsentHandler(
       clientId,
       clientMetadata: metadata,
       isTrusted: deps.trustedClients.includes(clientId),
+      selectedDid: PREVIEW_ACCOUNT_DID,
     }
 
     const html = await renderConsentHtml({ fixture, injectedCss })

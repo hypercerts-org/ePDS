@@ -508,7 +508,9 @@ When(
   async function (this: EpdsWorld) {
     const page = getPage(this)
     await page
-      .getByRole('button', { name: 'Login to account that is not listed' })
+      .getByRole('button', {
+        name: /^(?:Sign in to an account|Login to account) that is not listed$/,
+      })
       .click()
   },
 )

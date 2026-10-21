@@ -25,13 +25,19 @@ applyPdsPortFallback()
 import type * as http from 'node:http'
 import { randomBytes } from 'node:crypto'
 import * as path from 'node:path'
-import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
+import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
-/* v8 ignore next 3 -- module-level init, only testable via e2e */
-const atprotoPdsPkg: { version: string } = JSON.parse(
-  readFileSync(require.resolve('@atproto/pds/package.json'), 'utf8'),
-)
-import { HandleUnavailableError } from '@atproto/oauth-provider'
+import { createRequire } from 'node:module'
+import { PDS, envToCfg, envToSecrets, readEnv } from '@atproto/pds'
+import { HandleUnavailableError } from '@atproto/oauth-provider/errors'
+import type { Account } from '@atproto/oauth-provider/store'
+import type { DidString } from '@atproto/syntax'
+import {
+  canLookUpAccountByHandle,
+  canCheckHandle,
+  canResolveHandle,
+  isValidConstructedHandle,
+} from './lib/identifier-guards.js'
 import {
   generateRandomHandle,
   createLogger,
@@ -40,21 +46,17 @@ import {
   validateLocalPart,
   resolveClientMetadata,
   getClientCss,
-  getClientMetadataCacheStatus,
   getEpdsVersion,
   renderError,
-  validateClientMetadataForPreview,
+  requireEnv,
 } from '@certified-app/shared'
 import { shouldRewriteSecFetchSite } from './lib/sec-fetch-site-rewrite.js'
 import {
   findInsertionIndex,
   installCssInjectionMiddleware,
 } from './lib/client-css-injection.js'
-import express, { type Application, type Request, type Response } from 'express'
-import {
-  createPreviewConsentHandler,
-  renderPreviewIndex,
-} from './lib/preview-consent.js'
+import express from 'express'
+import { createPreviewConsentHandler } from './lib/preview-consent.js'
 import { createPreviewChooserHandler } from './lib/preview-chooser.js'
 import {
   createCookieDomainMiddleware,
@@ -65,69 +67,23 @@ import { createUpstreamFaviconMiddleware } from './upstream-favicon.js'
 import { createAuthUiGuard, parsePromptTokens } from './auth-ui-guard.js'
 import { loadDeviceAccountEmails } from './lib/device-accounts.js'
 import { handleCallbackError } from './lib/epds-callback-error.js'
+import {
+  markEmailConfirmed,
+  needsEmailConfirmation,
+} from './lib/email-confirmed.js'
 import { installTestHooks } from './lib/test-hooks.js'
+import { buildPostCallbackAuthorizeUrl } from './lib/epds-callback-authorize.js'
+import { installPreviewRoutes } from './preview-routes.js'
+
+/* v8 ignore next 4 -- module-level init, only testable via e2e */
+const atprotoPdsPkg: { version: string } = JSON.parse(
+  readFileSync(
+    createRequire(import.meta.url).resolve('@atproto/pds/package.json'),
+    'utf8',
+  ),
+)
 
 const logger = createLogger('pds-core')
-
-/**
- * Wire up the /preview/* routes on the given Express app, if
- * `createPreviewConsentHandler` returned a handler (i.e. the env flag
- * is on). No-op otherwise. Factored out of `main` to keep its cognitive
- * complexity under the Sonar ceiling.
- */
-function installPreviewRoutes(
-  app: Application,
-  opts: {
-    previewConsentHandler: NonNullable<
-      ReturnType<typeof createPreviewConsentHandler>
-    >
-    previewChooserHandler: NonNullable<
-      ReturnType<typeof createPreviewChooserHandler>
-    >
-    authHostname: string
-    pdsPublicUrl: string
-    trustedClients: string[]
-  },
-): void {
-  // auth-service runs on auth.<PDS_HOSTNAME>; pds-core is pdsPublicUrl.
-  // Use https for real hostnames, http for localhost (see setup.sh and
-  // Caddyfile — same rule applied in auth-service's preview router).
-  const authScheme =
-    opts.authHostname === 'localhost' ||
-    opts.authHostname.endsWith('.localhost')
-      ? 'http'
-      : 'https'
-  const authPublicUrl = `${authScheme}://${opts.authHostname}`
-  app.get('/preview', (_req: Request, res: Response) => {
-    res.setHeader('Content-Type', 'text/html; charset=utf-8')
-    res.send(
-      renderPreviewIndex({ authPublicUrl, pdsPublicUrl: opts.pdsPublicUrl }),
-    )
-  })
-  app.get('/preview/consent', opts.previewConsentHandler)
-  app.get('/preview/chooser', opts.previewChooserHandler)
-  app.get('/preview/cache-status', (_req: Request, res: Response) => {
-    res.setHeader('Cache-Control', 'no-store')
-    res.json({ now: Date.now(), entries: getClientMetadataCacheStatus() })
-  })
-  app.get('/preview/validate', async (req: Request, res: Response) => {
-    const url =
-      typeof req.query.client_id === 'string' ? req.query.client_id : ''
-    res.setHeader('Cache-Control', 'no-store')
-    if (!url) {
-      res.json({ url: '', fetched: false, checks: [] })
-      return
-    }
-    const result = await validateClientMetadataForPreview(
-      url,
-      opts.trustedClients,
-    )
-    res.json(result)
-  })
-  logger.info(
-    'Preview routes installed (PDS_PREVIEW_ROUTES=1): /preview, /preview/consent, /preview/chooser, /preview/cache-status, /preview/validate',
-  )
-}
 
 async function main() {
   const env = readEnv()
@@ -168,8 +124,7 @@ async function main() {
   // Called by the auth service after OTP verification + user consent.
   // Steps: load device -> resolve account -> issue code -> redirect to client
 
-  const epdsCallbackSecret =
-    process.env.EPDS_CALLBACK_SECRET || 'dev-callback-secret-change-me'
+  const epdsCallbackSecret = requireEnv('EPDS_CALLBACK_SECRET')
 
   // When true, consent may be skipped on initial sign-up for trusted clients
   // that request it via epds_skip_consent_on_signup in their metadata.
@@ -203,8 +158,33 @@ async function main() {
 
     const approvedStr = req.query.approved as string
     const newAccountStr = req.query.new_account as string
+    // Whether auth-service is claiming this sign-in proved control of
+    // `email`. Part of the HMAC payload, so it cannot be forged or
+    // stripped: a callback without it fails verifyCallback outright.
+    const emailVerifiedStr = req.query.email_verified as string
     const handleParam = req.query.handle as string | undefined
     const clientIdParam = req.query.client_id as string | undefined
+    const handleModeParam = req.query.epds_handle_mode as string | undefined
+
+    // Reject a missing or malformed email_verified before signature
+    // verification. The signature check would catch it anyway — the
+    // field is inside the HMAC — but it would surface as "Invalid
+    // callback signature", which sends an operator hunting for a
+    // secret mismatch during what is actually a mixed-version rollout
+    // (an auth-service too old to send the field). Say what is
+    // actually wrong instead.
+    if (emailVerifiedStr !== '0' && emailVerifiedStr !== '1') {
+      logger.warn(
+        { emailVerified: emailVerifiedStr },
+        'epds-callback missing or invalid email_verified — auth-service too old, or a hand-built callback',
+      )
+      res.status(400).json({
+        error:
+          'Missing or invalid email_verified parameter (expected "0" or "1")',
+      })
+      return
+    }
+
     const signatureValid = verifyCallback(
       {
         request_uri: requestUri,
@@ -213,6 +193,8 @@ async function main() {
         new_account: newAccountStr,
         handle: handleParam,
         client_id: clientIdParam,
+        epds_handle_mode: handleModeParam,
+        email_verified: emailVerifiedStr,
       },
       ts,
       sig,
@@ -322,16 +304,29 @@ async function main() {
       // the HMAC-signed callback; by the time we reach here, email is the verified primary.
       const existingAccount =
         await pds.ctx.accountManager.getAccountByEmail(email)
-      let did: string | undefined = existingAccount?.did
+      // existingAccount.did is already branded DidString (ActorAccount).
+      let did: DidString | undefined = existingAccount?.did
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider Account type not exported
-      let account: any
+      let account: Account | undefined
 
       if (did) {
         // Existing account
         const accountData = await provider.accountManager.getAccount(did)
         account = accountData.account
       } else if (chosenHandle) {
+        // chosenHandle is `${localPart}.${handleDomain}`, already validated via
+        // validateLocalPart above. Brand it as HandleString for the strongly
+        // typed account APIs; a failure here means the constructed handle is
+        // malformed (a bug), so fail loudly rather than proceed.
+        if (!isValidConstructedHandle(chosenHandle)) {
+          logger.error(
+            { handle: chosenHandle },
+            'constructed handle failed validation',
+          )
+          res.status(500).send('Invalid handle')
+          return
+        }
+
         // User chose a handle — pre-check existence before attempting createAccount.
         // This avoids treating non-collision errors (datastore failures, invite-code
         // misconfiguration, etc.) as handle collisions.
@@ -370,7 +365,7 @@ async function main() {
               inviteCode: process.env.EPDS_INVITE_CODE,
             },
           )
-          did = account.sub
+          did = account.did
           logger.info(
             { did, email, handle: chosenHandle },
             'Created account with chosen handle',
@@ -410,6 +405,13 @@ async function main() {
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
             const randomHandle = generateRandomHandle(handleDomain)
+            // generateRandomHandle always yields `${local}.${domain}`; brand it
+            // for the strongly typed createAccount input.
+            if (!isValidConstructedHandle(randomHandle)) {
+              throw new Error(
+                `generated handle failed validation: ${randomHandle}`,
+              )
+            }
             account = await provider.accountManager.createAccount(
               deviceId,
               deviceMetadata,
@@ -427,7 +429,7 @@ async function main() {
                 inviteCode: process.env.EPDS_INVITE_CODE,
               },
             )
-            did = account.sub
+            did = account.did
             logger.info({ did, email, handle: randomHandle }, 'Created account')
             break
           } catch (createErr: unknown) {
@@ -441,7 +443,52 @@ async function main() {
       }
 
       // Step 4: Bind account to device session (for future SSO).
-      await provider.accountManager.upsertDeviceAccount(deviceId, account.sub)
+      if (!account) {
+        // Unreachable: every branch above either assigns account or returns/throws.
+        logger.error({ email }, 'account unexpectedly unset after resolution')
+        res.status(500).send('Account resolution failed')
+        return
+      }
+      await provider.accountManager.upsertDeviceAccount(deviceId, account.did)
+
+      // Step 4b: Record that the email is confirmed, but only when
+      // auth-service explicitly claims this sign-in proved control of
+      // `email`. Upstream only records confirmation via confirmEmail()'s
+      // token flow, so without this the address stays marked unverified
+      // forever.
+      //
+      // The claim is read from the signed callback rather than inferred
+      // from "a valid callback arrived". Only the authenticating service
+      // knows *how* the user authenticated: today that is always an
+      // emailed one-time code, but a passkey or similar flow would
+      // legitimately send a signed callback carrying `email` merely to
+      // locate the account, having proved nothing about that address.
+      // Inferring verification here would assert `email_verified: true`
+      // to relying parties on no evidence, and would engage the
+      // email-change verification gate on an unproven address.
+      //
+      // Keyed on whether the account is *confirmed*, not on whether it
+      // is new: a returning user whose earlier confirmation failed
+      // (or who predates this code) is repaired on their next sign-in
+      // rather than waiting for the backfill script. Already-confirmed
+      // accounts skip it, so the common case costs no writes.
+      // Best-effort: never fails the sign-in.
+      const emailProven = emailVerifiedStr === '1'
+      if (
+        emailProven &&
+        (!existingAccount || needsEmailConfirmation(existingAccount))
+      ) {
+        await markEmailConfirmed({
+          accountManager: pds.ctx.accountManager,
+          did: account.did,
+          // The HMAC-signed address whose control was proved — not the
+          // account's stored address. Upstream compares the two and
+          // rejects a mismatch, so an address changed since the flow
+          // began is not recorded as confirmed on this evidence.
+          email,
+          logger,
+        })
+      }
 
       // Step 5: Determine whether to skip consent on sign-up.
       // Consent is skipped only when ALL of these hold:
@@ -592,9 +639,12 @@ async function main() {
       // - Checks checkConsentRequired() against actual OAuth scopes
       // - Auto-approves if no consent needed (SSO match, previously authorized scopes)
       // - Renders the upstream consent UI (consent-view.tsx) if consent is required
-      const authorizeUrl = new URL('/oauth/authorize', pdsUrl)
-      authorizeUrl.searchParams.set('request_uri', requestUri)
-      authorizeUrl.searchParams.set('client_id', clientId)
+      const authorizeUrl = buildPostCallbackAuthorizeUrl({
+        pdsUrl,
+        requestUri,
+        clientId,
+        handleMode: req.query.epds_handle_mode,
+      })
 
       res.setHeader('Cache-Control', 'no-store')
       res.redirect(303, authorizeUrl.toString())
@@ -775,19 +825,21 @@ async function main() {
     .map((s) => s.trim())
     .filter(Boolean)
 
+  const resolveClientIdFromRequestUri = provider
+    ? async (requestUri: string) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
+        const requestData = await (provider.requestManager as any).get(
+          requestUri,
+        )
+        return requestData?.clientId as string | undefined
+      }
+    : undefined
+
   installCssInjectionMiddleware(pds.app, stack, {
     trustedClients,
     resolveClientMetadata,
     getClientCss,
-    resolveClientIdFromRequestUri: provider
-      ? async (requestUri: string) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
-          const requestData = await (provider.requestManager as any).get(
-            requestUri,
-          )
-          return requestData?.clientId as string | undefined
-        }
-      : undefined,
+    resolveClientIdFromRequestUri,
     logger,
   })
 
@@ -834,6 +886,7 @@ async function main() {
       authHostname,
       pdsPublicUrl: pdsUrl,
       trustedClients,
+      logger,
     })
   }
 
@@ -905,7 +958,9 @@ async function main() {
   // pds-core-rendered error page and the /preview/consent shell can
   // reference the Certified favicon without a cross-origin request to
   // the auth-service host.
-  const publicDir = path.resolve(__dirname, '..', 'public')
+  // ESM has no __dirname; derive this module's directory from import.meta.url.
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url))
+  const publicDir = path.resolve(moduleDir, '..', 'public')
   pds.app.get('/favicon.ico', (_req, res) => {
     res.sendFile(path.join(publicDir, 'favicon.svg'))
   })
@@ -998,6 +1053,11 @@ async function main() {
       res.status(400).json({ error: 'Missing handle' })
       return
     }
+    if (!canLookUpAccountByHandle(handle)) {
+      // A syntactically invalid identifier cannot match any account.
+      res.json({ email: null })
+      return
+    }
     try {
       const account = await pds.ctx.accountManager.getAccount(handle)
       res.json({ email: account?.email ?? null })
@@ -1018,6 +1078,13 @@ async function main() {
     const handle = ((req.query.handle as string) || '').trim()
     if (!handle) {
       res.status(400).json({ error: 'missing handle param' })
+      return
+    }
+    if (!canCheckHandle(handle)) {
+      // A syntactically invalid handle can never be registered, so report it as
+      // unavailable rather than "free" (which would let signup proceed and then
+      // fail at account creation).
+      res.json({ exists: true })
       return
     }
     try {
@@ -1184,6 +1251,12 @@ async function checkHandleRoute(
       return res.status(400).json({
         error: 'InvalidRequest',
         message: 'handles are not provided on this domain',
+      })
+    }
+    if (!canResolveHandle(domain)) {
+      return res.status(404).json({
+        error: 'NotFound',
+        message: 'handle not found for this domain',
       })
     }
     const account = await pds.ctx.accountManager.getAccount(domain)

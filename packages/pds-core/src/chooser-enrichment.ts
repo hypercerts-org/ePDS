@@ -51,8 +51,10 @@ export function buildChooserEnrichmentScript(): string {
   //     sets window.__sessions (type: readonly Session[])
   //   - /account          (the standalone account-management SPA)
   //     sets window.__deviceSessions (type: readonly ActiveDeviceSession[])
-  // Both contain { account: { sub, email, preferred_username, ... }, ... }
-  // so our DOM-enrichment heuristic can operate on either one.
+  // Both contain { account: { did, handle, email, ... }, ... }
+  // so our DOM-enrichment heuristic can operate on either one. Legacy
+  // sub/preferred_username fields are accepted as a fallback below for
+  // older rendered pages.
   var captured = null;
   function interceptGlobal(name) {
     try {
@@ -139,16 +141,18 @@ export function buildChooserEnrichmentScript(): string {
     var handleMode = readHandleMode();
     var hideHandle = handleMode === 'random';
     var byHandle = Object.create(null);
-    var bySub = Object.create(null);
+    var byDid = Object.create(null);
     captured.forEach(function(s) {
       var a = s && s.account;
       if (!a) return;
-      if (a.preferred_username) byHandle[a.preferred_username] = a.email || '';
-      if (a.sub) bySub[a.sub] = a.email || '';
+      var handle = a.handle || a.preferred_username;
+      var did = a.did || a.sub;
+      if (handle) byHandle[handle] = a.email || '';
+      if (did) byDid[did] = a.email || '';
     });
 
     // Find the deepest element whose own text content contains a known
-    // handle or sub, and append the email next to it. Upstream's markup
+    // handle or DID, and append the email next to it. Upstream's markup
     // varies between versions; walking by leaf-element text is more
     // resilient than guessing at class names. We skip elements that have
     // children whose text also matches (so we only label the deepest
@@ -173,8 +177,8 @@ export function buildChooserEnrichmentScript(): string {
         if (own.indexOf(handle) >= 0) { email = byHandle[handle]; break; }
       }
       if (!email) {
-        for (var sub in bySub) {
-          if (own.indexOf(sub) >= 0) { email = bySub[sub]; break; }
+        for (var did in byDid) {
+          if (own.indexOf(did) >= 0) { email = byDid[did]; break; }
         }
       }
       if (email) matches.push({ el: node, email: email });
@@ -238,6 +242,11 @@ export function buildChooserEnrichmentScript(): string {
   // its compiled bundle. Match by exact text content; the button lives
   // inside #root alongside the chooser list. Idempotent via
   // dataset.epdsHidden so the MutationObserver doesn't thrash.
+  //
+  // NOTE: oauth-provider-ui 0.8 dropped the "Sign up" button from the
+  // account-selector page (no "Sign up"/"Create account" string in the
+  // account-page bundle), so this is currently a no-op. Kept as a cheap
+  // guard in case a signup affordance returns to the chooser upstream.
   function hideSignup() {
     var root = document.getElementById('root');
     if (!root) return;
@@ -267,21 +276,39 @@ export function buildChooserEnrichmentScript(): string {
     if (!buildAnotherAccountUrl(authOrigin)) return;
     var root = document.getElementById('root');
     if (!root) return;
-    // Upstream @atproto/oauth-provider-ui renders this as a
-    // div-with-role, NOT a native button:
-    //   <div role="button" aria-label="Login to account that is not listed">
-    //     Another account
+    // Upstream @atproto/oauth-provider-ui has rendered this as both a
+    // div-with-role and a native button:
+    //   <div role="button" aria-label="Sign in to an account that is not listed">
+    //     Select another account
     //   </div>
-    // The aria-label is more stable across upstream copy changes than
-    // the visible text, so match on that with a text-content fallback
-    // scoped to anything with role=button (div OR button).
-    var btn = root.querySelector(
-      '[role="button"][aria-label="Login to account that is not listed"]',
-    );
+    //   <button aria-label="Sign in to an account that is not listed">
+    //     Select another account
+    //   </button>
+    // The aria-label copy changed in oauth-provider-ui 0.8 ("Login to
+    // account…" -> "Sign in to an account…", visible text "Another
+    // account" -> "Select another account"). Match either aria-label
+    // on either element type, then fall back to either visible-text
+    // variant on either element type so a future copy tweak degrades
+    // rather than breaks.
+    var ARIA_LABELS = [
+      'Sign in to an account that is not listed',
+      'Login to account that is not listed',
+    ];
+    var TEXTS = ['Select another account', 'Another account'];
+    var btn = null;
+    for (var a = 0; a < ARIA_LABELS.length && !btn; a++) {
+      btn = root.querySelector(
+        'button[aria-label="' +
+          ARIA_LABELS[a] +
+          '"], [role="button"][aria-label="' +
+          ARIA_LABELS[a] +
+          '"]',
+      );
+    }
     if (!btn) {
-      var candidates = root.querySelectorAll('[role="button"]');
+      var candidates = root.querySelectorAll('button, [role="button"]');
       for (var i = 0; i < candidates.length; i++) {
-        if ((candidates[i].textContent || '').trim() === 'Another account') {
+        if (TEXTS.indexOf((candidates[i].textContent || '').trim()) >= 0) {
           btn = candidates[i];
           break;
         }

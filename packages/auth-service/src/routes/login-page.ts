@@ -42,7 +42,7 @@ import {
   type HandleMode,
 } from '@certified-app/shared'
 import { socialProviders } from '../better-auth.js'
-import { buildOtpInputProps } from '../otp-input.js'
+import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
 import {
   resolveLoginHint,
   fetchParLoginHint,
@@ -53,6 +53,11 @@ import {
   renderFaviconTag,
 } from '../lib/page-helpers.js'
 import { renderError } from '../lib/render-error.js'
+import {
+  EMAIL_TYPO_GUARD_CSS,
+  renderEmailTypoGuardMarkup,
+  renderEmailTypoGuardScript,
+} from '../lib/email-typo-guard.js'
 import {
   appendOrphanDeviceCookieClearHeaders,
   buildPdsAuthorizeRedirect,
@@ -509,6 +514,7 @@ export function renderLoginPage(opts: {
     : `<img src="/static/certified-brandmark.svg" alt="Certified" class="client-logo">`
 
   const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
+  const inputFilter = buildOtpInputFilter(opts.otpCharset)
 
   // ATProto/Bluesky handle login button.
   //
@@ -554,6 +560,14 @@ export function renderLoginPage(opts: {
   const hasGithub = 'github' in socialProviders
   const hasSocialProviders = hasGoogle || hasGithub
 
+  // The flash region is a single element shared by both steps, so there
+  // is only ever one live region for assistive tech to track. It is
+  // server-rendered into whichever step is initially visible and moved
+  // between the two slots on step transitions; both transitions call
+  // clearError() first, so it is always empty when it moves.
+  const flashRegionHtml =
+    '<div id="error-msg" class="flash-msg hidden" role="status" aria-live="polite"></div>'
+
   // Social login buttons — redirect to better-auth provider endpoints
   const socialButtonsHtml = hasSocialProviders
     ? `
@@ -597,7 +611,7 @@ export function renderLoginPage(opts: {
   ${renderFaviconTag(opts.customFaviconUrl, opts.customFaviconUrlDark)}
   <title>Sign in to ${escapeHtml(appName)}</title>
   <style>
-    :root { --muted-foreground: #999; --input-bg: #ffffff; --input-border: #e5e5e5; --page-bg: #E8E8E8; --card-bg: #F8F8F8; --card-border: #E5E5E5; --btn-secondary-border: #e5e5e5; --focus-border: ${brandColor}; }
+    :root { --muted-foreground: #666; --input-bg: #ffffff; --input-border: #e5e5e5; --page-bg: #E8E8E8; --card-bg: #F8F8F8; --card-border: #E5E5E5; --btn-secondary-border: #e5e5e5; --focus-border: ${brandColor}; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--page-bg); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; color: #1A130F; }
     .page-wrap { display: flex; flex-direction: column; align-items: stretch; max-width: 497px; width: 100%; }
@@ -609,6 +623,7 @@ export function renderLoginPage(opts: {
     .field label { display: block; font-size: 16px; line-height: 24px; font-weight: 600; color: #1A130F; margin-bottom: 8px; }
     .field input { width: 100%; padding: 14px 20px; border: 1px solid var(--input-border); border-radius: 8px; font-size: 16px; outline: none; background: var(--input-bg); transition: border-color 0.15s; }
     .field input:focus { border-color: var(--focus-border); }
+    ${EMAIL_TYPO_GUARD_CSS}
     .otp-boxes { display: flex; gap: 10px; justify-content: center; margin-bottom: 24px; }
     .otp-box { width: 48px; height: 56px; padding: 0; text-align: center; font-size: 24px; font-family: 'SF Mono', Menlo, Consolas, monospace; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: #1A130F; outline: none; transition: border-color 0.15s; }
     .otp-box::placeholder { color: #d4d4d4; }
@@ -616,36 +631,57 @@ export function renderLoginPage(opts: {
     .otp-actions { display: flex; gap: 32px; justify-content: center; margin-top: 12px; }
     .btn-primary { width: 100%; padding: 15px; background: ${brandColor}; color: white; border: none; border-radius: 9999px; font-size: 15px; font-weight: 500; cursor: pointer; transition: opacity 0.15s; }
     .btn-primary:hover { opacity: 0.9; }
+    .btn-primary:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; }
     .btn-primary:disabled { opacity: 0.7; cursor: not-allowed; }
-    .btn-secondary { display: inline-block; color: #6b6b6b; background: none; border: none; font-size: 14px; font-weight: 500; cursor: pointer; padding: 4px 0; }
+    /* Link-affordance convention (see also .flash-action / .terms-link):
+       STANDALONE actions sit in their own row, where position and spacing
+       already read as actionable, so they carry no underline. IN-SENTENCE
+       actions are surrounded by prose and need an underline to be
+       identifiable at all. Both darken to #1A130F on hover; no rule ever
+       toggles an underline on or off, because an affordance that appears
+       or vanishes under the cursor is disorienting. */
+    .btn-secondary { display: inline-block; color: var(--muted-foreground); background: none; border: none; font-size: 14px; font-weight: 500; cursor: pointer; padding: 4px 0; border-radius: 4px; text-decoration: none; }
     .btn-secondary:hover { color: #1A130F; }
+    .btn-secondary:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; }
     .btn-social { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 13px 20px; border: 1px solid var(--btn-secondary-border); border-radius: 9999px; font-size: 15px; font-weight: 500; cursor: pointer; text-decoration: none; background: white; color: #333; margin-bottom: 8px; transition: background 0.15s; }
     .btn-social:hover { background: #fafafa; }
     .btn-atproto { margin-top: 12px; margin-bottom: 0; color: #1A130F !important; background: var(--input-bg) !important; border-color: var(--input-border) !important; }
-    .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: #999; font-size: 13px; }
+    .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: var(--muted-foreground); font-size: 13px; }
     .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #ececec; }
     .flash-msg { padding: 12px; border-radius: 10px; margin: 12px 0; font-size: 14px; text-align: center; }
+    .flash-msg.hidden { display: none; }
     .flash-msg.error { color: #dc3545; background: #fdf0f0; }
     .flash-msg.success { color: #28a745; background: #f0fff4; }
     /* Inline action button rendered next to an OTP-expired error so
        the user doesn't have to hunt for the separate Resend button.
        Styled as a link rather than a button to make it visually
-       continuous with the message text. */
+       continuous with the message text. IN-SENTENCE action: it inherits
+       the surrounding error colour, so the underline is its only marker
+       of being clickable and must survive hover. */
     .flash-action { background: none; border: none; padding: 0; font: inherit; color: inherit; text-decoration: underline; cursor: pointer; }
-    .flash-action:hover { text-decoration: none; }
+    .flash-action:hover { color: #1A130F; }
+    .flash-action:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; border-radius: 4px; }
     .step-otp { display: none; }
     .step-otp.active { display: block; }
     .step-email.hidden { display: none; }
     .terms { margin-top: 24px; color: var(--muted-foreground); font-size: 13px; font-weight: 400; line-height: 1.5; text-align: center; }
+    /* IN-SENTENCE action: sits inside the terms sentence and inherits its
+       colour, so the underline is its only marker and must survive hover. */
     .terms-link { color: inherit; text-decoration: underline; cursor: pointer; }
+    .terms-link:hover { color: #1A130F; }
+    .terms-link:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; border-radius: 4px; }
     .powered-by { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 16px; color: var(--muted-foreground); font-size: 13px; text-decoration: none; cursor: pointer; }
     .powered-by:hover, .powered-by:focus, .powered-by:visited { color: var(--muted-foreground); text-decoration: none; }
     .powered-by .certified-mark { height: 14px; width: auto; display: block; }
     /* Recovery-via-backup-email link. Shown by default; trusted clients
        hide it by setting --recovery-link-display: none in their injected
-       branding.css. */
-    .recovery-link { display: var(--recovery-link-display, block); margin-top: 16px; color: var(--muted-foreground); font-size: 13px; text-decoration: underline; text-align: center; }
+       branding.css. STANDALONE action: it shares the action cluster
+       under Verify with the .btn-secondary buttons, and the anchor-vs-
+       button split behind the old underline was never legible to a
+       user — those buttons are deliberately styled to look like links. */
+    .recovery-link { display: var(--recovery-link-display, block); margin-top: 16px; color: var(--muted-foreground); font-size: 13px; text-decoration: none; text-align: center; }
     .recovery-link:hover { color: #1A130F; }
+    .recovery-link:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; border-radius: 4px; }
   </style>${renderOptionalStyleTag(opts.customCss)}
 </head>
 <body>
@@ -653,8 +689,6 @@ export function renderLoginPage(opts: {
     <div class="container">
     ${logoHtml}
     <h1 id="heading">${opts.initialStep === 'otp' ? 'Enter your code' : 'Sign in'}</h1>
-
-    <div id="error-msg" class="flash-msg" style="display:none;"></div>
 
     ${socialButtonsHtml}
 
@@ -664,13 +698,22 @@ export function renderLoginPage(opts: {
         <div class="field">
           <label for="email">Enter your email address</label>
           <input type="email" id="email" name="email" required autofocus
+                 autocomplete="email"
                  placeholder="you@example.com"
                  value="${escapeHtml(opts.loginHint)}">
         </div>
-        <button type="submit" class="btn-primary">Continue</button>
+        ${renderEmailTypoGuardMarkup()}
+        <!-- Flash slot: the shared #error-msg region is moved in here
+             while the email step is active, so a send failure reads
+             directly under the field that caused it rather than above
+             the heading. -->
+        <div id="flash-slot-email">${opts.initialStep === 'otp' ? '' : flashRegionHtml}</div>
+        <button type="submit" class="btn-primary" disabled>Continue</button>
       </form>
       ${handleLoginButtonHtml}
     </div>
+
+    <noscript><div class="flash-msg error">JavaScript is required to sign in with email.</div></noscript>
 
     <!-- Step 2: OTP entry (calls better-auth verifyOtp) -->
     <div id="step-otp" class="step-otp${opts.initialStep === 'otp' ? ' active' : ''}">
@@ -694,10 +737,16 @@ export function renderLoginPage(opts: {
             )
             .join('\n          ')}
         </div>
+        <!-- Flash slot: see #flash-slot-email. Sitting between the
+             boxes and Verify puts a rejected-code message at the point
+             of failure — where the user's attention already is after
+             typing — instead of above the subtitle, and places the
+             inline Resend action next to it. -->
+        <div id="flash-slot-otp">${opts.initialStep === 'otp' ? flashRegionHtml : ''}</div>
         <button type="submit" class="btn-primary">Verify</button>
       </form>
       <div class="otp-actions">
-        <button type="button" class="btn-secondary" id="btn-resend">Resend code</button>
+        <button type="button" class="btn-secondary" id="btn-resend">Send a new code</button>
         <button type="button" class="btn-secondary" id="btn-back">Use different email</button>
       </div>
       <a href="/auth/recover?request_uri=${encodeURIComponent(opts.pdsPublicUrl + '/placeholder')}"
@@ -713,6 +762,7 @@ export function renderLoginPage(opts: {
     </a>
   </div>
 
+  ${renderEmailTypoGuardScript('form-send-otp', 'email')}
   <script>
     (function() {
       var authBasePath = ${JSON.stringify(opts.authBasePath)};
@@ -727,6 +777,7 @@ export function renderLoginPage(opts: {
       var otpSubtitle = document.getElementById('otp-subtitle');
       var otpEmailInput = document.getElementById('otp-email');
       var atprotoBtn = document.querySelector('.btn-atproto');
+      var sendOtpForm = document.getElementById('form-send-otp');
       var emailInput = document.getElementById('email');
       var emailLabel = document.querySelector('label[for="email"]');
       var sendOtpBtn = document.querySelector('#form-send-otp button[type=submit]');
@@ -734,6 +785,8 @@ export function renderLoginPage(opts: {
       var termsEl = document.getElementById('terms');
       var otpBoxes = Array.prototype.slice.call(document.querySelectorAll('.otp-box'));
       var hiddenCode = document.getElementById('code');
+      var otpLength = ${opts.otpLength};
+      var otpCharset = ${JSON.stringify(opts.otpCharset)};
 
       // PAR heartbeat — slides the upstream request_uri inactivity
       // timer (atproto's AUTHORIZATION_INACTIVITY_TIMEOUT, 5 min) so
@@ -845,22 +898,26 @@ export function renderLoginPage(opts: {
         // Render the notice in the existing error banner so the
         // styling / position is consistent with other errors. The
         // copy is set via textContent (no HTML), the Start over
-        // button is built imperatively.
+        // button is built imperatively. Both go in through setFlash
+        // so the notice and its button land as one mutation and
+        // announce as a single message.
         clearError();
-        showFlash(
-          'Your sign-in has timed out. The code we sent will no longer work. Start sign-in again from the app you came from.',
-          'error',
-        );
-        errorEl.appendChild(document.createElement('br'));
-        var startOverBtn = document.createElement('button');
-        startOverBtn.type = 'button';
-        startOverBtn.id = 'btn-start-over';
-        startOverBtn.className = 'flash-action';
-        startOverBtn.textContent = 'Start over';
-        startOverBtn.addEventListener('click', function() {
-          window.location.href = '/auth/abort';
+        setFlash('error', function(frag) {
+          appendMessage(
+            frag,
+            'Your sign-in has timed out. The code we sent will no longer work. Start sign-in again from the app you came from.',
+          );
+          frag.appendChild(document.createElement('br'));
+          var startOverBtn = document.createElement('button');
+          startOverBtn.type = 'button';
+          startOverBtn.id = 'btn-start-over';
+          startOverBtn.className = 'flash-action';
+          startOverBtn.textContent = 'Start over';
+          startOverBtn.addEventListener('click', function() {
+            window.location.href = '/auth/abort';
+          });
+          frag.appendChild(startOverBtn);
         });
-        errorEl.appendChild(startOverBtn);
       }
 
       /**
@@ -937,6 +994,19 @@ export function renderLoginPage(opts: {
         return false;
       }
 
+      // Drop characters the configured code alphabet can't contain, so a
+      // code copied out of prose (punctuation, line breaks, a stray letter
+      // in a digits-only code) still lands in the boxes as a valid code
+      // instead of silently failing verification. Alphanumeric codes are
+      // generated uppercase, and the browser only auto-capitalises on soft
+      // keyboards, so normalise here too — otherwise a desktop user typing
+      // lowercase submits a code the server will reject.
+      var otpCharFilter = ${inputFilter.toString()};
+      function filterOtpChars(s) {
+        var cleaned = s.replace(otpCharFilter, '');
+        return otpCharset === 'alphanumeric' ? cleaned.toUpperCase() : cleaned;
+      }
+
       function updateHiddenCode() {
         var v = '';
         for (var i = 0; i < otpBoxes.length; i++) v += otpBoxes[i].value;
@@ -951,7 +1021,7 @@ export function renderLoginPage(opts: {
       otpBoxes.forEach(function(box, idx) {
         box.addEventListener('input', function() {
           // keep only the last typed char (handles paste into a single box)
-          var v = box.value.replace(/\\s/g, '');
+          var v = filterOtpChars(box.value);
           if (v.length > 1) v = v.slice(-1);
           box.value = v;
           updateHiddenCode();
@@ -975,7 +1045,7 @@ export function renderLoginPage(opts: {
         box.addEventListener('paste', function(e) {
           e.preventDefault();
           var data = (e.clipboardData || window.clipboardData).getData('text') || '';
-          var cleaned = data.replace(/\\s/g, '').slice(0, otpBoxes.length - idx);
+          var cleaned = filterOtpChars(data).slice(0, otpBoxes.length - idx);
           for (var i = 0; i < cleaned.length; i++) otpBoxes[idx + i].value = cleaned[i];
           updateHiddenCode();
           var nextIdx = Math.min(idx + cleaned.length, otpBoxes.length - 1);
@@ -987,16 +1057,52 @@ export function renderLoginPage(opts: {
         box.addEventListener('focus', function() { box.select(); });
       });
 
-      function showFlash(msg, kind) {
-        // Build the message DOM imperatively so showErrorWithAction
-        // can append an inline action (e.g. Resend) without ever
-        // interpolating user-influenced strings as HTML. textContent
-        // is the only sink for the msg argument, which neutralises
-        // any HTML in the better-auth error string.
-        errorEl.textContent = msg;
+      /**
+       * Swap the flash region's contents in a single mutation.
+       *
+       * Two ordering constraints make this fiddlier than it looks:
+       *
+       * 1. The region must already be visible before its text changes.
+       *    A display:none element is excluded from the accessibility
+       *    tree, so text written while hidden leaves the live region
+       *    with no "before" state to diff against and assistive tech
+       *    may never announce it.
+       * 2. The new content must arrive as one mutation. Building it
+       *    off-DOM and appending a fragment means an error plus its
+       *    inline action announce together rather than twice.
+       *
+       * Content is always built imperatively with textContent as the
+       * only sink for caller-supplied strings, so a reflected
+       * better-auth error can never be interpolated as HTML.
+       */
+      function setFlash(kind, buildContent) {
         errorEl.classList.remove('error', 'success');
         errorEl.classList.add(kind);
-        errorEl.style.display = 'block';
+        errorEl.classList.remove('hidden');
+
+        var frag = document.createDocumentFragment();
+        buildContent(frag);
+
+        // Replace the children wholesale rather than assigning
+        // textContent in place. Re-submitting a bad OTP yields the
+        // identical string, which is not a DOM mutation and so would
+        // announce nothing — leaving the screen-reader user unsure the
+        // retry was even processed. Swapping nodes is always a
+        // mutation, so every failure announces.
+        errorEl.replaceChildren(frag);
+      }
+
+      /** Append msg to frag as a text-only node. */
+      function appendMessage(frag, msg) {
+        var msgNode = document.createElement('span');
+        msgNode.textContent = msg;
+        frag.appendChild(msgNode);
+      }
+
+      function showFlash(msg, kind) {
+        setFlash(kind, function(frag) {
+          appendMessage(frag, msg);
+        });
       }
 
       function showError(msg) { showFlash(msg, 'error'); }
@@ -1010,21 +1116,78 @@ export function renderLoginPage(opts: {
        * handler runs the supplied callback. When actionLabel is
        * absent, behaves like showError.
        */
+      /**
+       * Rewrite better-auth's verification errors as end-user copy.
+       *
+       * better-auth returns developer-facing strings — "Invalid OTP" is
+       * an unexplained acronym with no article, and none of them say
+       * what to do next. The rendered text is the one thing a user
+       * actually reads when sign-in fails, so it is worth owning.
+       *
+       * Anything unrecognised passes through verbatim rather than
+       * collapsing into a generic apology: an unexpected failure that
+       * still names itself can be diagnosed from a screenshot, and one
+       * that says "Something went wrong" cannot.
+       */
+      function otpErrorText(raw) {
+        switch (raw) {
+          case 'Invalid OTP': return "That code didn't work.";
+          case 'OTP expired': return 'That code has expired.';
+          case 'Too many attempts':
+            return 'Too many tries — that code is no longer usable.';
+          default: return raw;
+        }
+      }
+
       function showErrorWithAction(msg, actionLabel, onClick) {
-        showFlash(msg, 'error');
-        if (!actionLabel || typeof onClick !== 'function') return;
-        errorEl.appendChild(document.createTextNode(' '));
-        var btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'flash-action';
-        btn.textContent = actionLabel;
-        btn.addEventListener('click', onClick);
-        errorEl.appendChild(btn);
+        if (!actionLabel || typeof onClick !== 'function') {
+          showError(msg);
+          return;
+        }
+        setFlash('error', function(frag) {
+          appendMessage(frag, msg);
+          // Separate the sentence from the action. Mapped copy already
+          // ends in a full stop, but a passed-through better-auth string
+          // may not, so supply one rather than letting the two run
+          // together as "Invalid OTP Send a new code".
+          frag.appendChild(
+            document.createTextNode(/[.!?]$/.test(msg) ? ' ' : '. '),
+          );
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'flash-action';
+          btn.textContent = actionLabel;
+          btn.addEventListener('click', onClick);
+          frag.appendChild(btn);
+        });
+      }
+
+      /**
+       * Reparent the single flash region into the active step's slot,
+       * so a message always renders at the point of failure — under
+       * the email field on the email step, between the code boxes and
+       * Verify on the OTP step.
+       *
+       * Callers must clearError() first: moving a *populated* live
+       * region across parents can re-announce or drop the message
+       * depending on the screen reader. Both step transitions already
+       * clear before switching, so the region is empty whenever it
+       * moves here.
+       */
+      function moveFlashTo(slotId) {
+        var slot = document.getElementById(slotId);
+        if (slot && errorEl && errorEl.parentNode !== slot) {
+          slot.appendChild(errorEl);
+        }
       }
 
       function clearError() {
-        errorEl.style.display = 'none';
-        errorEl.textContent = '';
+        // Empty the region before hiding it. Clearing after the
+        // region is hidden would mutate one that is already out of
+        // the accessibility tree, which some assistive tech reports
+        // as a stale announcement.
+        errorEl.replaceChildren();
+        errorEl.classList.add('hidden');
         errorEl.classList.remove('error', 'success');
       }
 
@@ -1035,6 +1198,7 @@ export function renderLoginPage(opts: {
           emailInput.type = 'text';
           emailInput.placeholder = 'you.bsky.social';
           emailInput.name = 'handle';
+          emailInput.autocomplete = 'username';
           emailInput.value = '';
           // Browser's built-in type="email" validation would block valid
           // handles; remove it for handle mode.
@@ -1046,6 +1210,7 @@ export function renderLoginPage(opts: {
           emailInput.type = 'email';
           emailInput.placeholder = 'you@example.com';
           emailInput.name = 'email';
+          emailInput.autocomplete = 'email';
           emailInput.value = '';
           emailInput.setAttribute('required', '');
           sendOtpBtn.textContent = 'Continue';
@@ -1062,8 +1227,6 @@ export function renderLoginPage(opts: {
         });
       }
 
-      var otpLength = ${opts.otpLength};
-      var otpCharset = ${JSON.stringify(opts.otpCharset)};
       function showOtpStep(email) {
         currentEmail = email;
         otpEmailInput.value = email;
@@ -1076,6 +1239,7 @@ export function renderLoginPage(opts: {
         clearOtpBoxes();
         if (otpBoxes.length) otpBoxes[0].focus();
         clearError();
+        moveFlashTo('flash-slot-otp');
         startHeartbeat();
         refreshResendVisibility();
       }
@@ -1086,7 +1250,17 @@ export function renderLoginPage(opts: {
         headingEl.textContent = 'Sign in';
         if (termsEl) termsEl.style.display = 'block';
         clearError();
+        moveFlashTo('flash-slot-email');
         stopHeartbeat();
+        // Reset the email field — the user clicked "Use different
+        // email" precisely to escape the previous value, so leaving
+        // it pre-filled both wastes a clearing keystroke and looks
+        // like the form remembered them when they wanted a fresh
+        // start. Focus the input so they can start typing
+        // immediately.
+        emailInput.value = '';
+        currentEmail = '';
+        emailInput.focus();
       }
 
       // Send OTP via better-auth
@@ -1117,7 +1291,12 @@ export function renderLoginPage(opts: {
           });
           if (!res.ok) {
             var data = await res.json().catch(function() { return {}; });
-            return { error: data.message || data.error || 'Invalid code' };
+            var raw = data.message || data.error || 'Invalid code';
+            // Keep the raw reason alongside the display text: callers
+            // branch on it (see isExpired below), and branching on the
+            // rewritten copy would couple control flow to wording, so
+            // an innocuous copy edit could silently change behaviour.
+            return { error: otpErrorText(raw), rawError: raw };
           }
           // Success: redirect to /auth/complete to complete the AT Protocol flow
           window.location.href = '/auth/complete';
@@ -1128,7 +1307,7 @@ export function renderLoginPage(opts: {
       }
 
       // Form: send OTP (email mode) or hand off to client (handle mode)
-      document.getElementById('form-send-otp').addEventListener('submit', async function(e) {
+      sendOtpForm.addEventListener('submit', async function(e) {
         e.preventDefault();
         clearError();
         var raw = emailInput.value.trim();
@@ -1197,7 +1376,10 @@ export function renderLoginPage(opts: {
             // match catches the better-auth wording ("Invalid or
             // expired code") and the auth-service wording ("OTP
             // expired") plus generic "expir"/"too long" variants.
-            var isExpired = /expir|too long/i.test(result.error);
+            // Test the raw better-auth reason, not the rewritten copy:
+            // otpErrorText() owns the wording, and matching against it
+            // would mean a copy edit could silently reroute the branch.
+            var isExpired = /expir|too long/i.test(result.rawError || result.error);
             if (isExpired) {
               // Only offer "Send a new code" when the PAR is still
               // alive. If it isn't, a fresh OTP would issue but
@@ -1214,6 +1396,43 @@ export function renderLoginPage(opts: {
                   document.getElementById('btn-resend').click();
                 });
               }
+            } else if (!parLikelyDead()) {
+              // Every other verify failure gets the same inline
+              // shortcut, for the same reason as the expired path: the
+              // standalone Resend button sits below the form and is
+              // easy to miss.
+              //
+              // 3d31876 originally kept non-expired errors on the plain
+              // path, reasoning that a typo should be retyped rather
+              // than resent. But "Invalid OTP" does not reliably mean
+              // a typo: better-auth throws it from two places
+              // (1.4.18 email-otp/routes.mjs) — the wrong-code
+              // comparison, and a missing stored code. The second
+              // covers several states where retyping cannot possibly
+              // work and a fresh code is the only recovery:
+              //
+              //   - after a lockout. TOO_MANY_ATTEMPTS deletes the
+              //     stored value, so it is reported exactly once and
+              //     every later submit falls through to "Invalid OTP".
+              //   - after the code was consumed elsewhere, e.g. the
+              //     user completed sign-in in another tab.
+              //   - after expiry cleanup deleted the value, so a later
+              //     submit reads "Invalid OTP" rather than "expired".
+              //
+              // Since the branch cannot distinguish those from a typo,
+              // withholding the action strands the users who need it
+              // most. Offering it costs a typo-ing user nothing: the
+              // boxes are cleared and focused for retyping either way.
+              //
+              // Gated on parLikelyDead() because
+              // refreshResendVisibility() hides the standalone Resend
+              // button in that state; surfacing an inline one anyway
+              // would re-offer an action the page has deliberately
+              // withdrawn. The aborted-flow notice carries its own
+              // restart action, so nothing is lost by staying quiet.
+              showErrorWithAction(result.error, 'Send a new code', function() {
+                document.getElementById('btn-resend').click();
+              });
             } else {
               showError(result.error);
             }
@@ -1237,7 +1456,7 @@ export function renderLoginPage(opts: {
         }
       });
 
-      // Resend code
+      // Send a new code (the element id predates the relabel)
       document.getElementById('btn-resend').addEventListener('click', async function() {
         clearError();
         this.disabled = true;
@@ -1249,11 +1468,22 @@ export function renderLoginPage(opts: {
         if (await abortIfFlowDead()) return;
         var result = await sendOtp(currentEmail);
         this.disabled = false;
-        this.textContent = 'Resend code';
+        this.textContent = 'Send a new code';
         if (result.error) {
           showError(result.error);
         } else {
-          showSuccess('Code resent!');
+          // Clear any characters typed for the old code so the new code
+          // starts from a clean, focused input grid.
+          clearOtpBoxes();
+          if (otpBoxes.length) otpBoxes[0].focus();
+          // Both facts only matter once a resend has happened, so they
+          // live here rather than in permanently-visible page copy:
+          // sending a new OTP invalidates every earlier one, and a user
+          // who needed to resend is the user whose mail may be in spam.
+          showSuccess(
+            'Sent! Make sure to use the new code; earlier ones no longer work. ' +
+              'It may be in your spam folder.',
+          );
         }
       });
 
@@ -1262,6 +1492,10 @@ export function renderLoginPage(opts: {
         showEmailStep();
         clearOtpBoxes();
       });
+
+      // Enable only after the submit handler is installed. This avoids a race mostly
+      // seen in fast e2e runs where the button is clicked before JS is ready.
+      sendOtpBtn.disabled = false;
 
       // Pillar 1: If login_hint was provided, the OTP step is already visible
       // server-side — no DOM transition needed.

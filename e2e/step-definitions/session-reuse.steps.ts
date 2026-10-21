@@ -380,17 +380,19 @@ When(
 
 /**
  * Click upstream's "Another account" button on the chooser. The button
- * is rendered by @atproto/oauth-provider-ui with
- * aria-label="Login to account that is not listed". ePDS must intercept
- * the click (upstream swaps to its stock sign-in component client-side)
- * and hard-navigate to the auth-service email/OTP form instead.
+ * label changed between provider UI versions, so accept both accessible
+ * names. ePDS must intercept the click (upstream swaps to its stock
+ * sign-in component client-side) and hard-navigate to the auth-service
+ * email/OTP form instead.
  */
 When(
   'the user clicks "Another account" on the chooser',
   async function (this: EpdsWorld) {
     const page = getPage(this)
     await page
-      .getByRole('button', { name: 'Login to account that is not listed' })
+      .getByRole('button', {
+        name: /^(?:Sign in to an account|Login to account) that is not listed$/,
+      })
       .click()
   },
 )

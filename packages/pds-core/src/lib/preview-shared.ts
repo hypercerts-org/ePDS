@@ -16,11 +16,11 @@ import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import serialize from 'serialize-javascript'
 
-// pds-core compiles to CommonJS, so createRequire(__filename) gives us a
-// require that can resolve the sibling package without tripping the
-// no-require-imports lint rule (we never call the local `require` — only
-// require.resolve, which is a function lookup not a syntactic require).
-const nodeRequire = createRequire(__filename)
+// pds-core is pure ESM, so we build a require via import.meta.url to resolve
+// the sibling package without tripping the no-require-imports lint rule (we
+// never call the local `require` — only require.resolve, which is a function
+// lookup not a syntactic require).
+const nodeRequire = createRequire(import.meta.url)
 
 // Use structural request/response types rather than importing from
 // express — pds-core doesn't depend on express's types directly and
@@ -58,9 +58,9 @@ export async function loadAssetRefs(): Promise<{
 }> {
   if (cachedAssets) return cachedAssets
   // Read the manifest as a plain file rather than via `import(..., { with:
-  // { type: 'json' } })`. Import-attributes are only stable in Node 22+
-  // and the repo allows Node >=20.0.0; require.resolve + fs.readFile
-  // works on every Node 20.x without attributes.
+  // { type: 'json' } })`. require.resolve + fs.readFile keeps the manifest
+  // load lazy (import-attributes would hoist it to parse time) and avoids
+  // depending on attribute-syntax stability across bundlers.
   const manifestPath = nodeRequire.resolve(
     '@atproto/oauth-provider-ui/bundle-manifest.json',
   )
@@ -107,6 +107,8 @@ export interface PreviewAuthorizeFixture {
   clientId: string
   clientMetadata: ClientMetadata
   isTrusted: boolean
+  /** Account selected by consent previews; omit for chooser previews. */
+  selectedDid?: string
 }
 
 /** Minimal AuthorizeData fixture shared by /preview/consent + /preview/chooser. */
@@ -125,6 +127,7 @@ export function buildAuthorizeData(opts: PreviewAuthorizeFixture): unknown {
     clientMetadata: opts.clientMetadata,
     clientTrusted: opts.isTrusted,
     clientFirstParty: false,
+    selectedDid: opts.selectedDid,
     scope: 'atproto transition:generic',
     uiLocales: undefined,
     promptMode: undefined,

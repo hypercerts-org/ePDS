@@ -119,7 +119,7 @@ describe('Resend webhook receiver', () => {
         email: 'person@example.com',
         subject: '[REDACTED] — Your sign-in code',
       },
-      'Received email event',
+      "Received email event 'delivered' from Resend",
     )
   })
 
@@ -137,7 +137,7 @@ describe('Resend webhook receiver', () => {
         messageId: 'resend-email-123',
         email: 'person@example.com',
       }),
-      'Received email event',
+      `Received email event '${normalizedType}' from Resend`,
     )
   })
 
@@ -222,7 +222,7 @@ describe('Resend webhook receiver', () => {
         eventType: normalizedType,
         messageId: 'resend-email-123',
       }),
-      'Received email event',
+      `Received email event '${normalizedType}' from Resend`,
     )
   })
 

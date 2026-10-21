@@ -102,7 +102,7 @@ export function renderError(
   <div class="page-wrap">
     <div class="container">
       <h1>${escapeHtml(title)}</h1>
-      <p class="error">${escapeHtml(message)}</p>
+      <p class="error" role="alert">${escapeHtml(message)}</p>
       ${startOverHtml}
     </div>
     ${bodyExtra}

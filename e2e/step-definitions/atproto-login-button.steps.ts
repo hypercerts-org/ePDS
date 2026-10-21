@@ -76,6 +76,7 @@ Then(
     const input = page.locator('#email')
     await expect(input).toHaveAttribute('type', 'text')
     await expect(input).toHaveAttribute('name', 'handle')
+    await expect(input).toHaveAttribute('autocomplete', 'username')
     await expect(input).toHaveAttribute('placeholder', 'you.bsky.social')
     await expect(page.locator('label[for="email"]')).toHaveText('Handle')
   },
@@ -88,6 +89,7 @@ Then(
     const input = page.locator('#email')
     await expect(input).toHaveAttribute('type', 'email')
     await expect(input).toHaveAttribute('name', 'email')
+    await expect(input).toHaveAttribute('autocomplete', 'email')
     await expect(input).toHaveAttribute('placeholder', 'you@example.com')
     await expect(page.locator('label[for="email"]')).toHaveText(
       'Enter your email address',

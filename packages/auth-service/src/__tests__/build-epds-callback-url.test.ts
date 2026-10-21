@@ -58,6 +58,7 @@ describe('buildEpdsCallbackUrl', () => {
       flowClientId: CLIENT_ID,
       email: EMAIL,
       isNewAccount: false,
+      emailVerified: true,
       pdsPublicUrl: PDS_PUBLIC_URL,
       epdsCallbackSecret: SECRET,
     })
@@ -72,6 +73,7 @@ describe('buildEpdsCallbackUrl', () => {
       flowClientId: CLIENT_ID,
       email: EMAIL,
       isNewAccount: false,
+      emailVerified: true,
       pdsPublicUrl: PDS_PUBLIC_URL,
       epdsCallbackSecret: SECRET,
     })
@@ -89,6 +91,7 @@ describe('buildEpdsCallbackUrl', () => {
       email: EMAIL,
       approved: '1',
       new_account: '0',
+      email_verified: '1',
       client_id: CLIENT_ID,
     }
     expect(verifyCallback(params, ts, sig, SECRET)).toBe(true)
@@ -100,6 +103,7 @@ describe('buildEpdsCallbackUrl', () => {
       flowClientId: CLIENT_ID,
       email: EMAIL,
       isNewAccount: true,
+      emailVerified: true,
       pdsPublicUrl: PDS_PUBLIC_URL,
       epdsCallbackSecret: SECRET,
     })
@@ -110,6 +114,7 @@ describe('buildEpdsCallbackUrl', () => {
       email: EMAIL,
       approved: '1',
       new_account: '1',
+      email_verified: '1',
       client_id: CLIENT_ID,
     }
     expect(
@@ -128,6 +133,7 @@ describe('buildEpdsCallbackUrl', () => {
       flowClientId: null,
       email: EMAIL,
       isNewAccount: false,
+      emailVerified: true,
       pdsPublicUrl: PDS_PUBLIC_URL,
       epdsCallbackSecret: SECRET,
     })
@@ -140,6 +146,7 @@ describe('buildEpdsCallbackUrl', () => {
       email: EMAIL,
       approved: '1',
       new_account: '0',
+      email_verified: '1',
     }
     expect(
       verifyCallback(
@@ -160,6 +167,7 @@ describe('buildEpdsCallbackUrl', () => {
       flowClientId: CLIENT_ID,
       email: EMAIL,
       isNewAccount: true,
+      emailVerified: true,
       pdsPublicUrl: PDS_PUBLIC_URL,
       epdsCallbackSecret: SECRET,
     })
@@ -172,6 +180,7 @@ describe('buildEpdsCallbackUrl', () => {
       email: EMAIL,
       approved: '1',
       new_account: '1',
+      email_verified: '1',
       client_id: CLIENT_ID,
     }
     expect(
@@ -190,6 +199,7 @@ describe('buildEpdsCallbackUrl', () => {
       flowClientId: CLIENT_ID,
       email: EMAIL,
       isNewAccount: false,
+      emailVerified: true,
       pdsPublicUrl: PDS_PUBLIC_URL,
       epdsCallbackSecret: SECRET,
     })
@@ -199,6 +209,7 @@ describe('buildEpdsCallbackUrl', () => {
       email: EMAIL,
       approved: '1',
       new_account: '0',
+      email_verified: '1',
       client_id: 'https://attacker.example/client-metadata.json',
     }
     expect(
@@ -209,5 +220,42 @@ describe('buildEpdsCallbackUrl', () => {
         SECRET,
       ),
     ).toBe(false)
+  })
+  it('forwards emailVerified into the signed callback, both ways', () => {
+    // The whole point of the field: pds-core records email
+    // confirmation from this and nothing else, so a flow that did not
+    // prove control of the address must say so.
+    for (const [emailVerified, expected] of [
+      [true, '1'],
+      [false, '0'],
+    ] as const) {
+      const url = buildEpdsCallbackUrl({
+        flowRequestUri: REQUEST_URI,
+        flowClientId: null,
+        email: EMAIL,
+        isNewAccount: true,
+        emailVerified,
+        pdsPublicUrl: PDS_PUBLIC_URL,
+        epdsCallbackSecret: SECRET,
+      })
+      const q = paramsFromUrl(url)
+      expect(requiredParam(q, 'email_verified')).toBe(expected)
+      // And it must verify as signed — i.e. the value on the wire is
+      // the value inside the HMAC, not a decoration alongside it.
+      expect(
+        verifyCallback(
+          {
+            request_uri: REQUEST_URI,
+            email: EMAIL,
+            approved: '1',
+            new_account: '1',
+            email_verified: expected,
+          },
+          requiredParam(q, 'ts'),
+          requiredParam(q, 'sig'),
+          SECRET,
+        ),
+      ).toBe(true)
+    }
   })
 })

@@ -362,7 +362,7 @@ setup_toplevel_env() {
     cp .env.example .env
 
     generate_secrets_in_file .env \
-      PDS_JWT_SECRET PDS_DPOP_SECRET AUTH_SESSION_SECRET AUTH_CSRF_SECRET \
+      PDS_JWT_SECRET PDS_DPOP_SECRET AUTH_SESSION_SECRET \
       PDS_ADMIN_PASSWORD EPDS_CALLBACK_SECRET EPDS_INTERNAL_SECRET
   fi
 
@@ -410,7 +410,7 @@ setup_package_envs() {
 
   echo ""
   setup_package_env packages/pds-core PDS_JWT_SECRET PDS_DPOP_SECRET
-  setup_package_env packages/auth-service AUTH_SESSION_SECRET AUTH_CSRF_SECRET
+  setup_package_env packages/auth-service AUTH_SESSION_SECRET
 
   # Demo needs special handling: SESSION_SECRET line is commented out by default
   if [ ! -f packages/demo/.env ]; then

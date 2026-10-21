@@ -11,7 +11,7 @@ pds-core callback, full OAuth flow).
 
 | Package / Area                | Coverage | Notes                                                                  |
 | ----------------------------- | -------- | ---------------------------------------------------------------------- |
-| `shared/`                     | ~96%     | Near-complete; only `index.ts` re-exports and one logger branch remain |
+| `shared/`                     | ~91%     | Version fallback tests added; metadata, handle, and prompt gaps remain |
 | `auth-service/lib/`           | ~77%     | `auto-provision.ts` at 0% (needs live PDS)                             |
 | `auth-service/middleware/`    | ~91%     | `rate-limit.ts` timer cleanup at 82%                                   |
 | `auth-service/email/`         | ~71%     | Template conditional branches partially covered                        |

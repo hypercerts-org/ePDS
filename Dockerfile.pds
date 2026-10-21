@@ -4,7 +4,7 @@
 # so each service has its own Dockerfile.
 
 # -- Base --
-FROM node:20-alpine AS base
+FROM node:22-alpine AS base
 RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 RUN addgroup -g 1001 appuser && adduser -u 1001 -G appuser -D appuser
 WORKDIR /app
@@ -24,7 +24,7 @@ COPY tsconfig.json ./
 RUN pnpm --filter @certified-app/pds-core... build
 
 # -- PDS Core --
-FROM node:20-alpine
+FROM node:22-alpine
 RUN addgroup -g 1001 appuser && adduser -u 1001 -G appuser -D appuser
 RUN apk add --no-cache wget su-exec
 WORKDIR /app

@@ -28,6 +28,7 @@
 import { Router, type Request, type Response } from 'express'
 import { randomBytes } from 'node:crypto'
 import type { AuthServiceContext } from '../context.js'
+import { resolvePreviewOtpCharset } from '../otp-input.js'
 import {
   resolveClientMetadata,
   getClientCss,
@@ -233,6 +234,10 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
   router.get('/preview/login-otp', async (req: Request, res: Response) => {
     const { clientId, metadata, css, faviconUrl, faviconUrlDark } =
       await getBranding(req)
+    const otpCharset = resolvePreviewOtpCharset(
+      queryString(req, 'otp_charset'),
+      ctx.config.otpCharset,
+    )
     sendHtml(
       res,
       renderLoginPage({
@@ -253,7 +258,7 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
         privacyPolicyUrl: ctx.config.privacyPolicyUrl,
         legalEntityName: ctx.config.legalEntityName,
         otpLength: ctx.config.otpLength,
-        otpCharset: ctx.config.otpCharset,
+        otpCharset,
         // No real OAuth flow behind a preview, so no PAR to keep alive.
         heartbeatEnabled: false,
       }),
@@ -307,6 +312,10 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
 
   router.get('/preview/recovery-otp', async (req: Request, res: Response) => {
     const { css, faviconUrl, faviconUrlDark } = await getBranding(req)
+    const otpCharset = resolvePreviewOtpCharset(
+      queryString(req, 'otp_charset'),
+      ctx.config.otpCharset,
+    )
     sendHtml(
       res,
       renderRecoveryOtpForm({
@@ -314,7 +323,7 @@ export function createPreviewRouter(ctx: AuthServiceContext): Router {
         csrfToken: fakeCsrfToken(),
         requestUri: FAKE_REQUEST_URI,
         otpLength: ctx.config.otpLength,
-        otpCharset: ctx.config.otpCharset,
+        otpCharset,
         error: queryString(req, 'error'),
         customCss: css,
         customFaviconUrl: faviconUrl,

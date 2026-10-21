@@ -1,11 +1,11 @@
 {
   "name": "ePDS",
-  "version": "0.7.0",
+  "version": "0.9.0",
   "private": true,
   "description": "ePDS — extended Personal Data Server for AT Protocol with passwordless OTP authentication",
   "license": "MIT",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.19.0"
   },
   "packageManager": "pnpm@9.15.9",
   "//workspaces": "This field is only read by @manypkg/get-packages (used by Changesets) to put us into single-package mode. pnpm ignores it because pnpm-workspace.yaml takes precedence for actual workspace resolution. Do not remove without reading docs/PUBLISHING.md.",

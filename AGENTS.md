@@ -185,6 +185,30 @@ thresholds: {
 **Never lower thresholds.** If a change removes tested code (e.g. deleting
 a feature), add tests for other code to compensate.
 
+### Coveralls Thresholds (Not Version-Controlled)
+
+Coverage is gated twice: by `vitest.config.ts` above, and by Coveralls.
+The two measure different things, so a PR can pass one and fail the other.
+
+Coveralls' thresholds **cannot** be set from a file in this repo. They live
+only on the Coveralls repo Settings page, under "Status Updates":
+
+| Setting                                 | Value | Rationale                                                    |
+| --------------------------------------- | ----- | ------------------------------------------------------------ |
+| Coverage threshold for failure          | 55%   | Backstop below the vitest floors, so vitest trips first      |
+| Coverage decrease threshold for failure | 0.5%  | Catches drift; tolerates rounding noise and honest refactors |
+
+The decrease threshold is the one thing vitest cannot express: vitest checks
+absolute floors only, so nothing else catches a series of small drops.
+
+Do **not** add a `.coveralls.yml` with keys such as
+`coverage_threshold_for_failure` or `coverage_decreased_threshold`. They are
+silently ignored — the docs list no such keys, `coveralls-ruby` parses only
+`repo_token` / `repo_secret_token` / `service_name`, and the
+`coverallsapp/github-action@v2` used in `.github/workflows/ci.yml` neither
+reads the file nor exposes a threshold input. Such a file looks like
+version-controlled policy while configuring nothing.
+
 ## Docker
 
 ```bash
@@ -359,6 +383,14 @@ import { AuthServiceContext } from './context.js'
   schema and crashes. Leave unused tables/columns in place; they're harmless.
 - Do **not** directly read or modify `@atproto/pds` database tables — use
   `pds.ctx.accountManager.*` methods.
+  - **One documented exception:** enumerating every account in
+    `packages/pds-core/src/backfill-email-confirmed.ts`, because
+    `AccountManager` has no "list all accounts" call. Confined to that
+    operator-invoked script; the request path must never do it. See item 19
+    of [`docs/design/pds-white-boxing.md`](docs/design/pds-white-boxing.md)
+    for the rationale and the breakage scenario — that document is the
+    catalogue of upstream-internal dependencies, and is the list to check
+    on every `@atproto/pds` bump.
 
 ## Security
 

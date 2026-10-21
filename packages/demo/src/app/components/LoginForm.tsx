@@ -40,6 +40,7 @@ export function LoginForm() {
     <>
       {errorMessage && (
         <div
+          role="alert"
           style={{
             background: 'var(--theme-error-bg, #fef2f2)',
             color: 'var(--theme-error-text, #dc2626)',

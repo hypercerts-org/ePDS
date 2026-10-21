@@ -250,7 +250,7 @@ Feature: Passwordless authentication via email OTP
   # better-auth verification row only. We deliberately leave the
   # auth_flow row + cookie alive to mirror reality at the 10-minute mark.
   # After the OTP has been aged past expiry, submitting it must fail with
-  # the helpful "OTP expired" message; resending must produce a fresh
+  # the "That code has expired." message; resending must produce a fresh
   # code that completes the flow normally.
   #
   @email @otp-expiry
@@ -263,10 +263,12 @@ Feature: Passwordless authentication via email OTP
     And the login page shows an OTP verification form
     When more than 10 minutes pass before the user enters the OTP
     And the user enters the OTP code
-    Then the verification form shows an "OTP expired" error
+    Then the verification form shows the "That code has expired." error
     And the OTP entry boxes are visible and enabled
-    When the user requests a new OTP via the resend button
+    When the user enters two digits from the old OTP
+    And the user requests a new OTP via the resend button
     Then a fresh OTP email arrives in the mail trap for the test email
+    And the OTP entry boxes are empty with the first box focused
     When the user enters the OTP code
     And the user picks a handle
     Then the browser is redirected back to the demo client
@@ -362,7 +364,7 @@ Feature: Passwordless authentication via email OTP
     And the login page shows an OTP verification form
     When the PAR request_uri has expired before the bridge fires
     And the OTP form re-checks PAR liveness
-    Then the Resend code button is no longer offered
+    Then the Send a new code button is no longer offered
     And a Start over button is offered instead
 
   # The demo OAuth client stores its OAuth state (state value, code
@@ -384,6 +386,23 @@ Feature: Passwordless authentication via email OTP
   # programmatically clearing the demo's `oauth_state` cookie just
   # before the OTP submission, which is equivalent to the cookie
   # having lapsed by wall-clock.
+  # The "Use different email" button on the OTP step takes the user
+  # back to the email-entry form so they can sign in with a different
+  # address. The form must be EMPTY when they get there — leaving the
+  # prior email pre-filled is exactly the misleading "looks like the
+  # form remembered me" UX that the button was meant to escape from,
+  # and forces the user to manually clear the field before they can
+  # type their actual email.
+  @email
+  Scenario: "Use different email" returns the user to a clean email form
+    When the demo client initiates an OAuth login
+    Then the browser is redirected to the auth service login page
+    And the login page displays an email input form
+    When the user enters a unique test email and submits
+    Then the login page shows an OTP verification form
+    When the user clicks "Use different email"
+    Then the email input is empty and focused
+
   @email @demo-cookie-expiry @bug-report
   Scenario: Demo client's OAuth cookie has expired by the time of callback — useful error, not generic auth_failed
     When the demo client starts a new OAuth flow with random handle mode

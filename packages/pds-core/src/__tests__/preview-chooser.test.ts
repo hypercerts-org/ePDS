@@ -52,19 +52,28 @@ describe('createPreviewChooserHandler', () => {
       await handler({ query: {} }, res)
       expect(res.headers['Content-Type']).toBe('text/html; charset=utf-8')
       expect(res.body).toContain('preview.example/client-metadata.json')
-      // Drives chooser view (not consent): selected=false on every session.
-      expect(res.body).toContain(String.raw`\"selected\":false`)
-      // Default fixture is one account:
+      // Provider UI 0.10.3 chooser sessions contain only the current
+      // Account fields plus loginRequired.
       expect(res.body).toContain(
-        String.raw`\"preferred_username\":\"alice.preview.example\"`,
+        String.raw`\"did\":\"did:web:preview-0.example\"`,
       )
-      expect(res.body).not.toContain(
-        String.raw`\"preferred_username\":\"bob.preview.example\"`,
+      expect(res.body).toContain(
+        String.raw`\"pds\":\"did:web:preview-0.example\"`,
       )
-      // Email is always present on the fixture (chooser's value-add):
+      expect(res.body).toContain(String.raw`\"deactivated\":false`)
+      expect(res.body).toContain(
+        String.raw`\"handle\":\"alice.preview.example\"`,
+      )
+      expect(res.body).toContain(String.raw`\"name\":\"Alice Preview\"`)
       expect(res.body).toContain(
         String.raw`\"email\":\"alice@preview.example\"`,
       )
+      expect(res.body).toContain(String.raw`\"loginRequired\":false`)
+      expect(res.body).not.toContain(String.raw`\"sub\":`)
+      expect(res.body).not.toContain(String.raw`\"aud\":`)
+      expect(res.body).not.toContain(String.raw`\"preferred_username\":`)
+      expect(res.body).not.toContain(String.raw`\"selected\":`)
+      expect(res.body).not.toContain(String.raw`\"consentRequired\":`)
     })
 
     it('respects ?numAccounts to grow / shrink the fixture', async () => {
@@ -72,16 +81,14 @@ describe('createPreviewChooserHandler', () => {
       const res = mockRes()
       await handler({ query: { numAccounts: '3' } }, res)
       expect(res.body).toContain(
-        String.raw`\"preferred_username\":\"alice.preview.example\"`,
+        String.raw`\"handle\":\"alice.preview.example\"`,
       )
+      expect(res.body).toContain(String.raw`\"handle\":\"bob.preview.example\"`)
       expect(res.body).toContain(
-        String.raw`\"preferred_username\":\"bob.preview.example\"`,
-      )
-      expect(res.body).toContain(
-        String.raw`\"preferred_username\":\"carol.preview.example\"`,
+        String.raw`\"handle\":\"carol.preview.example\"`,
       )
       expect(res.body).not.toContain(
-        String.raw`\"preferred_username\":\"dave.preview.example\"`,
+        String.raw`\"handle\":\"dave.preview.example\"`,
       )
     })
 
@@ -90,7 +97,7 @@ describe('createPreviewChooserHandler', () => {
       const overflow = mockRes()
       await handler({ query: { numAccounts: '99' } }, overflow)
       expect(overflow.body).toContain(
-        String.raw`\"preferred_username\":\"jack.preview.example\"`,
+        String.raw`\"handle\":\"jack.preview.example\"`,
       )
 
       // Zero/negative clamp up to 1 — never to an empty session list, which
@@ -99,10 +106,10 @@ describe('createPreviewChooserHandler', () => {
         const res = mockRes()
         await handler({ query: { numAccounts: value } }, res)
         expect(res.body).toContain(
-          String.raw`\"preferred_username\":\"alice.preview.example\"`,
+          String.raw`\"handle\":\"alice.preview.example\"`,
         )
         expect(res.body).not.toContain(
-          String.raw`\"preferred_username\":\"bob.preview.example\"`,
+          String.raw`\"handle\":\"bob.preview.example\"`,
         )
       }
     })
