@@ -169,8 +169,10 @@ card when both `PDS_TERMS_OF_SERVICE_URL` and `PDS_PRIVACY_POLICY_URL`
 
 ### Social providers (optional)
 
-Both ID and SECRET must be set to enable a provider. When set, social login
-buttons appear on the login page.
+Both ID and SECRET must be set to enable a provider. A provider's button
+appears on the login page only for OAuth clients that also list it in their
+client metadata (`"epds_social_providers": ["google"]`), so enabling a
+provider does not change the login page of clients that did not ask for it.
 
 | Variable               | Description                                                                                  |
 | ---------------------- | -------------------------------------------------------------------------------------------- |
@@ -178,6 +180,51 @@ buttons appear on the login page.
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret                                                                   |
 | `GITHUB_CLIENT_ID`     | GitHub OAuth client ID — [GitHub Developer Settings](https://github.com/settings/developers) |
 | `GITHUB_CLIENT_SECRET` | GitHub OAuth client secret                                                                   |
+
+#### Redirect URIs
+
+better-auth handles the provider callback under `/api/auth` on the auth
+service, so register exactly these URIs with the provider (one per auth
+hostname, e.g. one for each environment):
+
+| Provider | Redirect / callback URI                            |
+| -------- | -------------------------------------------------- |
+| Google   | `https://<AUTH_HOSTNAME>/api/auth/callback/google` |
+
+#### Google setup
+
+1. In the Google Cloud Console, create an OAuth client of type **Web
+   application** and add the Google redirect URI above as an authorised
+   redirect URI.
+2. On the OAuth consent screen (in the current console: Google Auth
+   Platform → Branding, Audience and Data Access), request only the
+   `openid`, `email` and `profile` scopes; ePDS asks for nothing else.
+3. Set the publishing status to **In production**. While it is
+   **Testing**, only the test users listed on the consent screen (at
+   most 100) can sign in.
+4. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on the auth service
+   and restart it.
+
+#### Which social sign-ins are trusted
+
+The email address is the only link between a social sign-in and a PDS
+account, so ePDS accepts a social sign-in only when the provider proves
+control of the address:
+
+- **Google:** the ID token's `email_verified` must be `true` (a boolean,
+  or the exact string `"true"`), and Google must be authoritative for the
+  address: a `@gmail.com` / `@googlemail.com` address, or an address in a
+  Google Workspace organisation's hosted domain (the token's `hd` claim
+  equals the address's domain, ignoring case). An address in a Workspace
+  secondary domain, or any `hd` that differs from the address's domain,
+  does not count. For any other address Google only checked it once, when
+  the Google account was created, so ePDS treats it as unverified
+  ([Google's guidance](https://developers.google.com/identity/gsi/web/guides/verify-google-id-token)).
+
+An unverified address never creates a user, a PDS account, or a session
+ePDS honours: the user is returned to the login page with a message asking
+them to sign in with an email code instead. A cancel at the provider also
+returns to the login page.
 
 ### Email
 

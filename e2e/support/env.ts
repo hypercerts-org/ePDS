@@ -35,6 +35,9 @@ export const testEnv = {
     | 'numeric'
     | 'alphanumeric',
   headless: process.env.E2E_HEADLESS === 'true',
+  // The auth service answers Google sign-ins with a fake Google
+  // (EPDS_TEST_FAKE_GOOGLE=1); required by scenarios tagged @fake-google.
+  fakeGoogle: process.env.E2E_FAKE_GOOGLE === '1',
   // Must match the deployment's EPDS_INTERNAL_SECRET. Required only by
   // scenarios tagged @otp-expiry that call /_internal/test/* hooks;
   // steps return 'pending' if unset.

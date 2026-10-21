@@ -16,7 +16,7 @@ pds-core callback, full OAuth flow).
 | `auth-service/middleware/`    | ~91%     | `rate-limit.ts` timer cleanup at 82%                                   |
 | `auth-service/email/`         | ~71%     | Template conditional branches partially covered                        |
 | `auth-service/routes/`        | ~35%     | Resend webhook is HTTP-tested; browser/OAuth routes remain gaps        |
-| `auth-service/better-auth.ts` | 0%       | better-auth wiring — see below                                         |
+| `auth-service/better-auth.ts` | ~73%     | better-auth wiring — see below                                         |
 | `auth-service/context.ts`     | 0%       | Minimal glue class                                                     |
 | `auth-service/index.ts`       | 0%       | Express app assembly + `main()`                                        |
 | `demo/lib/auth.ts`            | ~51%     | Network-dependent resolution functions                                 |
@@ -100,7 +100,7 @@ this area's main gap: `login-page.ts`, `consent.ts`, `recovery.ts`, `account-log
 - Alternatively, cover them via e2e tests (Playwright or similar) that
   exercise the full stack.
 
-### 3. `auth-service/src/better-auth.ts` (0% — 213 lines)
+### 3. `auth-service/src/better-auth.ts` (~73%)
 
 **Why it's hard:**
 
@@ -116,16 +116,25 @@ this area's main gap: `login-page.ts`, `consent.ts`, `recovery.ts`, `account-log
 
 **What can be tested:**
 
-- `buildSocialProviders()` is already tested (indirectly) in
-  `social-providers.test.ts` by reimplementing the logic.
-- The social provider detection could be tested directly if
-  `buildSocialProviders` were exported.
+- `buildSocialProviders()` is exported and tested directly in
+  `social-providers.test.ts`.
+- `better-auth-social-sign-in.test.ts` runs the Google provider config
+  through a real better-auth instance on in-memory SQLite, using
+  better-auth's ID-token sign-in (no round trip to Google) with the
+  provider's signature check stubbed.
+- `create-better-auth.test.ts` runs `createBetterAuth()` itself, as
+  `index.ts` does, on in-memory SQLite (`DB_LOCATION=':memory:'`), with
+  Google's token endpoint stubbed, `getDidByEmail` mocked and email codes
+  captured from a stub `EmailSender`. It drives both the Google redirect
+  flow and a real email-code sign-in, so dropping the user-creation guard
+  or the Google claim mapper from the production instance fails it.
 
 **Recommended strategy:**
 
-- Consider exporting `buildSocialProviders` for direct unit testing.
-- The OTP email wiring is best verified by integration or e2e tests
-  that trigger a real OTP flow.
+- The OTP email branding (the `epds_auth_flow` cookie → auth_flow →
+  `clientId` lookup inside `sendVerificationOTP`) is still best verified
+  by integration or e2e tests that trigger a real OTP flow from the login
+  page; `create-better-auth.test.ts` only covers the no-cookie path.
 - `extractOtp` in `e2e/support/mailpit.ts` uses heuristic regex patterns
   rather than `OTP_LENGTH` / `OTP_CHARSET` env vars. This is slightly flaky
   by nature — the robust alternative would be keeping those env vars in sync

@@ -17,10 +17,13 @@ import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { generateRandomString } from 'better-auth/crypto'
 import { getMigrations } from 'better-auth/db'
 import { emailOTP } from 'better-auth/plugins'
+import type { GithubOptions, GoogleOptions } from 'better-auth/social-providers'
 import Database from 'better-sqlite3'
 import type { EmailSender } from './email/sender.js'
 import { getDidByEmail } from './lib/get-did-by-email.js'
+import { mapGoogleProfileToUser } from './lib/google-email-verified.js'
 import { ensurePdsUrl } from './lib/pds-url.js'
+import { hasVerifiedEmail } from './lib/verified-email.js'
 
 export type BetterAuthInstance = ReturnType<typeof createBetterAuth>
 
@@ -138,25 +141,37 @@ export function isOtpVerifyPath(path: string): boolean {
 
 const AUTH_FLOW_COOKIE = 'epds_auth_flow'
 
+/** The social providers passed to better-auth, keyed by provider id. */
+export interface SocialProvidersConfig {
+  google?: GoogleOptions
+  github?: GithubOptions
+}
+
 /**
  * Build the social providers config from env vars.
  * Only includes providers where both client ID and secret are set.
+ *
+ * Google's `email_verified` claim is not used as-is: `mapProfileToUser`
+ * replaces it with a strict check that also requires Google to be
+ * authoritative for the address (see lib/google-email-verified.ts).
  */
-function buildSocialProviders(): Record<
-  string,
-  { clientId: string; clientSecret: string }
-> {
-  const providers: Record<string, { clientId: string; clientSecret: string }> =
-    {}
+export function buildSocialProviders(
+  env: NodeJS.ProcessEnv = process.env,
+): SocialProvidersConfig {
+  const providers: SocialProvidersConfig = {}
 
-  const googleId = process.env.GOOGLE_CLIENT_ID
-  const googleSecret = process.env.GOOGLE_CLIENT_SECRET
+  const googleId = env.GOOGLE_CLIENT_ID
+  const googleSecret = env.GOOGLE_CLIENT_SECRET
   if (googleId && googleSecret) {
-    providers.google = { clientId: googleId, clientSecret: googleSecret }
+    providers.google = {
+      clientId: googleId,
+      clientSecret: googleSecret,
+      mapProfileToUser: mapGoogleProfileToUser,
+    }
   }
 
-  const githubId = process.env.GITHUB_CLIENT_ID
-  const githubSecret = process.env.GITHUB_CLIENT_SECRET
+  const githubId = env.GITHUB_CLIENT_ID
+  const githubSecret = env.GITHUB_CLIENT_SECRET
   if (githubId && githubSecret) {
     providers.github = { clientId: githubId, clientSecret: githubSecret }
   }
@@ -165,10 +180,42 @@ function buildSocialProviders(): Record<
 }
 
 /** Social providers that were configured — exported for use by the login page. */
-export let socialProviders: Record<
-  string,
-  { clientId: string; clientSecret: string }
-> = {}
+export let socialProviders: SocialProvidersConfig = {}
+
+/**
+ * The message better-auth reports when {@link refuseUnverifiedUser} refuses
+ * a user. Its OAuth callback turns it into `?error=email_not_verified` on
+ * the errorCallbackURL; its ID-token sign-in returns it as a 401.
+ */
+export const EMAIL_NOT_VERIFIED = 'email not verified'
+
+/**
+ * better-auth `databaseHooks.user.create.before`: never create a user whose
+ * email address is not verified.
+ *
+ * Email OTP always creates verified users (the code proves the address), so
+ * in practice this refuses social sign-ins whose provider does not vouch
+ * for the email. Such a sign-in must not leave a user behind: an email-OTP
+ * sign-in for that address later marks the existing user verified
+ * (better-auth 1.4.18 email-otp), while the social identity stays linked to
+ * it, so whoever controls the social account would from then on sign in as
+ * the person who proved the address by email.
+ */
+export function refuseUnverifiedUser(user: {
+  emailVerified?: unknown
+}): Promise<void> {
+  if (hasVerifiedEmail(user)) return Promise.resolve()
+  return Promise.reject(
+    new APIError('FORBIDDEN', { message: EMAIL_NOT_VERIFIED }),
+  )
+}
+
+/** The `databaseHooks` ePDS passes to better-auth. */
+export const databaseHooks = {
+  user: {
+    create: { before: refuseUnverifiedUser },
+  },
+}
 
 /**
  * Create a better-auth instance wired to the given EmailSender and EpdsDb.
@@ -299,6 +346,8 @@ export function createBetterAuth(
       expiresIn: sessionExpiresIn,
       updateAge: sessionUpdateAge,
     },
+
+    databaseHooks,
 
     socialProviders,
 

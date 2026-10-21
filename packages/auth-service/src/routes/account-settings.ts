@@ -13,12 +13,17 @@ import { getHandleByDid } from '../lib/get-handle-by-did.js'
 import { ensurePdsUrl } from '../lib/pds-url.js'
 import { renderError } from '../lib/render-error.js'
 import { POWERED_BY_CSS, POWERED_BY_HTML } from '../lib/page-helpers.js'
+import { hasVerifiedEmail } from '../lib/verified-email.js'
 
 const logger = createLogger('auth:account-settings')
 
 /**
  * Middleware that validates a better-auth session and injects it into res.locals.
  * If not authenticated, redirects to /account/login.
+ *
+ * The session's email must be verified: account settings act on the PDS
+ * account that owns that address, so a session from a social sign-in whose
+ * provider did not vouch for the email is treated as signed out.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth instance has no exported type
 function requireBetterAuth(auth: any) {
@@ -31,7 +36,7 @@ function requireBetterAuth(auth: any) {
       const session = await auth.api.getSession({
         headers: fromNodeHeaders(req.headers),
       })
-      if (!session?.user?.email) {
+      if (!session?.user?.email || !hasVerifiedEmail(session.user)) {
         res.redirect(303, '/account/login')
         return
       }

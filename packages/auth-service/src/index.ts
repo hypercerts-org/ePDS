@@ -24,6 +24,7 @@ import {
 } from './routes/resend-webhook.js'
 import { createRootRouter } from './routes/root.js'
 import { createTestHooksRouter } from './routes/test-hooks.js'
+import { installTestGoogleTokenEndpoint } from './lib/test-google-token.js'
 import { resolveAuthPort } from './lib/resolve-port.js'
 import { createSecurityHeadersMiddleware } from './lib/security-headers.js'
 import {
@@ -92,6 +93,10 @@ export function createAuthService(config: AuthServiceConfig): {
   // CSRF tokens are not applicable.
   if (process.env.EPDS_TEST_HOOKS === '1') {
     app.use(createTestHooksRouter(config.dbLocation))
+    // Lets the e2e suite fake a Google sign-in (lib/test-google-token.ts).
+    if (process.env.EPDS_TEST_FAKE_GOOGLE === '1') {
+      installTestGoogleTokenEndpoint(process.env.GOOGLE_CLIENT_ID ?? '')
+    }
   }
 
   app.use(csrfProtection())

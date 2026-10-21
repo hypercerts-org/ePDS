@@ -615,40 +615,50 @@ describe('renderLoginPage email form readiness gate', () => {
 })
 
 describe('renderLoginPage OTP verify-form double-submit latch (regression)', () => {
-  it('declares the verifying flag at IIFE scope so input/paste/submit handlers share it', () => {
+  // The verify form shares the page-wide sign-in guard (claimSignIn /
+  // releaseSignIn) with every other sign-in method; the behaviour is
+  // exercised in login-page-sign-in-guard.test.ts. These checks pin the
+  // ordering inside the verify handler.
+  function verifyHandler(html: string): string {
+    const start = html.indexOf(
+      "document.getElementById('form-verify-otp').addEventListener('submit'",
+    )
+    const end = html.indexOf(
+      "document.getElementById('btn-resend').addEventListener",
+      start,
+    )
+    expect(start).toBeGreaterThan(0)
+    expect(end).toBeGreaterThan(start)
+    return html.slice(start, end)
+  }
+
+  it('declares the guard once at IIFE scope so every handler shares it', () => {
     const html = renderDefault()
-    expect(html).toContain('var verifying = false;')
     // Exactly one declaration — a second one would shadow the shared flag.
-    expect(html.match(/var verifying =/g)).toHaveLength(1)
+    expect(html.match(/var signInBusy =/g)).toHaveLength(1)
   })
 
   it('guards the verify-form submit handler before any in-flight state is touched', () => {
-    const html = renderDefault()
-    // Order matters: the guard must short-circuit BEFORE we set
-    // verifying=true and BEFORE the verifyOtp() call. A guard placed
-    // after the fetch would not prevent a second request.
-    const guardIdx = html.indexOf('if (verifying) return;')
-    const setTrueIdx = html.indexOf('verifying = true;')
-    const verifyCallIdx = html.indexOf('await verifyOtp(currentEmail, otp)')
+    const handler = verifyHandler(renderDefault())
+    // Order matters: the guard must short-circuit BEFORE the verifyOtp()
+    // call. A guard placed after the fetch would not prevent a second
+    // request.
+    const guardIdx = handler.indexOf('if (!claimSignIn()) return;')
+    const verifyCallIdx = handler.indexOf('await verifyOtp(currentEmail, otp)')
     expect(guardIdx).toBeGreaterThan(0)
-    expect(setTrueIdx).toBeGreaterThan(guardIdx)
-    expect(verifyCallIdx).toBeGreaterThan(setTrueIdx)
+    expect(verifyCallIdx).toBeGreaterThan(guardIdx)
   })
 
-  it('resets the latch only on the error path, not on success', () => {
-    const html = renderDefault()
-    // The reset is wrapped in `if (!result || result.error) { ... }`. An
-    // unconditional reset would re-open the form during the post-success
+  it('releases the guard only on the error path, not on success', () => {
+    const handler = verifyHandler(renderDefault())
+    // The release is wrapped in `if (!result || result.error) { ... }`. An
+    // unconditional release would re-open the form during the post-success
     // navigation and let a late input/Enter event fire a second verify
     // on the consumed OTP — exactly the bug being prevented.
-    expect(html).toMatch(
-      /if \(!result \|\| result\.error\)\s*\{\s*verifying = false;/,
+    expect(handler).toMatch(
+      /if \(!result \|\| result\.error\)\s*\{\s*releaseSignIn\(\);/,
     )
-    // And there is exactly one place that sets the flag back to false (in
-    // the error branch). A second `verifying = false` somewhere else
-    // would defeat the latch.
-    const resetCount = html.split('verifying = false;').length - 1
-    expect(resetCount).toBe(2) // initial declaration + single reset
+    expect(handler.split('releaseSignIn();').length - 1).toBe(1)
   })
 
   it('clears the OTP boxes on verify error so re-entry does not auto-spam', () => {
@@ -660,9 +670,9 @@ describe('renderLoginPage OTP verify-form double-submit latch (regression)', () 
     // edit — easily tripping the per-IP rate limiter.
     const branchStart = html.indexOf('if (result && result.error) {')
     expect(branchStart).toBeGreaterThan(0)
-    // The next `verifying = false;` (in the `finally` block) bounds the
+    // The next `releaseSignIn();` (in the `finally` block) bounds the
     // error branch — bounded slice, no unbounded regex backtracking.
-    const branchEnd = html.indexOf('verifying = false;', branchStart)
+    const branchEnd = html.indexOf('releaseSignIn();', branchStart)
     expect(branchEnd).toBeGreaterThan(branchStart)
     const branch = html.slice(branchStart, branchEnd)
     // Either the plain showError or the inline-action variant is fine
