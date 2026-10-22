@@ -277,7 +277,7 @@ export async function runRotationCli(
     })
     if (values.help) {
       output(
-        'rotate-plc-key --phase add|remove --plc-url URL (--did DID ... | --did-file PATH) [--apply] [--confirm-cutover] [--old-key-file PATH --new-key-file PATH]. Dry-run by default. Keys: owner-only hex files or PLC_ROTATION_OLD_KEY_HEX / PLC_ROTATION_NEW_KEY_HEX, never CLI hex. Remove --apply requires --confirm-cutover; deployment cutover is manual.',
+        'rotate-plc-key --phase add|remove --plc-url URL (--did DID ... | --did-file PATH) [--apply] [--confirm-cutover] [--old-key-file PATH --new-key-file PATH]. Dry-run by default. Keys: owner-only hex files or PLC_ROTATION_OLD_KEY_HEX / PLC_ROTATION_NEW_KEY_HEX, never CLI hex. PLC only; publish identity separately after verifying results. Remove --apply also requires --confirm-cutover; deployment cutover is manual.',
       )
       return 0
     }

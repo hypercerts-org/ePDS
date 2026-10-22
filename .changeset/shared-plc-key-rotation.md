@@ -2,8 +2,8 @@
 'ePDS': minor
 ---
 
-Adds standalone tooling and a runbook for rotating a shared PLC rotation key across hosted DIDs.
+Adds a standalone PLC key rotation tool and a separate Railway identity notification helper.
 
 **Affects:** Operators
 
-**Operators:** Run `scripts/rotate-plc-key.ts` with Deno 2.8.3, an explicit PLC directory and DID inventory, and protected old/new key files. Follow `docs/plc-key-rotation.md` to preview and add the new key, manually switch the PDS signing configuration, then remove the old key. The script runs independently of ePDS; it does not change deployment secrets or eliminate PLC's historical recovery window.
+**Operators:** Use Deno 2.8.3 with `scripts/rotate-plc-key.ts` to preview/add/remove keys for an explicit verified DID inventory, and independently run `scripts/publish-identity-railway.ts --project ID --environment ID --service ID --did-file PATH --apply` to queue identity notifications on the hosting PDS. Follow `docs/plc-key-rotation.md`: during deployment outages add only while retaining the old signing configuration; once deployments recover, freeze writers, reconcile accounts created during the outage, manually switch and verify all PDS replicas, then remove the old key and notify again. The Railway helper requires compatible remote runtime/storage/user access; notification failure exits nonzero and can be retried without PLC writes. Neither tool changes deployment secrets, redeploys services, or eliminates PLC's historical recovery window.

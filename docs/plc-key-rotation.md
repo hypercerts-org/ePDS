@@ -1,29 +1,22 @@
 # Rotate a shared PLC key
 
-Rotate the shared secp256k1 rotation key for an explicit inventory of PLC DIDs on any PDS; deployment cutover is manual.
+Two independent scripts: `rotate-plc-key.ts` changes only the PLC directory; `publish-identity-railway.ts` queues `#identity` on the hosting PDS through Railway SSH. Deployment cutover is always manual.
 
-## Before starting — STOP if any check fails
+## Prepare
 
-- Use a trusted operator machine; after compromise, use a clean machine and involve recovery owners.
-- Obtain the exact DID inventory and trusted HTTPS PLC directory URL. Freeze signup and other PLC writers; run one rotation job only.
-- Have both exportable private keys as 64-character hex in separate owner-only (`0600`), operator-owned regular files, not symlinks. Generate the new key with established secret tooling. Never put hex in arguments, logs or shell history.
-- Check recovery owners and key priority. Adding needs a free slot (maximum five keys); this script never evicts recovery keys.
-- This handles `did:plc`, not `did:web` or non-exportable/HSM keys. It needs no PDS database, repository, build or package manifest.
-
-## Set up once
-
-Use Deno **2.8.3** on Linux/macOS. Copy `rotate-plc-key.ts` and this runbook anywhere outside the repository. From that directory:
+- Use a clean trusted operator machine, an explicitly verified hosted DID inventory (whitespace-separated), and the trusted HTTPS PLC URL. Split inventory by hosting PDS. Do not test against public PLC.
+- Obtain both exportable secp256k1 keys as 64-character hex in separate operator-owned `0600` regular files, not symlinks. Generate the new key with established secret tooling. Never put private keys in arguments, logs or history. Keep input directories protected.
+- Review recovery owners, key priority and capacity (maximum five keys). Addition inserts the new key immediately after the old key without evicting recovery keys; an existing new key is not moved. This is not a recovery/fork tool and does not support `did:web` or HSM keys.
+- Use Deno **2.8.3** on Linux/macOS. Copy both scripts and this runbook outside the repository. Cache/review dependencies before the incident:
 
 ```bash
-deno --version
 deno cache --no-config --no-lock --node-modules-dir=none rotate-plc-key.ts
-deno run --no-prompt --allow-sys=hostname,uid \
-  --allow-env=LOG_SYSTEMS,LOG_ENABLED,LOG_LEVEL,LOG_DESTINATION --no-config --no-lock --node-modules-dir=none rotate-plc-key.ts --help
+deno run --no-prompt --no-config --no-lock publish-identity-railway.ts --help
 ```
 
-The script pins `npm:@did-plc/lib@0.0.4` and `npm:@atproto/crypto@0.4.5`; review/cache dependencies before the incident. The PLC library’s logger needs hostname and the four `LOG_*` environment permissions shown below. Deno does not run npm lifecycle scripts without explicit approval: do not enable scripts or use `--allow-all`. Transitive versions are resolved during caching; keep the reviewed cache for the operation.
+PLC dependencies are pinned to `npm:@did-plc/lib@0.0.4` and `npm:@atproto/crypto@0.4.5`; transitive versions resolve at caching, so retain the reviewed cache. Do not enable npm lifecycle scripts or `--allow-all`.
 
-Set these values yourself (absolute paths; inventory is whitespace-separated DIDs):
+Set canonical absolute input paths and your trusted directory URL:
 
 ```bash
 PLC_URL='https://YOUR-TRUSTED-PLC-HOST'
@@ -31,48 +24,72 @@ DIDS='/secure/rotation-dids.txt'
 OLD='/secure/rotation-old.hex'
 NEW='/secure/rotation-new.hex'
 rotate() {
-  deno run --no-prompt --allow-sys=hostname,uid --cached-only --no-config --no-lock --node-modules-dir=none \
-    --allow-net="${PLC_URL#https://}" --allow-read="$DIDS,$OLD,$NEW" \
+  deno run --no-prompt --cached-only --no-config --no-lock --node-modules-dir=none \
+    --allow-sys=hostname,uid --allow-net="${PLC_URL#https://}" \
+    --allow-read="$DIDS,$OLD,$NEW" \
     --allow-env=LOG_SYSTEMS,LOG_ENABLED,LOG_LEVEL,LOG_DESTINATION,PLC_ROTATION_OLD_KEY_HEX,PLC_ROTATION_NEW_KEY_HEX \
     ./rotate-plc-key.ts --plc-url "$PLC_URL" --did-file "$DIDS" \
     --old-key-file "$OLD" --new-key-file "$NEW" "$@"
 }
 ```
 
-Grant only the selected files, never a whole directory or `--allow-all`. Each input and its canonical target must have Deno read permission; use canonical absolute paths when a parent directory is a symlink. Key files themselves must not be symlinks. Keep input directories protected from other writers.
+Grant only selected files, including their canonical targets, not a directory. Do not set `PLC_ROTATION_OLD_KEY_HEX` / `PLC_ROTATION_NEW_KEY_HEX` with files; secret-manager injection of those variables is an alternative (omit the corresponding file arguments/read permissions). No `.env` loading occurs. The PLC logger needs the shown hostname and `LOG_*` permissions. `--did DID` repeated can replace `--did-file` in either script.
 
-Do not set `PLC_ROTATION_OLD_KEY_HEX` / `PLC_ROTATION_NEW_KEY_HEX` when using files. Secret-manager injection of those variables is an alternative: omit the corresponding file arguments/read permissions. No `.env` loading occurs. `--did DID` (repeatable) can replace `--did-file`.
+## NOW: add only, including during a deployment outage
 
-## 1. Add overlap, then check every DID
+Run one rotation job at a time; coordinate other PLC writers where possible.
 
 ```bash
 rotate --phase add
 rotate --phase add --apply
 ```
 
-First command must report `planned` or already `unchanged` for every intended DID; it never POSTs. Review before applying. Apply must report `updated` or `unchanged` for every DID. Save JSON reports; both `failed` and `missing-old` exit 1. **Missing-old is not a successful migration:** reconcile the inventory before proceeding.
+Preview must show `planned` or `unchanged` for every intended DID. Save the apply JSON; require `updated` or `unchanged` for each DID and verify directory heads: both keys present, unrelated keys/order, aliases, services and verification methods unchanged. `missing-old` is not a successful migration; it and `failed` exit 1. Requests have 15-second deadlines and up to four attempts per DID, reconciling raced heads and ambiguous POSTs. Repeating a completed change does not POST again. No identity event is emitted by this script.
 
-Verify directory data: both keys present, unrelated recovery keys/order, verification methods, aliases and services unchanged. The new key is inserted immediately after the old key; an existing new key is not moved.
+**ADD-ONLY STOP: while deployments are unavailable, leave the old signing configuration active. Do not remove the old key, change secrets, or redeploy.** Overlap is not revocation: a compromised old key still has authority. Accounts created meanwhile may contain only the old key; final inventory reconciliation is mandatory. Notify now using the second script if SSH works; if SSH is also down, notification remains pending, not successful.
 
-## 2. Manual deployment gate — do not skip
+## Notify through Railway (independent and repeatable)
 
-Update the PDS secret to the new key (`PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX` on upstream PDS). Restart/redeploy **all replicas** using your PDS's procedure. Verify a normal handle/account PLC update signed by the new key and that a newly created account uses it. Reconcile the final inventory, including any test signup; keep other writers frozen. The script neither performs nor verifies this gate.
+Verify the project/environment/service explicitly and, when needed, choose `--instance ID` (`--deployment-instance` on Railway). Use an installed trusted Railway CLI supporting `ssh -p/-e/-s/-d`. Do not mutate linked state. `railway run` is local execution with injected variables, **not remote execution**, and is not used here.
 
-## 3. Remove the old key
+```bash
+PROJECT='YOUR-PROJECT-ID'
+ENVIRONMENT='YOUR-ENVIRONMENT-ID'
+SERVICE='YOUR-HOSTING-PDS-SERVICE-ID'
+notify() {
+  deno run --no-prompt --no-config --no-lock --allow-read="$DIDS" --allow-run=railway \
+    ./publish-identity-railway.ts --project "$PROJECT" --environment "$ENVIRONMENT" \
+    --service "$SERVICE" --workdir /app/packages/pds-core --did-file "$DIDS" "$@"
+}
+notify
+notify --apply
+```
+
+Default is an offline plan: no Railway process or remote connection. Supply only DIDs whose PLC heads you have verified, not a guessed inventory or failed PLC results. Limit each batch to 1,000 DIDs. The script does not independently read PLC or accept a PLC JSON report.
+
+**Before apply:** verify the package workdir (ePDS currently `/app/packages/pds-core`; override explicitly for other images), exact deployed `@atproto/pds` version exporting public `AppContext`, service user, runtime environment and mounted storage. The SSH process must use the same user/storage/config as the running PDS; do not copy secrets locally. `AppContext.fromEnv()` can initialize/migrate databases: stop if compatibility or permissions are uncertain. This does not start a server or add an admin endpoint. Deno's subprocess permission trusts the Railway executable; it does not sandbox it.
+
+One SSH session handles the batch. Each DID must be a local active account with a handle; unknown, deactivated and taken-down accounts fail. Strict `sequenceIdentity` errors propagate (the upstream helper that swallows errors is not used). Only safe DID/status results are returned; arbitrary remote logs/stderr are suppressed. `queued` means sequencer persistence and successful cleanup, **not relay delivery**. Observe fresh `#identity` on both PDS and relay streams before declaring notification complete.
+
+Each remote setup/DID/cleanup has a 10-second deadline; expiry aborts the batch. The local deadline is 20 seconds plus 11 seconds per DID. Failed/ambiguous transport, timeout, missing reports or cleanup failure exit 1 and conservatively mark the batch failed. Other per-DID errors are isolated and return individual `failed` results with exit 1. Retry independently with a reviewed inventory; at-least-once delivery can duplicate events, but never writes PLC. If SSH cannot reach the correct runtime, stop and retain pending notification; no fallback reports success.
+
+## When deployments recover: freeze, reconcile, cut over
+
+1. Freeze signups **and all other PLC writers**. Obtain the final inventory, including accounts created during the outage. Preview/add the new key to every missing DID with the first script; verify every head, then publish with the second. Stop on any failure.
+2. Manually update `PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX` and redeploy **all replicas**. Verify a normal handle/account PLC update signed by the new key and a newly created account using it. Include that test account in final checks; keep other writers frozen. Neither script performs or verifies this gate.
+3. Only after those checks, remove and notify:
 
 ```bash
 rotate --phase remove
 rotate --phase remove --apply --confirm-cutover
 rotate --phase remove
+notify --apply
 ```
 
-Review the preview before applying. Removal uses the new signer and requires overlap. Verify old key absent, unrelated DID data unchanged, and final preview `unchanged` for every DID. Restore signup/other writers only after all checks pass.
+Require removal success, final preview `unchanged`, old key absent, unrelated DID data unchanged, and fresh identity events on both streams. Unfreeze only after all checks pass.
 
-## Failure / rollback
+## Stop / rollback
 
-- Stop cutover/removal on any failure or unexplained status. Partial success is possible. Inspect directory heads and rerun only reviewed inventory; repeats do not write already-completed changes.
-- Requests time out after 15 seconds; four attempts maximum per DID reconcile stale heads and ambiguous POST results. Permanent failures stop after one attempt; each DID gets one result and the next DID is still processed. Fixed validation codes (such as `confirm-cutover-required` or `file-read-permission-required`) are reported; arbitrary filesystem, parser and HTTP details stay generic. No keys are printed. Capture JSON, not shell tracing.
-- Before removal: restore the old deployment secret if necessary; leave overlap while investigating. After removal: **do not restore an old-key-only deployment**. Engage recovery owners; this is not a recovery/fork tool.
-- **72-hour caveat:** old-key rejection at the current head is not irreversible revocation. A historical key strictly higher priority than the first nullified operation's signer can recover from its parent within PLC's recovery window; equal priority is insufficient. Review audit history with recovery owners and monitor heads through the window.
+Stop cutover/removal on any failure. Partial success is possible: inspect heads and retry only reviewed DIDs. Notification retry never requires another PLC write. Before removal, leave overlap while investigating (restore old deployment secret only if appropriate). After removal, **do not restore an old-key-only deployment**; engage recovery owners.
 
-Validation uses disposable private PLC DIDs only; never test against public directories. Private AiaB validation covers three key-order layouts and protocol cutover, not a real PDS deployment or elapsed 72-hour expiry.
+**72-hour caveat:** old-key rejection at the current head is not irreversible revocation. A historical key strictly higher priority than the first nullified operation's signer can recover from its parent within PLC's recovery window; equal priority is insufficient. Review audit history and monitor heads with recovery owners. Private testing does not establish elapsed 72-hour expiry or public acceptance.
