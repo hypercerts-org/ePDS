@@ -306,7 +306,8 @@ export async function runRotationCli(
                 'utf8',
               )
             )
-              .split(/\s+/)
+              .split(/\r?\n/)
+              .map((did) => did.trim())
               .filter(Boolean)
           : values.did,
       ),
