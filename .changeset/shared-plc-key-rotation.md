@@ -2,7 +2,7 @@
 'ePDS': minor
 ---
 
-Add standalone tooling and a runbook for rotating a shared PLC rotation key across hosted DIDs.
+Adds standalone tooling and a runbook for rotating a shared PLC rotation key across hosted DIDs.
 
 **Affects:** Operators
 

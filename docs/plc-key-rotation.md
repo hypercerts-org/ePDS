@@ -39,6 +39,8 @@ rotate() {
 }
 ```
 
+Grant only the selected files, never a whole directory or `--allow-all`. Each input and its canonical target must have Deno read permission; use canonical absolute paths when a parent directory is a symlink. Key files themselves must not be symlinks. Keep input directories protected from other writers.
+
 Do not set `PLC_ROTATION_OLD_KEY_HEX` / `PLC_ROTATION_NEW_KEY_HEX` when using files. Secret-manager injection of those variables is an alternative: omit the corresponding file arguments/read permissions. No `.env` loading occurs. `--did DID` (repeatable) can replace `--did-file`.
 
 ## 1. Add overlap, then check every DID
@@ -69,7 +71,7 @@ Review the preview before applying. Removal uses the new signer and requires ove
 ## Failure / rollback
 
 - Stop cutover/removal on any failure or unexplained status. Partial success is possible. Inspect directory heads and rerun only reviewed inventory; repeats do not write already-completed changes.
-- Requests time out after 15 seconds; four attempts maximum per DID reconcile stale heads and ambiguous POST results. No raw HTTP errors or keys are printed. Capture JSON, not shell tracing.
+- Requests time out after 15 seconds; four attempts maximum per DID reconcile stale heads and ambiguous POST results. Permanent failures stop after one attempt; each DID gets one result and the next DID is still processed. Fixed validation codes (such as `confirm-cutover-required` or `file-read-permission-required`) are reported; arbitrary filesystem, parser and HTTP details stay generic. No keys are printed. Capture JSON, not shell tracing.
 - Before removal: restore the old deployment secret if necessary; leave overlap while investigating. After removal: **do not restore an old-key-only deployment**. Engage recovery owners; this is not a recovery/fork tool.
 - **72-hour caveat:** old-key rejection at the current head is not irreversible revocation. A historical key strictly higher priority than the first nullified operation's signer can recover from its parent within PLC's recovery window; equal priority is insufficient. Review audit history with recovery owners and monitor heads through the window.
 

@@ -106,87 +106,113 @@ function retryable(error: unknown): boolean {
   )
 }
 
+type Pause = (ms: number) => Promise<unknown>
+
+interface DidRotation {
+  client: RotationClient
+  options: RotationOptions
+  did: string
+  submitted: boolean
+  pause: Pause
+}
+
+function desiredKeys(last: CompatibleOpOrTombstone, options: RotationOptions) {
+  if (last.type === 'plc_tombstone') throw new RotationError('tombstoned')
+  const normalized = normalizeOp(last)
+  const keys = rotationKeys(
+    normalized.rotationKeys,
+    options.oldKey.did(),
+    options.newKey.did(),
+    options.phase,
+  )
+  return { last, normalized, keys }
+}
+
+async function rotateDidAttempt(state: DidRotation): Promise<RotationResult> {
+  const { client, options, did, pause } = state
+  await pause(250)
+  const { last, normalized, keys } = desiredKeys(
+    await client.getLastOp(did),
+    options,
+  )
+  await assureValidOp(normalized)
+  if (keys === 'missing-old') return { did, status: 'missing-old' }
+  if (JSON.stringify(keys) === JSON.stringify(normalized.rotationKeys)) {
+    return { did, status: state.submitted ? 'updated' : 'unchanged' }
+  }
+  const signer = options.phase === 'add' ? options.oldKey : options.newKey
+  if (!normalized.rotationKeys.includes(signer.did())) {
+    throw new RotationError('signer-not-authorized')
+  }
+  const op = await updateRotationKeysOp(last, signer, keys)
+  await assureValidOp(op)
+  if (!options.apply) return { did, status: 'planned' }
+  state.submitted = true
+  await pause(250)
+  await client.sendOperation(did, op)
+  await pause(250)
+  const readback = desiredKeys(await client.getLastOp(did), options)
+  if (
+    readback.keys === 'missing-old' ||
+    JSON.stringify(readback.keys) !==
+      JSON.stringify(readback.normalized.rotationKeys)
+  ) {
+    throw new Error('readback-mismatch')
+  }
+  return { did, status: 'updated' }
+}
+
+async function rotateDid(
+  state: DidRotation,
+  attempt = 0,
+): Promise<RotationResult> {
+  try {
+    return await rotateDidAttempt(state)
+  } catch (error) {
+    if (attempt < 3 && retryable(error)) {
+      await state.pause(500 * 2 ** attempt)
+      return rotateDid(state, attempt + 1)
+    }
+    return {
+      did: state.did,
+      status: 'failed',
+      reason:
+        error instanceof RotationError
+          ? error.message
+          : 'plc-request-or-validation-failed',
+    }
+  }
+}
+
 export async function rotatePlcKeys(
   client: RotationClient,
   options: RotationOptions,
-  pause: (ms: number) => Promise<unknown> = delay,
+  pause: Pause = delay,
 ): Promise<RotationResult[]> {
-  const oldKey = options.oldKey.did()
-  const newKey = options.newKey.did()
-  if (oldKey === newKey) throw new RotationError('identical-keys')
-  const signer = options.phase === 'add' ? options.oldKey : options.newKey
-  const results: RotationResult[] = []
-  for (const did of options.dids) {
-    let submitted = false
-    for (let attempt = 0; attempt < 4; attempt++) {
-      try {
-        await pause(250)
-        const last = await client.getLastOp(did)
-        if (last.type === 'plc_tombstone') throw new RotationError('tombstoned')
-        const normalized = normalizeOp(last)
-        await assureValidOp(normalized)
-        const keys = rotationKeys(
-          normalized.rotationKeys,
-          oldKey,
-          newKey,
-          options.phase,
-        )
-        if (keys === 'missing-old') {
-          results.push({ did, status: 'missing-old' })
-          break
-        }
-        if (JSON.stringify(keys) === JSON.stringify(normalized.rotationKeys)) {
-          results.push({ did, status: submitted ? 'updated' : 'unchanged' })
-          break
-        }
-        if (!normalized.rotationKeys.includes(signer.did())) {
-          throw new RotationError('signer-not-authorized')
-        }
-        const op = await updateRotationKeysOp(last, signer, keys)
-        await assureValidOp(op)
-        if (!options.apply) {
-          results.push({ did, status: 'planned' })
-          break
-        }
-        submitted = true
-        await pause(250)
-        await client.sendOperation(did, op)
-        await pause(250)
-        const readback = await client.getLastOp(did)
-        if (readback.type === 'plc_tombstone')
-          throw new RotationError('tombstoned')
-        const remaining = rotationKeys(
-          normalizeOp(readback).rotationKeys,
-          oldKey,
-          newKey,
-          options.phase,
-        )
-        if (
-          remaining === 'missing-old' ||
-          JSON.stringify(remaining) !==
-            JSON.stringify(normalizeOp(readback).rotationKeys)
-        ) {
-          throw new Error('readback-mismatch')
-        }
-        results.push({ did, status: 'updated' })
-        break
-      } catch (error) {
-        if (attempt < 3 && retryable(error)) {
-          await pause(500 * 2 ** attempt)
-          continue
-        }
-        results.push({
-          did,
-          status: 'failed',
-          reason:
-            error instanceof RotationError
-              ? error.message
-              : 'plc-request-or-validation-failed',
-        })
-      }
-    }
-  }
-  return results
+  if (options.oldKey.did() === options.newKey.did())
+    throw new RotationError('identical-keys')
+  return await options.dids.reduce(async (pending, did) => {
+    const results = await pending
+    results.push(
+      await rotateDid({ client, options, did, submitted: false, pause }),
+    )
+    return results
+  }, Promise.resolve<RotationResult[]>([]))
+}
+
+async function permittedReadPath(file: string): Promise<string> {
+  if (
+    (await Deno.permissions.query({ name: 'read', path: file })).state !==
+    'granted'
+  )
+    throw new RotationError('file-read-permission-required')
+  const canonical = await Deno.realPath(file)
+  if (
+    (await Deno.permissions.query({ name: 'read', path: canonical })).state !==
+    'granted'
+  )
+    throw new RotationError('file-read-permission-required')
+  return canonical
 }
 
 async function loadKey(
@@ -197,9 +223,13 @@ async function loadKey(
     throw new RotationError('choose-one-key-source')
   let hex = env
   if (file) {
+    const canonical = await permittedReadPath(file)
     const before = await lstat(file)
     if (!before.isFile()) throw new RotationError('key-file-must-be-regular')
-    const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW)
+    const handle = await open(
+      canonical,
+      constants.O_RDONLY | constants.O_NOFOLLOW,
+    )
     try {
       const stat = await handle.stat()
       const after = await lstat(file)
@@ -260,7 +290,12 @@ export async function runRotationCli(
     const dids = [
       ...new Set(
         values['did-file']
-          ? (await readFile(values['did-file'], 'utf8'))
+          ? (
+              await readFile(
+                await permittedReadPath(values['did-file']),
+                'utf8',
+              )
+            )
               .split(/\s+/)
               .filter(Boolean)
           : values.did,
@@ -296,10 +331,13 @@ export async function runRotationCli(
     )
       ? 1
       : 0
-  } catch {
+  } catch (error) {
     output(
       JSON.stringify({
-        error: 'invalid-input-or-key-source',
+        error:
+          error instanceof RotationError
+            ? error.message
+            : 'invalid-input-or-key-source',
         hint: 'Use --help; no operation was started.',
       }),
     )
