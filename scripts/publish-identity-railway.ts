@@ -26,12 +26,12 @@ try {
   for (const did of dids) {
     arm();
     try {
-      if (!/^did:plc:[a-z2-7]{24}$/.test(did)) throw new Error();
+      if (!/^did:plc:[a-z2-7]{24}$/.test(did)) throw new Error('invalid-did');
       const account = await ctx.accountManager.getAccount(did, {
         includeDeactivated: true, includeTakenDown: true
       });
       if (!account || account.did !== did || !account.handle ||
-          account.deactivatedAt || account.takedownRef) throw new Error();
+          account.deactivatedAt || account.takedownRef) throw new Error('inactive-or-missing-account');
       await ctx.sequencer.sequenceIdentity(did, account.handle);
       results.push({did, status: 'queued'});
     } catch {
@@ -52,7 +52,7 @@ process.exit(complete && results.every(r => r.status === 'queued') ? 0 : 1);
 }
 
 function shellLiteral(value: string): string {
-  return "'" + value.replaceAll("'", "'\\''") + "'"
+  return "'" + value.replaceAll("'", String.raw`'\''`) + "'"
 }
 
 export async function publishBatch(
@@ -80,7 +80,7 @@ export async function publishBatch(
       let size = 0
       for await (const chunk of process.stdout) {
         size += chunk.length
-        if (size > 2_000_000) throw new Error()
+        if (size > 2_000_000) throw new Error('stdout-limit-exceeded')
         chunks.push(chunk)
       }
       const bytes = new Uint8Array(size)
@@ -114,7 +114,10 @@ export async function publishBatch(
     return await Promise.race([
       collect(),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error()), timeoutMs)
+        timer = setTimeout(
+          () => reject(new Error('publisher-timeout')),
+          timeoutMs,
+        )
       }),
     ])
   } catch {
@@ -161,18 +164,18 @@ export async function runIdentityCli(
     for (const name of ['project', 'environment', 'service'] as const) {
       const value = values[name]
       if (!value || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(value))
-        throw new Error()
+        throw new Error('invalid-target')
       target.push(`--${name}`, value)
     }
     if (values.instance) {
       if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(values.instance))
-        throw new Error()
+        throw new Error('invalid-instance')
       target.push('--deployment-instance', values.instance)
     }
     if (!/^\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+$/.test(values.workdir))
-      throw new Error()
+      throw new Error('invalid-workdir')
     if (Boolean(values.did?.length) === Boolean(values['did-file']))
-      throw new Error()
+      throw new Error('choose-one-did-source')
     const dids = [
       ...new Set(
         values['did-file']
@@ -187,7 +190,7 @@ export async function runIdentityCli(
       dids.length > 1000 ||
       dids.some((did) => !/^did:plc:[a-z2-7]{24}$/.test(did))
     )
-      throw new Error()
+      throw new Error('invalid-did-scope')
     const results: IdentityResult[] = values.apply
       ? await publishBatch(target, dids, values.workdir)
       : dids.map((did) => ({ did, status: 'planned' }))

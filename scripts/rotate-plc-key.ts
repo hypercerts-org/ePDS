@@ -1,5 +1,5 @@
 import process from 'node:process'
-import { lstat, open, readFile } from 'node:fs/promises'
+import { open, readFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { parseArgs } from 'node:util'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -215,6 +215,13 @@ async function permittedReadPath(file: string): Promise<string> {
   return canonical
 }
 
+async function permittedKeyPath(file: string) {
+  const canonical = await permittedReadPath(file)
+  const before = await Deno.lstat(file)
+  if (!before.isFile) throw new RotationError('key-file-must-be-regular')
+  return { canonical, before }
+}
+
 async function loadKey(
   file: string | undefined,
   env: string | undefined,
@@ -223,18 +230,16 @@ async function loadKey(
     throw new RotationError('choose-one-key-source')
   let hex = env
   if (file) {
-    const canonical = await permittedReadPath(file)
-    const before = await lstat(file)
-    if (!before.isFile()) throw new RotationError('key-file-must-be-regular')
+    const { canonical, before } = await permittedKeyPath(file)
     const handle = await open(
       canonical,
       constants.O_RDONLY | constants.O_NOFOLLOW,
     )
     try {
       const stat = await handle.stat()
-      const after = await lstat(file)
+      const after = await Deno.lstat(file)
       if (
-        !after.isFile() ||
+        !after.isFile ||
         before.ino !== stat.ino ||
         before.dev !== stat.dev ||
         after.ino !== stat.ino ||
