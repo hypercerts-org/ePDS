@@ -11,8 +11,12 @@ report_dir=${REPORT_DIR:-"$PWD/reports"}
 workdir=${WORKDIR:-/app/packages/pds-core}
 
 umask 077
+if [[ -L "$report_dir" ]]; then
+  printf 'Report directory must not be a symlink: %s\n' "$report_dir" >&2
+  exit 1
+fi
 mkdir -p "$report_dir"
-chmod 700 "$report_dir"
+report_dir=$(mktemp -d "$report_dir/identity-XXXXXXXXXX")
 report_path=$(mktemp "$report_dir/identity-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX.json")
 
 if deno run --no-prompt --no-config --no-lock --allow-read="$DIDS" --allow-run=railway \

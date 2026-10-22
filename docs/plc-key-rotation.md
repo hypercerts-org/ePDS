@@ -23,7 +23,7 @@ The rotation script uses fixed versions of `@did-plc/lib` and `@atproto/crypto`.
 
 ## Configure the rotation wrapper
 
-Set these four shell variables to absolute paths and the PLC directory URL, then run `scripts/rotate-plc-key.sh`. The wrapper passes those values to the TypeScript script with the smallest set of Deno permissions it needs. It prints the JSON result to the terminal and saves the same result in a new private report file under `./reports/`. Set `REPORT_DIR` to use a different local report directory.
+Set these four shell variables to absolute paths and the PLC directory URL, then run `scripts/rotate-plc-key.sh`. The wrapper passes those values to the TypeScript script with the smallest set of Deno permissions it needs. It prints the JSON result to the terminal and saves the same result in a new private report file under `./reports/`. Set `REPORT_DIR` to use a different local report directory. Each invocation creates a dedicated owner-only subdirectory without changing the permissions of an existing parent directory. The report directory must not be a symlink.
 
 ```bash
 export PLC_URL='https://YOUR-TRUSTED-PLC-HOST'
@@ -59,13 +59,27 @@ scripts/rotate-plc-key.sh --phase add --apply
 The first command is a preview. Every DID should report `planned` or `unchanged`. For example:
 
 ```json
-{"phase":"add","apply":false,"results":[{"did":"did:plc:aaaaaaaaaaaaaaaaaaaaaaaa","status":"planned"},{"did":"did:plc:bbbbbbbbbbbbbbbbbbbbbbbb","status":"planned"}]}
+{
+  "phase": "add",
+  "apply": false,
+  "results": [
+    { "did": "did:plc:aaaaaaaaaaaaaaaaaaaaaaaa", "status": "planned" },
+    { "did": "did:plc:bbbbbbbbbbbbbbbbbbbbbbbb", "status": "planned" }
+  ]
+}
 ```
 
 The wrapper saves the JSON result locally and prints `Saved report: …` on stderr. Each DID in the apply report must show `updated` or `unchanged`:
 
 ```json
-{"phase":"add","apply":true,"results":[{"did":"did:plc:aaaaaaaaaaaaaaaaaaaaaaaa","status":"updated"},{"did":"did:plc:bbbbbbbbbbbbbbbbbbbbbbbb","status":"unchanged"}]}
+{
+  "phase": "add",
+  "apply": true,
+  "results": [
+    { "did": "did:plc:aaaaaaaaaaaaaaaaaaaaaaaa", "status": "updated" },
+    { "did": "did:plc:bbbbbbbbbbbbbbbbbbbbbbbb", "status": "unchanged" }
+  ]
+}
 ```
 
 `updated` means this run submitted the change. `unchanged` means the DID already had the required key order. Any `missing-old` or `failed` result stops the cutover.
@@ -96,13 +110,25 @@ Without `--apply`, the command only validates the request and does not open an S
 The preview reports one `planned` result per DID:
 
 ```json
-{"apply":false,"results":[{"did":"did:plc:aaaaaaaaaaaaaaaaaaaaaaaa","status":"planned"},{"did":"did:plc:bbbbbbbbbbbbbbbbbbbbbbbb","status":"planned"}]}
+{
+  "apply": false,
+  "results": [
+    { "did": "did:plc:aaaaaaaaaaaaaaaaaaaaaaaa", "status": "planned" },
+    { "did": "did:plc:bbbbbbbbbbbbbbbbbbbbbbbb", "status": "planned" }
+  ]
+}
 ```
 
-After `notify --apply`, each successful DID reports `queued`:
+After `scripts/publish-identity-railway.sh --apply`, each successful DID reports `queued`:
 
 ```json
-{"apply":true,"results":[{"did":"did:plc:aaaaaaaaaaaaaaaaaaaaaaaa","status":"queued"},{"did":"did:plc:bbbbbbbbbbbbbbbbbbbbbbbb","status":"queued"}]}
+{
+  "apply": true,
+  "results": [
+    { "did": "did:plc:aaaaaaaaaaaaaaaaaaaaaaaa", "status": "queued" },
+    { "did": "did:plc:bbbbbbbbbbbbbbbbbbbbbbbb", "status": "queued" }
+  ]
+}
 ```
 
 `queued` means the PDS accepted and stored the event. It does not confirm that relays have received it. A `failed` result makes the command exit unsuccessfully; retry only the reviewed failed DIDs.
@@ -140,4 +166,4 @@ Stop before or during removal if any check fails. Some DIDs may already have cha
 
 Before removal, leave both keys in place while you investigate. Restore the old deployment secret only if that is appropriate for the incident. After removal, **do not redeploy a service that has only the old key**. Involve the DID recovery owners instead.
 
-**The 72-hour recovery window matters:** rejecting the old key at the current PLC head does not make it permanently unusable immediately. For roughly 72 hours, a historical key can recover from the parent operation only when its priority is strictly higher than the key that signed the first operation being replaced. Equal priority is not enough. This is why the new key is placed ahead of the old key during overlap: if the old key is used to remove the new key, the new key retains the priority needed to recover. Review the DID audit history with recovery owners and monitor the heads throughout that window. Private tests do not prove that the public PLC directory will accept recovery after the full 72 hours.
+**The 72-hour recovery window matters:** rejecting the old key at the current PLC head does not make it permanently unusable immediately. For roughly 72 hours, a historical key can recover from the parent operation only when its priority is strictly higher than the key that signed the first operation being replaced. Equal priority is not enough. Once the new key is present in a historical parent, placing it ahead of the old key gives it the priority needed to recover a later old-key-signed removal of the new key. It cannot retroactively undo the operation that first introduced it: that operation’s parent did not authorize the new key. Review the DID audit history with recovery owners and monitor the heads throughout that window. Private tests do not prove that the public PLC directory will accept recovery after the full 72 hours.
