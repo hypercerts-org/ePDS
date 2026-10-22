@@ -91,10 +91,15 @@ export function rotationKeys(
     if (!keys.includes(newKey)) throw new RotationError('new-key-not-present')
     return keys.filter((key) => key !== oldKey)
   }
-  if (keys.includes(newKey)) return keys
-  if (keys.length >= 5) throw new RotationError('rotation-key-capacity')
-  const position = keys.indexOf(oldKey) + 1
-  return [...keys.slice(0, position), newKey, ...keys.slice(position)]
+  const keysWithoutNew = keys.filter((key) => key !== newKey)
+  if (!keys.includes(newKey) && keys.length >= 5)
+    throw new RotationError('rotation-key-capacity')
+  const position = keysWithoutNew.indexOf(oldKey)
+  return [
+    ...keysWithoutNew.slice(0, position),
+    newKey,
+    ...keysWithoutNew.slice(position),
+  ]
 }
 
 function retryable(error: unknown): boolean {
