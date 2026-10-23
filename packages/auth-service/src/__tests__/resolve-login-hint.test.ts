@@ -45,6 +45,43 @@ describe('resolveLoginHint', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['object (?login_hint[a]=b)', { a: 'b' }],
+    ['array (?login_hint=a&login_hint=b)', ['a@example.com', 'b']],
+    ['number', 42],
+  ])(
+    'returns null without throwing for a non-string hint (%s)',
+    async (_label, hint) => {
+      expect(
+        await resolveLoginHint(hint as unknown as string, PDS_URL, SECRET),
+      ).toBeNull()
+      expect(fetchSpy).not.toHaveBeenCalled()
+    },
+  )
+
+  it('accepts plus-addressed emails on multi-label domains', async () => {
+    const email = 'first.last+tag@mail.example.co.uk'
+    expect(await resolveLoginHint(email, PDS_URL, SECRET)).toBe(email)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['script-closing payload', 'a@</script><script>alert(1)</script>'],
+    ['attribute breakout', 'a@example.com"><img src=x onerror=alert(1)>'],
+    ['whitespace in domain', 'user@exa mple.com'],
+    ['trailing newline', 'user@example.com\n'],
+    ['empty local part', '@example.com'],
+    ['single-label domain', 'user@example'],
+    ['double @', 'user@@example.com'],
+    ['over-long address', `${'a'.repeat(250)}@example.com`],
+  ])(
+    'returns null for malformed email-shaped hint (%s) without calling the internal API',
+    async (_label, hint) => {
+      expect(await resolveLoginHint(hint, PDS_URL, SECRET)).toBeNull()
+      expect(fetchSpy).not.toHaveBeenCalled()
+    },
+  )
+
   it('resolves handle to email via internal API', async () => {
     fetchSpy.mockResolvedValueOnce(
       new Response(JSON.stringify({ email: 'alice@example.com' }), {

@@ -7,14 +7,23 @@
  * an email to proceed with OTP, so this helper calls pds-core's internal
  * API to resolve non-email identifiers.
  *
- * Returns the email if the hint is already an email or if resolution
- * succeeds; returns null if the hint cannot be resolved.
+ * Returns the email if the hint is already a well-formed email or if
+ * resolution succeeds; returns null if the hint cannot be resolved or is
+ * email-shaped (contains '@') but malformed.
  */
 import { createLogger } from '@certified-app/shared'
 
 const logger = createLogger('auth:resolve-login-hint')
 
 const RESOLVE_TIMEOUT_MS = 3000
+
+// login_hint is attacker-controlled (URL query or PAR body) and an email-shaped
+// value is echoed back into the login page, so accept only a conservative
+// allowlist rather than anything containing '@'. Deliberately excludes
+// quotes, angle brackets, '&' and whitespace, so some RFC 5322-valid addresses
+// (e.g. o'brien@example.com, internationalised addresses) are not accepted.
+const EMAIL_HINT_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
+const EMAIL_HINT_MAX_LENGTH = 254 // RFC 5321 path limit
 
 /**
  * Determine whether a login_hint is an email (contains '@'), a handle,
@@ -25,10 +34,24 @@ export async function resolveLoginHint(
   pdsInternalUrl: string,
   internalSecret: string,
 ): Promise<string | null> {
-  if (!loginHint) return null
+  // Callers pass req.query values, which can be objects or arrays at runtime
+  // despite the string type; treat anything else as no hint.
+  if (!loginHint || typeof loginHint !== 'string') return null
 
-  // Already an email — use it directly
+  // Email-shaped — use it directly if well-formed. A malformed value is
+  // dropped rather than forwarded to the handle/DID lookup: '@' never
+  // appears in a handle or DID, so it cannot be a valid identifier there.
   if (loginHint.includes('@')) {
+    if (
+      loginHint.length > EMAIL_HINT_MAX_LENGTH ||
+      !EMAIL_HINT_PATTERN.test(loginHint)
+    ) {
+      logger.warn(
+        { loginHintLength: loginHint.length },
+        'Rejected malformed email-shaped login_hint',
+      )
+      return null
+    }
     return loginHint
   }
 
