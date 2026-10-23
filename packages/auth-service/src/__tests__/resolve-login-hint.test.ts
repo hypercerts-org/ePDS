@@ -33,17 +33,21 @@ describe('resolveLoginHint', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('returns email directly when hint contains @', async () => {
-    const email = 'user@example.com'
-    expect(await resolveLoginHint(email, PDS_URL, SECRET)).toBe(email)
-    expect(fetchSpy).not.toHaveBeenCalled()
-  })
-
-  it('returns email for mixed-case email hint', async () => {
-    const email = 'User@Example.COM'
-    expect(await resolveLoginHint(email, PDS_URL, SECRET)).toBe(email)
-    expect(fetchSpy).not.toHaveBeenCalled()
-  })
+  it.each([
+    ['plain', 'user@example.com'],
+    ['mixed case', 'User@Example.COM'],
+    [
+      'plus-addressed on a multi-label domain',
+      'first.last+tag@mail.example.co.uk',
+    ],
+    ['hyphen inside a domain label', 'user@my-example.com'],
+  ])(
+    'returns a well-formed email hint (%s) directly',
+    async (_label, email) => {
+      expect(await resolveLoginHint(email, PDS_URL, SECRET)).toBe(email)
+      expect(fetchSpy).not.toHaveBeenCalled()
+    },
+  )
 
   it.each([
     ['object (?login_hint[a]=b)', { a: 'b' }],
@@ -59,12 +63,6 @@ describe('resolveLoginHint', () => {
     },
   )
 
-  it('accepts plus-addressed emails on multi-label domains', async () => {
-    const email = 'first.last+tag@mail.example.co.uk'
-    expect(await resolveLoginHint(email, PDS_URL, SECRET)).toBe(email)
-    expect(fetchSpy).not.toHaveBeenCalled()
-  })
-
   it.each([
     ['script-closing payload', 'a@</script><script>alert(1)</script>'],
     ['attribute breakout', 'a@example.com"><img src=x onerror=alert(1)>'],
@@ -73,6 +71,9 @@ describe('resolveLoginHint', () => {
     ['empty local part', '@example.com'],
     ['single-label domain', 'user@example'],
     ['double @', 'user@@example.com'],
+    ['empty domain label', 'user@example..com'],
+    ['label starting with a hyphen', 'user@-example.com'],
+    ['label ending with a hyphen', 'user@example-.com'],
     ['over-long address', `${'a'.repeat(250)}@example.com`],
   ])(
     'returns null for malformed email-shaped hint (%s) without calling the internal API',

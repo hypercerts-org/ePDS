@@ -22,7 +22,9 @@ const RESOLVE_TIMEOUT_MS = 3000
 // allowlist rather than anything containing '@'. Deliberately excludes
 // quotes, angle brackets, '&' and whitespace, so some RFC 5322-valid addresses
 // (e.g. o'brien@example.com, internationalised addresses) are not accepted.
-const EMAIL_HINT_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
+// Each domain label must be non-empty and must not start or end with '-'.
+const EMAIL_HINT_PATTERN =
+  /^[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$/
 const EMAIL_HINT_MAX_LENGTH = 254 // RFC 5321 path limit
 
 /**

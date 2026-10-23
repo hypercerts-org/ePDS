@@ -116,7 +116,8 @@ function isSafeHttpUrl(value: string | undefined): boolean {
 function toScriptJson(value: string | boolean | null): string {
   return JSON.stringify(value).replace(
     /[<>&\u2028\u2029]/g,
-    (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`,
+    (ch) =>
+      String.raw`\u${(ch.codePointAt(0) ?? 0).toString(16).padStart(4, '0')}`,
   )
 }
 
