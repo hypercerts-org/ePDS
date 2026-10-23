@@ -1,11 +1,11 @@
 # Rotate a shared PLC key
 
-Use these two scripts when rotating the PLC signing key shared by accounts on one PDS:
+Use these scripts when rotating the PLC signing key shared by accounts on one PDS:
 
 - `rotate-plc-key.ts` adds or removes the key in the PLC directory.
-- `publish-identity-railway.ts` asks the PDS to publish `#identity` events through Railway SSH after you have verified the directory changes.
+- `publish-identity-railway.ts` or `publish-identity-docker.ts` asks the PDS to publish `#identity` events through Railway SSH or Docker after you have verified the directory changes.
 
-Neither script changes deployed secrets or redeploys the PDS. You perform that deployment step yourself.
+None of these scripts changes deployed secrets or redeploys the PDS. You perform that deployment step yourself.
 
 ## Prepare
 
@@ -89,62 +89,68 @@ Then inspect the PLC directory heads yourself. Confirm that both keys exist, the
 
 **During an outage, stop after adding the new key.** Keep the old deployment secret and the old key active. Do not remove the old key, change the deployed secret, or redeploy until service is restored. Adding the new key does not revoke the old one. Any account created during the outage may still have only the old key, so you must rebuild the inventory before cutover. You may publish identity events now if Railway SSH works; otherwise leave that notification pending.
 
-## Publish identity events through Railway
+## Publish identity events
 
-Use this only after you have verified the PLC directory heads. It is independent of rotation and can be re-run without another PLC write.
+- Use a reviewed inventory of 1–1,000 PLC DIDs whose directory heads you have verified. Publishers do not read PLC or accept rotation reports as evidence.
+- Install Deno **2.8.3** and a trusted Railway or Docker CLI. Keep the chosen publisher's `.sh` launcher beside its matching `.ts` file; no other publisher files are needed.
+- Each DID must belong to an active local account with a handle. Preview is offline; `--apply` publishes events without writing to PLC.
 
-Set the Railway project, environment, and PDS service IDs explicitly. If Railway requires a specific deployment instance, add `--instance ID`. Use a trusted Railway CLI that supports `ssh -p`, `-e`, `-s`, and `-d`. Do not run `railway link`, `railway environment link`, or `railway service link`; those change your local CLI state. `railway run` executes locally with injected environment variables, so it is not suitable here.
+`AppContext.fromEnv()` may initialize or migrate databases: stop unless the deployed PDS version, runtime permissions, configuration, and storage match; do not copy production secrets locally.
+
+### Railway
 
 ```bash
 export PROJECT='YOUR-PROJECT-ID'
 export ENVIRONMENT='YOUR-ENVIRONMENT-ID'
 export SERVICE='YOUR-HOSTING-PDS-SERVICE-ID'
-export WORKDIR='/app/packages/pds-core'
+export DIDS='/secure/rotation-dids.txt'
 export REPORT_DIR='/secure/rotation-reports'
 
 scripts/publish-identity-railway.sh
 scripts/publish-identity-railway.sh --apply
 ```
 
-Without `--apply`, the command only validates the request and does not open an SSH connection. The wrapper prints the JSON result to the terminal and saves the same result in a new private report file under `REPORT_DIR`, then prints `Saved report: …` on stderr. Use only DIDs whose PLC heads you have already checked. Do not use a guessed inventory or copy failed results from the rotation script. Process no more than 1,000 DIDs at a time. The notification script does not read PLC itself and will not accept a PLC JSON report as evidence.
+- Set all three target IDs explicitly; add `--instance ID` if needed. Use Railway SSH, not `railway run` or commands that link local CLI state.
+- `WORKDIR` / `--workdir` defaults to `/app/packages/pds-core`.
+- `EXEC_USER` / `--user` defaults to `appuser`. It checks the SSH runtime user; it does not switch users.
 
-The preview reports one `planned` result per DID:
+### Docker
 
-```json
-{
-  "apply": false,
-  "results": [
-    { "did": "did:plc:aaaaaaaaaaaaaaaaaaaaaaaa", "status": "planned" },
-    { "did": "did:plc:bbbbbbbbbbbbbbbbbbbbbbbb", "status": "planned" }
-  ]
-}
+```bash
+export CONTAINER='epds-core'
+export DIDS='/secure/rotation-dids.txt'
+export REPORT_DIR='/secure/rotation-reports'
+
+scripts/publish-identity-docker.sh
+scripts/publish-identity-docker.sh --apply
 ```
 
-After `scripts/publish-identity-railway.sh --apply`, each successful DID reports `queued`:
+- Set `CONTAINER` or `--container NAME_OR_ID` explicitly.
+- `WORKDIR` / `--workdir` defaults to `/app/packages/pds-core`.
+- Docker uses the container's configured user by default. Override with `EXEC_USER` or `--user USER[:GROUP]` (names or numeric IDs).
 
-```json
-{
-  "apply": true,
-  "results": [
-    { "did": "did:plc:aaaaaaaaaaaaaaaaaaaaaaaa", "status": "queued" },
-    { "did": "did:plc:bbbbbbbbbbbbbbbbbbbbbbbb", "status": "queued" }
-  ]
-}
+**Error: `chdir to cwd … no such file or directory`** — no events were queued. Try `/app`:
+
+```bash
+WORKDIR=/app scripts/publish-identity-docker.sh --apply
 ```
 
-`queued` means the PDS accepted and stored the event. It does not confirm that relays have received it. A `failed` result makes the command exit unsuccessfully; retry only the reviewed failed DIDs.
+Still failing? Check the configured workdir and use that path:
 
-Before applying, verify all of the following:
+```bash
+docker inspect --format '{{.Config.WorkingDir}}' "$CONTAINER"
+```
 
-- `/app/packages/pds-core` is the correct package directory for the deployed image. Override `--workdir` for a different image.
-- The deployed `@atproto/pds` version exports the public `AppContext` API expected by the script.
-- Railway SSH starts under the same user, storage, configuration, and runtime environment as the running PDS.
+### Reports and resume
 
-Do not copy production secrets to your machine. The script's `AppContext.fromEnv()` call may initialize or migrate databases, so stop if you are unsure that it has the required permissions or matches the deployed version. The script does not start a server or create an admin endpoint. `--allow-run=railway` trusts the Railway executable, so install it from a trusted source.
+- `REPORT_DIR` (default `./reports`) holds `identity-<transport>-<timestamp>-<id>.json` and a matching `.log`; paths are printed at startup and completion. Stdout shows an outcome summary, not JSON. Files are owner-only (0600), new directories 0700; existing parent permissions stay unchanged. Use a trusted operator-owned directory without symlinks or group/other write access. **Raw logs may contain secrets.**
+- Every preview/apply run shows inventory/process/skip counts, then requires exactly `yes` at a native terminal. Refusal or nonterminal input stops safely; there is no `--yes` bypass.
+- Choose a numbered report or `0` for a fresh run. `--no-resume` skips selection; `--resume-report PATH` selects explicitly. Neither skips confirmation.
+- Resume requires the same transport, target, user/workdir, preview/apply mode, and ordered deduplicated inventory. Queued successes are skipped; failures and unfinished work are retried. Preview reports cannot skip apply work. Reports are not proof of current remote state.
+- Use `DIDS` / `--did-file PATH`, or repeated `--did DID` flags, not both. For direct Deno use, grant report-directory read/write access, `--allow-sys=uid`, and the scoped transport permission; see the launcher and `--help`.
+- `queued` means PDS storage and batch cleanup succeeded, **not relay receipt**. Check PDS and relay streams. Failures, timeouts, or lost connections exit 1; leave notification pending if you cannot verify the intended runtime.
 
-The script uses one SSH session for the batch. Each DID must belong to an active local account with a handle. Unknown, deactivated, and taken-down accounts fail. A `queued` result means that the PDS stored the event and cleaned up successfully; it does **not** mean relays have received it. Watch both PDS and relay streams for fresh `#identity` events before treating notification as complete.
-
-Remote setup, each DID, and cleanup each have a 10-second deadline. A timeout, missing result, failed cleanup, or uncertain SSH connection fails the whole batch. Other per-DID errors appear as individual `failed` results and also produce a nonzero exit status. Retry failed notifications with a reviewed inventory. Delivery may happen more than once, but notification never writes to PLC. If SSH cannot reach the intended PDS runtime, stop and keep notification pending. Do not treat another environment's result as success.
+**Interruption:** Ctrl+C/SIGTERM stops the local client, saves the full report, and exits 130; it **does not ensure the remote process stopped**. Inspect the runtime and wait for it to stop before retrying uncertain work; duplicate events are possible. SIGKILL, power loss, or storage failure cannot guarantee a final report.
 
 ## When deployments recover: freeze, reconcile, and cut over
 
