@@ -9,6 +9,12 @@ None of these scripts changes deployed secrets or redeploys the PDS. You perform
 
 ## Prepare
 
+List active DIDs without an admin password (active means not deactivated or taken down):
+
+```bash
+deno run --no-config --no-lock --allow-net=YOUR-TRUSTED-PDS-HOST scripts/list-active-dids.ts --pds-url https://YOUR-TRUSTED-PDS-HOST > dids.txt
+```
+
 - Use a trusted machine. Prepare a checked list of the PDS's DIDs, with **one DID per line**. Run a separate batch for each PDS. Do not test against the public PLC directory. Use Atmosphere in a Box instead.
 - Store the old and new exportable secp256k1 keys as 64-character hexadecimal values in two separate regular files, not symlinks. Use your normal secret-management tooling to generate and protect the new key.
 - Check recovery owners, key order, and available key slots before starting. PLC allows at most five rotation keys. The script places the new key immediately before the old key, so the new key has higher priority. It does not remove recovery keys. It cannot recover or fork a DID, rotate a `did:web`, or use an HSM-held key.
@@ -111,8 +117,8 @@ scripts/publish-identity-railway.sh --apply
 ```
 
 - Set all three target IDs explicitly; add `--instance ID` if needed. Use Railway SSH, not `railway run` or commands that link local CLI state.
-- `WORKDIR` / `--workdir` defaults to `/app/packages/pds-core`.
-- `EXEC_USER` / `--user` defaults to `appuser`. It checks the SSH runtime user; it does not switch users.
+- `WORKDIR` / `--workdir` defaults to `/app`.
+- Railway uses the SSH login user without switching users or checking an expected username. `EXEC_USER` is ignored; `--user` is not supported.
 
 ### Docker
 
@@ -126,16 +132,10 @@ scripts/publish-identity-docker.sh --apply
 ```
 
 - Set `CONTAINER` or `--container NAME_OR_ID` explicitly.
-- `WORKDIR` / `--workdir` defaults to `/app/packages/pds-core`.
+- `WORKDIR` / `--workdir` defaults to `/app`.
 - Docker uses the container's configured user by default. Override with `EXEC_USER` or `--user USER[:GROUP]` (names or numeric IDs).
 
-**Error: `chdir to cwd … no such file or directory`** — no events were queued. Try `/app`:
-
-```bash
-WORKDIR=/app scripts/publish-identity-docker.sh --apply
-```
-
-Still failing? Check the configured workdir and use that path:
+**Error: `chdir to cwd … no such file or directory`** — no events were queued. Check the configured workdir and set `WORKDIR` / `--workdir` if it differs from `/app`:
 
 ```bash
 docker inspect --format '{{.Config.WorkingDir}}' "$CONTAINER"
@@ -146,7 +146,7 @@ docker inspect --format '{{.Config.WorkingDir}}' "$CONTAINER"
 - `REPORT_DIR` (default `./reports`) holds `identity-<transport>-<timestamp>-<id>.json` and a matching `.log`; paths are printed at startup and completion. Stdout shows an outcome summary, not JSON. Files are owner-only (0600), new directories 0700; existing parent permissions stay unchanged. Use a trusted operator-owned directory without symlinks or group/other write access. **Raw logs may contain secrets.**
 - Every preview/apply run shows inventory/process/skip counts, then requires exactly `yes` at a native terminal. Refusal or nonterminal input stops safely; there is no `--yes` bypass.
 - Choose a numbered report or `0` for a fresh run. `--no-resume` skips selection; `--resume-report PATH` selects explicitly. Neither skips confirmation.
-- Resume requires the same transport, target, user/workdir, preview/apply mode, and ordered deduplicated inventory. Queued successes are skipped; failures and unfinished work are retried. Preview reports cannot skip apply work. Reports are not proof of current remote state.
+- Resume requires the same transport, target, workdir, Docker user override, preview/apply mode, and ordered deduplicated inventory. Queued successes are skipped; failures and unfinished work are retried. Preview reports cannot skip apply work. The obsolete expected-user field in Railway reports is ignored; project, environment, service, instance, and workdir must still match. Reports are not proof of current remote state.
 - Use `DIDS` / `--did-file PATH`, or repeated `--did DID` flags, not both. For direct Deno use, grant report-directory read/write access, `--allow-sys=uid`, and the scoped transport permission; see the launcher and `--help`.
 - `queued` means PDS storage and batch cleanup succeeded, **not relay receipt**. Check PDS and relay streams. Failures, timeouts, or lost connections exit 1; leave notification pending if you cannot verify the intended runtime.
 
