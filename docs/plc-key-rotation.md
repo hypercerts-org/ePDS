@@ -23,7 +23,16 @@ The rotation script uses fixed versions of `@did-plc/lib` and `@atproto/crypto`.
 
 ## Configure the rotation wrapper
 
-Set these four shell variables to absolute paths and the PLC directory URL, then run `scripts/rotate-plc-key.sh`. The wrapper passes those values to the TypeScript script with the smallest set of Deno permissions it needs. It prints the JSON result to the terminal and saves the same result in a new private report file under `./reports/`. Set `REPORT_DIR` to use a different local report directory. Each invocation creates a dedicated owner-only subdirectory without changing the permissions of an existing parent directory. The report directory must not be a symlink.
+Set `PLC_URL` and the three absolute file paths below, then run `scripts/rotate-plc-key.sh`. The helper launches Deno with scoped permissions. `REPORT_DIR` defaults to `./reports/`.
+
+Each run produces:
+
+- One full `rotation-<timestamp>-<id>.json`. Stdout shows an outcome table, not JSON.
+- A matching `.log` with timestamped progress, retries, and outcomes, also shown on stderr. Secrets and request payloads are excluded.
+
+Files are saved directly in the report directory without overwriting previous runs. New directories are owner-only (0700), and files are owner-only (0600). Use a trusted directory, not a symlink.
+
+Both filenames are printed at startup and completion. The JSON includes every DID, completed outcomes, unfinished work, target, mode, public key identities, and timestamps. Failed or missing-old results exit 1. Ctrl+C or SIGTERM stops processing, aborts requests and waits, saves the full report, prints the table, and exits 130. An interrupted submission is marked uncertain: inspect its PLC head before resuming. Startup errors before inventory preparation produce only a log; SIGKILL, power loss, or storage failure cannot guarantee a final report.
 
 ```bash
 export PLC_URL='https://YOUR-TRUSTED-PLC-HOST'
@@ -43,9 +52,9 @@ did:plc:cccccccccccccccccccccccc
 
 Give Deno read access to these exact three files, not their parent directory. If any path is a symlink, grant access to the file it resolves to as well. The key files must be owned by the operator and readable only by that operator.
 
-The wrapper reads key files. As an alternative, you may inject `PLC_ROTATION_OLD_KEY_HEX` and `PLC_ROTATION_NEW_KEY_HEX` from a secret manager when running `rotate-plc-key.ts` directly. Choose one method for each key: file **or** environment variable, never both. Neither script loads a `.env` file.
+The Deno script reads key files. As an alternative, you may inject `PLC_ROTATION_OLD_KEY_HEX` and `PLC_ROTATION_NEW_KEY_HEX` from a secret manager when running `rotate-plc-key.ts` directly. Choose one method for each key: file **or** environment variable, never both. Neither script loads a `.env` file.
 
-The wrapper also permits hostname access and a small set of `LOG_*` environment variables because the PLC dependency needs them for logging. This does not grant general system or environment access.
+For direct Deno use, pass `--report-dir PATH` (default `./reports`) and grant read/write access to that directory. See the helper for the remaining scoped permissions and `--help` for script options.
 
 ## Add the new key, including during a deployment outage
 
@@ -56,33 +65,25 @@ scripts/rotate-plc-key.sh --phase add
 scripts/rotate-plc-key.sh --phase add --apply
 ```
 
-The first command is a preview. Every DID should report `planned` or `unchanged`. For example:
+The first command is a preview.
+The table counts Updated, Missing old key, Failed after retries, Interrupted/not completed, and Total, plus Unchanged, Planned, or Skipped when present. Preview results should be planned or unchanged. Apply results should be updated or unchanged; resumed successes may be skipped with the original outcome preserved in JSON. Stop cutover on missing-old, failed, or unfinished results.
 
-```json
-{
-  "phase": "add",
-  "apply": false,
-  "results": [
-    { "did": "did:plc:aaaaaaaaaaaaaaaaaaaaaaaa", "status": "planned" },
-    { "did": "did:plc:bbbbbbbbbbbbbbbbbbbbbbbb", "status": "planned" }
-  ]
-}
+### Resume or start fresh
+
+Every preview and apply run displays the final inventory count and how many DIDs it will process or skip, then requires you to type yes at a native terminal prompt before any PLC read or write. Cancel, refusal, EOF, or nonterminal input stops safely; unattended execution is not supported.
+
+With matching rotation reports in REPORT_DIR, Deno first lists numbered filenames and readable UTC timestamps. Choose a report, or 0 for a fresh inventory, including when moving from add to remove. Report selection is separate from the mandatory execution confirmation.
+
+Resume requires the same PLC URL, phase, preview/apply mode, and public keys. It uses the saved inventory, skips only previous successful outcomes, and retries failed, unfinished, planned, and missing-old DIDs. Repeated resumes retain the original success provenance. Preview reports never skip work during apply. Old reports without full resume metadata and identity-notification reports are not eligible.
+
+To bypass report selection only, choose explicitly; both commands still require execution confirmation:
+
+```bash
+scripts/rotate-plc-key.sh --phase add --apply --no-resume
+scripts/rotate-plc-key.sh --phase add --apply --resume-report "$REPORT_DIR/rotation-<timestamp>-<id>.json"
 ```
 
-The wrapper saves the JSON result locally and prints `Saved report: …` on stderr. Each DID in the apply report must show `updated` or `unchanged`:
-
-```json
-{
-  "phase": "add",
-  "apply": true,
-  "results": [
-    { "did": "did:plc:aaaaaaaaaaaaaaaaaaaaaaaa", "status": "updated" },
-    { "did": "did:plc:bbbbbbbbbbbbbbbbbbbbbbbb", "status": "unchanged" }
-  ]
-}
-```
-
-`updated` means this run submitted the change. `unchanged` means the DID already had the required key order. Any `missing-old` or `failed` result stops the cutover.
+Direct Deno users must grant read access to an explicit report outside the report directory. Treat saved reports as trusted operator records, not independent proof of current PLC state.
 
 Then inspect the PLC directory heads yourself. Confirm that both keys exist, the new key is directly before the old key, and aliases, services, verification methods, and unrelated keys have not changed. `missing-old` and `failed` are failures. The script waits up to 15 seconds per request and retries temporary conflicts or network failures up to three times. Re-running a completed change does not submit another PLC operation. This script does not publish an identity event.
 
