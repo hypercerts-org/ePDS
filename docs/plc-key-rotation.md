@@ -97,9 +97,10 @@ Then inspect the PLC directory heads yourself. Confirm that both keys exist, the
 
 ## Publish identity events
 
-- Use a reviewed inventory of 1–1,000 PLC DIDs whose directory heads you have verified. Publishers do not read PLC or accept rotation reports as evidence.
+- Use a reviewed inventory of 1–15,000 PLC DIDs whose directory heads you have verified. Publishers do not read PLC or accept rotation reports as evidence.
 - Install Deno **2.8.3** and a trusted Railway or Docker CLI. Keep the chosen publisher's `.sh` launcher beside its matching `.ts` file; no other publisher files are needed.
 - Each DID must belong to an active local account with a handle. Preview is offline; `--apply` publishes events without writing to PLC.
+- The default workdir `/app/packages/pds-core` is ePDS-specific. For a reference PDS, set `export WORKDIR=/app` before running either launcher.
 
 `AppContext.fromEnv()` may initialize or migrate databases: stop unless the deployed PDS version, runtime permissions, configuration, and storage match; do not copy production secrets locally.
 
@@ -117,7 +118,7 @@ scripts/publish-identity-railway.sh --apply
 ```
 
 - Set all three target IDs explicitly; add `--instance ID` if needed. Use Railway SSH, not `railway run` or commands that link local CLI state.
-- `WORKDIR` / `--workdir` defaults to `/app`.
+- `WORKDIR` / `--workdir` defaults to `/app/packages/pds-core`.
 - Railway uses the SSH login user without switching users or checking an expected username. `EXEC_USER` is ignored; `--user` is not supported.
 
 ### Docker
@@ -132,10 +133,10 @@ scripts/publish-identity-docker.sh --apply
 ```
 
 - Set `CONTAINER` or `--container NAME_OR_ID` explicitly.
-- `WORKDIR` / `--workdir` defaults to `/app`.
+- `WORKDIR` / `--workdir` defaults to `/app/packages/pds-core`.
 - Docker uses the container's configured user by default. Override with `EXEC_USER` or `--user USER[:GROUP]` (names or numeric IDs).
 
-**Error: `chdir to cwd … no such file or directory`** — no events were queued. Check the configured workdir and set `WORKDIR` / `--workdir` if it differs from `/app`:
+**Error: `chdir to cwd … no such file or directory`** — no events were queued. Check the configured workdir and set `WORKDIR` / `--workdir` if it differs from `/app/packages/pds-core`:
 
 ```bash
 docker inspect --format '{{.Config.WorkingDir}}' "$CONTAINER"

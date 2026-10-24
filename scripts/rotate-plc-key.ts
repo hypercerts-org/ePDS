@@ -940,7 +940,7 @@ export async function runRotationCli(
 function validateInventory(dids: string[]) {
   if (
     !dids.length ||
-    dids.length > 10_000 ||
+    dids.length > 15_000 ||
     new Set(dids).size !== dids.length ||
     dids.some(
       (did) => typeof did !== 'string' || !/^did:plc:[a-z2-7]{24}$/.test(did),

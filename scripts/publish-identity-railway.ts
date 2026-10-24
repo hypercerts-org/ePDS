@@ -28,6 +28,7 @@ const codes = [
   'TypeError',
   'RangeError',
   'SyntaxError',
+  'E2BIG',
   'EACCES',
   'EPERM',
   'ENOENT',
@@ -79,7 +80,11 @@ export interface Diagnostic {
 }
 function diagnostic(stage: Diagnostic['stage'], err: unknown): Diagnostic {
   const e = err as { code?: unknown; message?: unknown; name?: unknown }
-  const candidate = e?.code ?? e?.message
+  const candidate = /argument list too long|os error 7/i.test(
+    String(e?.message),
+  )
+    ? 'E2BIG'
+    : (e?.code ?? e?.message)
   return {
     stage,
     code: codes.includes(candidate as Diagnostic['code'])
@@ -152,11 +157,7 @@ function stderrCode(text: string): Diagnostic['code'] {
   return 'unknown'
 }
 
-export function remotePayload(
-  dids: string[],
-  workdir: string,
-  user = '',
-): string {
+export function remotePayload(dids: string[], workdir: string): string {
   return `
 const dids = ${JSON.stringify(dids)};
 const codes = ${JSON.stringify(codes)};
@@ -177,13 +178,6 @@ try {
   arm();
   enter('workdir');
   process.chdir(${JSON.stringify(workdir)});
-  enter('runtime-user');
-  const expectedUser = ${JSON.stringify(user)};
-  if (expectedUser) {
-    const {userInfo} = await import('node:os');
-    const actual = userInfo();
-    if (actual.username !== expectedUser && String(actual.uid) !== expectedUser) throw Error('runtime-user');
-  }
   enter('import');
   const {createRequire} = await import('node:module');
   const {pathToFileURL} = await import('node:url');
@@ -234,11 +228,8 @@ process.exit(results.every(r => r.status === 'queued') ? 0 : 1);
 `
 }
 
-function shellLiteral(value: string): string {
-  return "'" + value.replaceAll("'", String.raw`'\''`) + "'"
-}
-
 type Child = {
+  stdin?: WritableStream<Uint8Array>
   stderr?: ReadableStream<Uint8Array>
   stdout: ReadableStream<Uint8Array>
   status: Promise<Deno.CommandStatus>
@@ -260,7 +251,22 @@ export async function publishCommand(
     bytes: Uint8Array,
     stage: Diagnostic['stage'],
   ) => void = () => {},
+  payload?: string,
 ): Promise<IdentityResult[]> {
+  let settled = false
+  const bounded = async <T>(promise: Promise<T>): Promise<T | undefined> => {
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<undefined>((resolve) => {
+          timeout = setTimeout(() => resolve(undefined), 250)
+        }),
+      ])
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
   let child: Child | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
   let rejectAbort: () => void = () => {}
@@ -275,6 +281,7 @@ export async function publishCommand(
   let stderrDone: Promise<void> = Promise.resolve()
   const stored = { stdout: 0, stderr: 0 }
   const raw = (channel: 'stdout' | 'stderr', bytes: Uint8Array) => {
+    if (settled) return
     const remaining = Math.max(0, 1_000_000 - stored[channel])
     if (remaining)
       runtimeOutput(channel, bytes.subarray(0, remaining), remoteStage)
@@ -344,7 +351,7 @@ export async function publishCommand(
     }
     child = spawn(executable, {
       args,
-      stdin: 'null',
+      stdin: payload === undefined ? 'null' : 'piped',
       stdout: 'piped',
       stderr: 'piped',
     })
@@ -367,7 +374,19 @@ export async function publishCommand(
           }
         }
     })()
+    const send = async () => {
+      if (payload === undefined) return
+      if (!process.stdin) throw Error('invalid-transport')
+      const writer = process.stdin.getWriter()
+      try {
+        await writer.write(new TextEncoder().encode(payload))
+        await writer.close()
+      } finally {
+        writer.releaseLock()
+      }
+    }
     const collect = async () => {
+      let linesRead = 0
       let size = 0
       let buffer = ''
       let final: IdentityResult[] | undefined
@@ -487,14 +506,20 @@ export async function publishCommand(
         }
       }
       for await (const chunk of process.stdout) {
+        if (settled) return incomplete()
+        if (signal?.aborted) throw Error('interrupted')
         rawStdout(chunk)
         size += chunk.length
-        if (size > 2_000_000) throw Error('output-limit')
+        if (size > 32_000_000) throw Error('output-limit')
         buffer += decoder.decode(chunk, { stream: true })
         let end: number
         while ((end = buffer.indexOf('\n')) !== -1) {
           line(buffer.slice(0, end).replace(/\r$/, ''))
           buffer = buffer.slice(end + 1)
+          if (++linesRead % 100 === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 0))
+            if (settled || signal?.aborted) throw Error('interrupted')
+          }
         }
       }
       if (prefix.length) raw('stdout', new Uint8Array(prefix))
@@ -542,7 +567,7 @@ export async function publishCommand(
       return final
     }
     return await Promise.race([
-      collect(),
+      Promise.all([collect(), send()]).then(([results]) => results),
       new Promise<never>((_, reject) => {
         rejectAbort = () => reject(Error('interrupted'))
         signal?.addEventListener('abort', abort, { once: true })
@@ -551,7 +576,16 @@ export async function publishCommand(
       }),
     ])
   } catch (err) {
-    failure ??= diagnostic(remoteStage, err)
+    if (!child)
+      raw(
+        'stderr',
+        new TextEncoder().encode(
+          err instanceof Error ? (err.stack ?? String(err)) : String(err),
+        ),
+      )
+    failure = signal?.aborted
+      ? { stage: remoteStage, code: 'interrupted' }
+      : (failure ?? diagnostic(remoteStage, err))
     if (
       child &&
       ['unknown', 'protocol-mismatch', 'output-limit'].includes(failure.code)
@@ -560,15 +594,21 @@ export async function publishCommand(
     if (failure.code === 'unknown' && child) failure.code = 'protocol-mismatch'
     if (child) {
       try {
-        child.kill('SIGKILL')
-      } catch {
-        await child.status.catch(() => {})
+        child.kill('SIGTERM')
+      } catch (err) {
+        raw('stderr', new TextEncoder().encode(String(err)))
       }
-      commandStatus = await child.status.catch(() => undefined)
+      commandStatus = await bounded(child.status.catch(() => undefined))
+      if (!commandStatus) {
+        try {
+          child.kill('SIGKILL')
+        } catch (err) {
+          raw('stderr', new TextEncoder().encode(String(err)))
+        }
+        commandStatus = await bounded(child.status.catch(() => undefined))
+      }
     }
-    await stderrDone.catch(() => {
-      failure ??= { stage: 'transport', code: 'unknown' }
-    })
+    await bounded(stderrDone.catch(() => {}))
     if (commandStatus)
       failure = {
         ...failure,
@@ -578,6 +618,7 @@ export async function publishCommand(
     progress('failure', JSON.stringify(failure))
     return incomplete()
   } finally {
+    settled = true
     clearTimeout(timer)
     signal?.removeEventListener('abort', abort)
   }
@@ -645,10 +686,14 @@ export function validateReport(
       (!validId(r.resumedFrom) ||
         !r.resumedFrom.startsWith(`identity-${transport}-`) ||
         r.resumedFrom === r.id)) ||
-    JSON.stringify(r.target) !== JSON.stringify(target) ||
+    !Array.isArray(r.target) ||
+    r.target.length !== target.length ||
+    r.target.some((value, i) =>
+      i === target.length - 2 ? typeof value !== 'string' : value !== target[i],
+    ) ||
     !Array.isArray(r.inventory) ||
     !r.inventory.length ||
-    r.inventory.length > 1000 ||
+    r.inventory.length > 15000 ||
     new Set(r.inventory).size !== r.inventory.length ||
     r.inventory.some((d) => !validDid(d)) ||
     JSON.stringify(r.inventory) !== JSON.stringify(inventory) ||
@@ -726,7 +771,7 @@ async function readReport(
   if (
     !info.isFile ||
     info.isSymlink ||
-    info.size > 2_000_000 ||
+    info.size > 8_000_000 ||
     info.uid !== Deno.uid() ||
     (info.mode! & 0o077) !== 0
   ) {
@@ -794,7 +839,6 @@ export async function runIdentityCli(
         environment: { type: 'string' },
         service: { type: 'string' },
         instance: { type: 'string' },
-        user: { type: 'string', default: 'appuser' },
         workdir: { type: 'string', default: '/app/packages/pds-core' },
         did: { type: 'string', multiple: true },
         'did-file': { type: 'string' },
@@ -805,7 +849,7 @@ export async function runIdentityCli(
     })
     if (values.help) {
       output(
-        'publish-identity-railway --project ID --environment ID --service ID [--instance ID] (--did DID ... | --did-file PATH) [--user appuser] [--workdir /app/packages/pds-core] [--report-dir PATH] [--apply] [--resume-report PATH | --no-resume]. Offline preview by default. Every run requires terminal confirmation (type yes). Reports and timestamped logs are private and flat. Resume only compatible inventory/target/mode, preserving queued provenance. Ctrl+C/SIGTERM saves unfinished work and exits 130. Local client termination cannot stop remote work: inspect runtime before retrying uncertain results. No PLC writes, secret copying, or PDS stop. At most 1000 DIDs.',
+        'publish-identity-railway --project ID --environment ID --service ID [--instance ID] (--did DID ... | --did-file PATH) [--workdir /app/packages/pds-core] [--report-dir PATH] [--apply] [--resume-report PATH | --no-resume]. Offline preview by default. Uses the Railway SSH login user without switching or checking it. Every run requires terminal confirmation (type yes). Reports and timestamped logs are private and flat. Resume only compatible inventory/target/mode, preserving queued provenance. Ctrl+C/SIGTERM saves unfinished work and exits 130. Local client termination cannot stop remote work: inspect runtime before retrying uncertain results. No PLC writes, secret copying, or PDS stop. At most 15000 DIDs.',
       )
       return 0
     }
@@ -823,14 +867,11 @@ export async function runIdentityCli(
       }
       target.push('--deployment-instance', values.instance)
     }
-    if (
-      !/^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,63}$/.test(values.user) ||
-      !/^\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+$/.test(values.workdir)
-    ) {
+    if (!/^\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+$/.test(values.workdir)) {
       throw Error('invalid-runtime')
     }
     const sshTarget = [...target]
-    target.push(values.user, values.workdir)
+    target.push('', values.workdir)
     if (values['no-resume'] && values['resume-report']) {
       throw Error('conflicting-resume')
     }
@@ -848,7 +889,7 @@ export async function runIdentityCli(
     ]
     if (
       !dids.length ||
-      dids.length > 1000 ||
+      dids.length > 15000 ||
       dids.some((did) => !validDid(did))
     ) {
       throw Error('invalid-inventory')
@@ -978,19 +1019,14 @@ export async function runIdentityCli(
       publishing = true
       const results = await publish(
         'railway',
-        [
-          'ssh',
-          ...sshTarget,
-          '--',
-          'node --input-type=module -e ' +
-            shellLiteral(remotePayload(pending, values.workdir, values.user)),
-        ],
+        ['ssh', ...sshTarget, '--', 'node --input-type=module -'],
         pending,
         undefined,
         undefined,
         controller.signal,
         (did, status) => writeLog(`${did}: ${status}`),
         writeRaw,
+        remotePayload(pending, values.workdir),
       )
       if (
         results.length !== pending.length ||
@@ -1002,9 +1038,10 @@ export async function runIdentityCli(
       ) {
         throw Error('invalid-transport')
       }
+      let resultIndex = 0
       report.results = report.results.map((r) => {
         if (r.status === 'skipped') return r
-        const result = results[pending.indexOf(r.did)]
+        const result = results[resultIndex++]
         return {
           ...result,
           ...(result.status === 'queued'
@@ -1016,19 +1053,21 @@ export async function runIdentityCli(
       })
       publishing = false
     } else if (!values.apply) {
+      let planned = 0
       for (const r of report.results) {
         if (controller.signal.aborted) break
         r.status = 'planned'
-        writeLog(`${r.did}: planned`)
+        if (report.results.length <= 20) writeLog(`${r.did}: planned`)
+        if (++planned % 100 === 0)
+          await new Promise((resolve) => setTimeout(resolve, 0))
       }
     }
-    if (values.apply) {
-      for (const result of report.results) {
-        writeLog(
-          `${result.did}: ${result.status}${result.error ? ' ' + JSON.stringify(result.error) : ''}`,
-        )
-      }
-    }
+    const failed = report.results.filter((r) => r.error)
+    if (failed.length)
+      writeLog(
+        `Batch outcomes: ${failed.length} errors; first=${JSON.stringify(failed[0].error)}; full outcomes in JSON`,
+      )
+    await new Promise((resolve) => setTimeout(resolve, 0))
     if (report.results.some((r) => r.uncertain)) {
       writeLog(
         'Remote completion uncertain; local client termination does not stop remote Node. Inspect runtime before retrying; duplicates possible.',
