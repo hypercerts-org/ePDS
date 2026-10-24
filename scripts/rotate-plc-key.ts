@@ -982,10 +982,12 @@ export async function runRotationCli(
       ? 1
       : 0
   } catch (error) {
+    const reason = rotationFailureReason(error, started)
     try {
+      if (!report) diagnostic('rotate-plc-key failed: ' + reason)
       emit({
         event: 'error',
-        reason: rotationFailureReason(error, started),
+        reason,
         submitted: started,
       })
     } catch {

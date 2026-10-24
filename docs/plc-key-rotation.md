@@ -3,7 +3,7 @@
 Use these scripts when rotating the PLC signing key shared by accounts on one PDS:
 
 - `rotate-plc-key.ts` adds or removes the key in the PLC directory.
-- `publish-identity-railway.ts` or `publish-identity-docker.ts` asks the PDS to publish `#identity` events through Railway SSH or Docker after you have verified the directory changes.
+- `scripts/publish-identity.sh --target railway|docker` asks the PDS to publish `#identity` events through Railway SSH or Docker after you have verified the directory changes.
 
 None of these scripts changes deployed secrets or redeploys the PDS. You perform that deployment step yourself.
 
@@ -18,11 +18,11 @@ deno run --no-config --no-lock --allow-net=YOUR-TRUSTED-PDS-HOST scripts/list-ac
 - Use a trusted machine. Prepare a checked list of the PDS's DIDs, with **one DID per line**. Run a separate batch for each PDS. Do not test against the public PLC directory. Use Atmosphere in a Box instead.
 - Store the old and new exportable secp256k1 keys as 64-character hexadecimal values in two separate regular files, not symlinks. Use your normal secret-management tooling to generate and protect the new key.
 - Check recovery owners, key order, and available key slots before starting. PLC allows at most five rotation keys. The script places the new key immediately before the old key, so the new key has higher priority. It does not remove recovery keys. It cannot recover or fork a DID, rotate a `did:web`, or use an HSM-held key.
-- Install Deno **2.8.3** on Linux or macOS. Copy both scripts and the wrapper to your operator workspace, then cache and review their dependencies before an incident.
+- Install Deno **2.8.3** on Linux or macOS. Copy `scripts/rotate-plc-key.{sh,ts}` and `scripts/publish-identity.{sh,ts}` to a `scripts/` directory in your operator workspace, then cache and review their dependencies before an incident.
 
 ```bash
-deno cache --no-config --no-lock --node-modules-dir=none rotate-plc-key.ts
-deno run --no-prompt --no-config --no-lock publish-identity-railway.ts --help
+deno cache --no-config --no-lock --node-modules-dir=none scripts/rotate-plc-key.ts
+scripts/publish-identity.sh --help
 ```
 
 The rotation script uses fixed versions of `@did-plc/lib` and `@atproto/crypto`. Deno resolves their indirect dependencies when you cache them, so keep and review that cache. Do not enable npm lifecycle scripts or use `--allow-all`.
@@ -98,11 +98,13 @@ Then inspect the PLC directory heads yourself. Confirm that both keys exist, the
 ## Publish identity events
 
 - Use a reviewed inventory of 1–15,000 PLC DIDs whose directory heads you have verified. Publishers do not read PLC or accept rotation reports as evidence.
-- Install Deno **2.8.3** and a trusted Railway or Docker CLI. Keep the chosen publisher's `.sh` launcher beside its matching `.ts` file; no other publisher files are needed.
+- Install Deno **2.8.3** and a trusted Railway or Docker CLI. Keep `publish-identity.sh` beside `publish-identity.ts`. Select `--target railway` or `--target docker` explicitly (or set `TARGET` for the launcher); the target is never inferred.
 - Each DID must belong to an active local account with a handle. Preview is offline; `--apply` publishes events without writing to PLC.
-- The default workdir `/app/packages/pds-core` is ePDS-specific. For a reference PDS, set `export WORKDIR=/app` before running either launcher.
+- The default workdir `/app/packages/pds-core` is ePDS-specific. For a reference PDS, set `export WORKDIR=/app` before running the launcher.
 
 `AppContext.fromEnv()` may initialize or migrate databases: stop unless the deployed PDS version, runtime permissions, configuration, and storage match; do not copy production secrets locally.
+
+Import and setup each have a separate 60-second budget. Override both with `--setup-timeout-ms MS` (integer 1–600000), for example `scripts/publish-identity.sh --target docker --apply --setup-timeout-ms 120000`. Per-DID work and cleanup remain limited to 10 seconds each; the local deadline includes both startup budgets, batch work, cleanup, and transport overhead.
 
 ### Railway
 
@@ -113,8 +115,8 @@ export SERVICE='YOUR-HOSTING-PDS-SERVICE-ID'
 export DIDS='/secure/rotation-dids.txt'
 export REPORT_DIR='/secure/rotation-reports'
 
-scripts/publish-identity-railway.sh
-scripts/publish-identity-railway.sh --apply
+scripts/publish-identity.sh --target railway
+scripts/publish-identity.sh --target railway --apply
 ```
 
 - Set all three target IDs explicitly; add `--instance ID` if needed. Use Railway SSH, not `railway run` or commands that link local CLI state.
@@ -128,8 +130,8 @@ export CONTAINER='epds-core'
 export DIDS='/secure/rotation-dids.txt'
 export REPORT_DIR='/secure/rotation-reports'
 
-scripts/publish-identity-docker.sh
-scripts/publish-identity-docker.sh --apply
+scripts/publish-identity.sh --target docker
+scripts/publish-identity.sh --target docker --apply
 ```
 
 - Set `CONTAINER` or `--container NAME_OR_ID` explicitly.
@@ -163,7 +165,7 @@ docker inspect --format '{{.Config.WorkingDir}}' "$CONTAINER"
 scripts/rotate-plc-key.sh --phase remove
 scripts/rotate-plc-key.sh --phase remove --apply --confirm-cutover
 scripts/rotate-plc-key.sh --phase remove
-scripts/publish-identity-railway.sh --apply
+scripts/publish-identity.sh --target railway --apply
 ```
 
 The first and third commands are previews. Require a successful removal, then confirm that the final preview reports `unchanged`, the old key is absent, unrelated directory data is unchanged, and both streams show fresh identity events. Unfreeze writers only after all checks pass.

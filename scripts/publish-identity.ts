@@ -71,6 +71,7 @@ const codes = [
   'unsafe-report',
   'untrusted-directory',
   'invalid-transport',
+  'invalid-setup-timeout',
 ] as const
 export interface Diagnostic {
   stage: (typeof stages)[number]
@@ -152,7 +153,11 @@ function stderrCode(text: string): Diagnostic['code'] {
   return 'unknown'
 }
 
-export function remotePayload(dids: string[], workdir: string): string {
+export function remotePayload(
+  dids: string[],
+  workdir: string,
+  { setupTimeoutMs = 60_000 }: Pick<PublishOptions, 'setupTimeoutMs'> = {},
+): string {
   return `
 const dids = ${JSON.stringify(dids)};
 const codes = ${JSON.stringify(codes)};
@@ -167,25 +172,27 @@ const safe = err => {
   return {stage, code};
 };
 const enter = value => { stage = value; emit('STAGE', {stage}); };
-const arm = () => {
+const arm = (ms = 10000) => {
   clearTimeout(timer);
   timer = setTimeout(() => {
     const error = {stage, code:'timeout'};
     emit('ERROR', {error, beforeSequence:!attempted});
     process.exit(1);
-  }, 10000);
+  }, ms);
 };
 try {
   arm();
   enter('workdir');
   process.chdir(${JSON.stringify(workdir)});
   enter('import');
+  arm(${setupTimeoutMs});
   const {createRequire} = await import('node:module');
   const {pathToFileURL} = await import('node:url');
   const require = createRequire(process.cwd() + '/package.json');
   const {AppContext} = await import(pathToFileURL(require.resolve('@atproto/pds')).href);
   if (typeof AppContext?.fromEnv !== 'function') throw new Error('api-unavailable');
   enter('setup');
+  arm(${setupTimeoutMs});
   ctx = await AppContext.fromEnv();
   enter('api');
   if (typeof ctx?.accountManager?.getAccount !== 'function' || typeof ctx?.sequencer?.sequenceIdentity !== 'function' || typeof ctx?.destroy !== 'function') throw new Error('api-unavailable');
@@ -263,6 +270,7 @@ export interface PublishOptions {
   args: string[]
   dids: string[]
   timeoutMs?: number
+  setupTimeoutMs?: number
   spawn?: Spawn
   signal?: AbortSignal
   progress?: (did: string, status: string) => void
@@ -281,7 +289,8 @@ export async function publishCommand(
     executable,
     args,
     dids,
-    timeoutMs = 20_000 + dids.length * 11_000,
+    setupTimeoutMs = 60_000,
+    timeoutMs = 30_000 + 2 * setupTimeoutMs + dids.length * 11_000,
     spawn = (executable, options) =>
       new Deno.Command(executable, options).spawn(),
     signal,
@@ -864,6 +873,7 @@ function parseCliArgs(args: string[]) {
       workdir: { type: 'string', default: '/app/packages/pds-core' },
       did: { type: 'string', multiple: true },
       'did-file': { type: 'string' },
+      'setup-timeout-ms': { type: 'string', default: '60000' },
       'report-dir': { type: 'string', default: './reports' },
       'resume-report': { type: 'string' },
       'no-resume': { type: 'boolean', default: false },
@@ -1365,9 +1375,18 @@ export async function runIdentityCli(
     const values = parseCliArgs(args)
     if (values.help) {
       output(
-        'publish-identity --target railway|docker (Railway: --project ID --environment ID --service ID [--instance ID]; Docker: --container NAME_OR_ID [--user USER[:GROUP]]) (--did DID ... | --did-file PATH) [--workdir /app/packages/pds-core] [--report-dir PATH] [--apply] [--resume-report PATH | --no-resume]. Offline preview by default. Uses Docker configured user unless --user is supplied; Railway uses its SSH login user without an expected-user check. Every run requires terminal confirmation (type yes). Reports and timestamped logs are private and flat. Resume only compatible inventory/target/mode, preserving queued provenance. Ctrl+C/SIGTERM saves unfinished work and exits 130. Local client termination cannot stop remote work: inspect runtime before retrying uncertain results. No PLC writes, secret copying, or PDS stop. At most 15000 DIDs.',
+        'publish-identity --target railway|docker (Railway: --project ID --environment ID --service ID [--instance ID]; Docker: --container NAME_OR_ID [--user USER[:GROUP]]) (--did DID ... | --did-file PATH) [--workdir /app/packages/pds-core] [--report-dir PATH] [--setup-timeout-ms MS] [--apply] [--resume-report PATH | --no-resume]. Offline preview by default. Uses Docker configured user unless --user is supplied; Railway uses its SSH login user without an expected-user check. Every run requires terminal confirmation (type yes). Reports and timestamped logs are private and flat. Resume only compatible inventory/target/mode, preserving queued provenance. Ctrl+C/SIGTERM saves unfinished work and exits 130. Local client termination cannot stop remote work: inspect runtime before retrying uncertain results. No PLC writes, secret copying, or PDS stop. At most 15000 DIDs. Import and setup each allow --setup-timeout-ms (default 60000; integer 1–600000); per-DID work and cleanup each allow 10000 ms.',
       )
       return 0
+    }
+    const setupTimeoutMs = Number(values['setup-timeout-ms'])
+    if (
+      !/^[0-9]+$/.test(values['setup-timeout-ms']) ||
+      !Number.isInteger(setupTimeoutMs) ||
+      setupTimeoutMs < 1 ||
+      setupTimeoutMs > 600_000
+    ) {
+      throw new Error('invalid-setup-timeout')
     }
     const { transport, target, args: commandArgs } = cliTarget(values)
     const dids = await cliInventory(values)
@@ -1421,7 +1440,8 @@ export async function runIdentityCli(
         signal: controller.signal,
         progress: (did, status) => writeLog(`${did}: ${status}`),
         runtimeOutput: writeRaw,
-        payload: remotePayload(pending, values.workdir),
+        setupTimeoutMs,
+        payload: remotePayload(pending, values.workdir, { setupTimeoutMs }),
       })
       mergePublishedResults(report, pending, results, priorUncertain)
       publishing = false
