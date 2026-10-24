@@ -709,7 +709,7 @@ function chooseRotationReport(
   if (choice === null) throw new RotationError('resume-cancelled')
   if (choice.trim() === '0') return undefined
   if (
-    !/^[1-9][0-9]*$/.test(choice.trim()) ||
+    !/^[1-9]\d*$/.test(choice.trim()) ||
     !candidates[Number(choice.trim()) - 1]
   )
     throw new RotationError('invalid-report-selection')

@@ -11,7 +11,7 @@ function addActiveRepo(dids: Set<string>, value: unknown): void {
     throw new Error('Invalid repository DID in listRepos response')
   }
   if (typeof repo.active !== 'boolean') {
-    throw new Error(
+    throw new TypeError(
       'Unknown repository activity: listRepos must provide active booleans',
     )
   }

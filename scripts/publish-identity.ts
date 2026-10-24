@@ -598,7 +598,6 @@ function createPublishSession({
       if (text.startsWith('EPDS_IDENTITY_RESULT:')) {
         remoteStarted = true
         result(text.slice(21))
-        return
       }
     }
     const consumeLines = async () => {
@@ -887,9 +886,7 @@ function dockerTarget(values: CliValues) {
     !values.container ||
     !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(values.container) ||
     (values.user !== undefined &&
-      !/^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,63}(?::[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,63})?$/.test(
-        values.user,
-      )) ||
+      !/^\w[\w.-]{0,63}(?::\w[\w.-]{0,63})?$/.test(values.user)) ||
     !/^\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+$/.test(values.workdir)
   ) {
     throw new Error('invalid-target')
@@ -1033,7 +1030,7 @@ async function resumeReport(
       const answer = interaction.prompt('Select report number (0 for new run):')
       if (
         answer === null ||
-        !/^(0|[1-9][0-9]*)$/.test(answer) ||
+        !/^(0|[1-9]\d*)$/.test(answer) ||
         Number(answer) > candidates.length
       ) {
         throw new Error('invalid-selection')
@@ -1219,8 +1216,7 @@ function validateProvenance(r: Report, result: IdentityResult) {
 
 function validateReportResult(r: Report, result: IdentityResult, i: number) {
   if (
-    !result ||
-    result.did !== r.inventory[i] ||
+    result?.did !== r.inventory[i] ||
     (result.error !== undefined && !validDiagnostic(result.error)) ||
     Object.keys(result).some(
       (k) => !['did', 'status', 'uncertain', 'queuedIn', 'error'].includes(k),
@@ -1354,6 +1350,19 @@ function runtimeLog(
   return { writeLog, writeRaw }
 }
 
+function parseSetupTimeout(value: string): number {
+  const setupTimeoutMs = Number(value)
+  if (
+    !/^\d+$/.test(value) ||
+    !Number.isInteger(setupTimeoutMs) ||
+    setupTimeoutMs < 1 ||
+    setupTimeoutMs > 600_000
+  ) {
+    throw new Error('invalid-setup-timeout')
+  }
+  return setupTimeoutMs
+}
+
 export async function runIdentityCli(
   args: string[],
   output: (line: string) => void,
@@ -1379,15 +1388,7 @@ export async function runIdentityCli(
       )
       return 0
     }
-    const setupTimeoutMs = Number(values['setup-timeout-ms'])
-    if (
-      !/^[0-9]+$/.test(values['setup-timeout-ms']) ||
-      !Number.isInteger(setupTimeoutMs) ||
-      setupTimeoutMs < 1 ||
-      setupTimeoutMs > 600_000
-    ) {
-      throw new Error('invalid-setup-timeout')
-    }
+    const setupTimeoutMs = parseSetupTimeout(values['setup-timeout-ms'])
     const { transport, target, args: commandArgs } = cliTarget(values)
     const dids = await cliInventory(values)
     const directory = await trustedDirectory(values['report-dir'])

@@ -6,6 +6,7 @@ for ((i=1; i<=$#; i++)); do
   case "${!i}" in
     --target) j=$((i+1)); target=${!j:-} ;;
     --target=*) target=${!i#--target=} ;;
+    *) ;;
   esac
 done
 for arg in "$@"; do
