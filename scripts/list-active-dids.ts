@@ -1,3 +1,23 @@
+function addActiveRepo(dids: Set<string>, value: unknown): void {
+  const repo = value as { did?: unknown; active?: unknown } | null
+  if (
+    !repo ||
+    typeof repo !== 'object' ||
+    typeof repo.did !== 'string' ||
+    !/^did:[a-z]+:(?:[A-Za-z0-9._:-]|%[0-9A-Fa-f]{2})*[A-Za-z0-9._-]$/.test(
+      repo.did,
+    )
+  ) {
+    throw new Error('Invalid repository DID in listRepos response')
+  }
+  if (typeof repo.active !== 'boolean') {
+    throw new Error(
+      'Unknown repository activity: listRepos must provide active booleans',
+    )
+  }
+  if (repo.active === true) dids.add(repo.did)
+}
+
 export async function listActiveDids(
   pdsUrl: string,
   fetchPage: typeof fetch = fetch,
@@ -38,24 +58,7 @@ export async function listActiveDids(
     ) {
       throw new Error('Invalid listRepos response')
     }
-    for (const repo of page.repos) {
-      if (
-        !repo ||
-        typeof repo !== 'object' ||
-        typeof repo.did !== 'string' ||
-        !/^did:[a-z]+:(?:[A-Za-z0-9._:-]|%[0-9A-Fa-f]{2})*[A-Za-z0-9._-]$/.test(
-          repo.did,
-        )
-      ) {
-        throw new Error('Invalid repository DID in listRepos response')
-      }
-      if (typeof repo.active !== 'boolean') {
-        throw new Error(
-          'Unknown repository activity: listRepos must provide active booleans',
-        )
-      }
-      if (repo.active === true) dids.add(repo.did)
-    }
+    for (const repo of page.repos) addActiveRepo(dids, repo)
     if (page.repos.length === 0 || !('cursor' in page) || !page.cursor) break
     cursor = page.cursor as string
     if (cursors.has(cursor)) throw new Error('Repeated listRepos cursor')

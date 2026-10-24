@@ -22,6 +22,7 @@ for ((i=0; i<${#args[@]}; i++)); do
     --resume-report=*) resume_path=${args[i]#--resume-report=} ;;
     --report-dir) report_dir=${args[i+1]:-} ;;
     --report-dir=*) report_dir=${args[i]#--report-dir=} ;;
+    *) ;;
   esac
 done
 permissions=(--allow-read="$report_dir" --allow-write="$report_dir")

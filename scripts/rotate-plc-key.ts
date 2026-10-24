@@ -215,6 +215,27 @@ async function rotateDidAttempt(state: DidRotation): Promise<RotationResult> {
   return { did, status: 'updated' }
 }
 
+async function retryRotation(
+  state: DidRotation,
+  attempt: number,
+  error: unknown,
+): Promise<void> {
+  state.progress({
+    event: 'retry',
+    did: state.did,
+    attempt: attempt + 1,
+    backoffMs: 500 * 2 ** attempt,
+    httpStatus: error instanceof HttpError ? error.status : undefined,
+    reason: 'plc-request-or-validation-failed',
+    submitted: state.submitted,
+  })
+  try {
+    await state.pause(500 * 2 ** attempt)
+  } catch (error) {
+    if (!state.options.signal?.aborted) throw error
+  }
+}
+
 async function rotateDid(
   state: DidRotation,
   attempt = 0,
@@ -235,20 +256,7 @@ async function rotateDid(
       }
     if (error instanceof ReportingError) throw error
     if (attempt < 3 && retryable(error)) {
-      state.progress({
-        event: 'retry',
-        did: state.did,
-        attempt: attempt + 1,
-        backoffMs: 500 * 2 ** attempt,
-        httpStatus: error instanceof HttpError ? error.status : undefined,
-        reason: 'plc-request-or-validation-failed',
-        submitted: state.submitted,
-      })
-      try {
-        await state.pause(500 * 2 ** attempt)
-      } catch (error) {
-        if (!state.options.signal?.aborted) throw error
-      }
+      await retryRotation(state, attempt, error)
       return rotateDid(state, attempt + 1)
     }
     return {
@@ -400,7 +408,7 @@ export class RotationReport {
 
   constructor(
     directory: string,
-    private diagnostic: (line: string) => void,
+    private readonly diagnostic: (line: string) => void,
   ) {
     try {
       try {
@@ -638,6 +646,76 @@ export function resumeResults(report: BatchReport): RotationResult[] {
   })
 }
 
+async function readResumeReport(path: string, target: RotationTarget) {
+  const canonical = await permittedReadPath(path)
+  if (
+    !(await Deno.lstat(path)).isFile ||
+    (await Deno.stat(canonical)).size > 8_000_000
+  )
+    throw new RotationError('invalid-resume-file')
+  return validateResumeReport(
+    JSON.parse(await Deno.readTextFile(canonical)),
+    target,
+  )
+}
+
+async function rotationCandidates(
+  directory: string,
+  target: RotationTarget,
+  inform: (line: string) => void,
+) {
+  const candidates: { name: string; report: BatchReport }[] = []
+  for await (const entry of Deno.readDir(directory)) {
+    if (!entry.isFile || !/^rotation-.*\.json$/.test(entry.name)) continue
+    try {
+      candidates.push({
+        name: entry.name,
+        report: await readResumeReport(directory + '/' + entry.name, target),
+      })
+    } catch {
+      inform('Ignoring invalid or nonmatching rotation report: ' + entry.name)
+    }
+  }
+  return candidates
+}
+
+function chooseRotationReport(
+  candidates: { name: string; report: BatchReport }[],
+  ask: Prompt,
+  inform: (line: string) => void,
+  interactive: boolean,
+): BatchReport | undefined {
+  candidates.sort((a, b) => a.name.localeCompare(b.name))
+  if (!candidates.length) return undefined
+  if (!interactive)
+    throw new RotationError('choose-no-resume-or-explicit-resume-report')
+  inform('0) New run (use current inventory)')
+  candidates.forEach((candidate, index) =>
+    inform(
+      String(index + 1) +
+        ') ' +
+        candidate.name +
+        ' - ' +
+        new Date(candidate.report.finishedAt).toLocaleString('en-GB', {
+          dateStyle: 'medium',
+          timeStyle: 'long',
+          timeZone: 'UTC',
+        }),
+    ),
+  )
+  const choice = ask(
+    'Choose report number, or 0 for a new run (Cancel to stop):',
+  )
+  if (choice === null) throw new RotationError('resume-cancelled')
+  if (choice.trim() === '0') return undefined
+  if (
+    !/^[1-9][0-9]*$/.test(choice.trim()) ||
+    !candidates[Number(choice.trim()) - 1]
+  )
+    throw new RotationError('invalid-report-selection')
+  return candidates[Number(choice.trim()) - 1].report
+}
+
 export async function selectResumeReport(
   directory: string,
   target: RotationTarget,
@@ -649,62 +727,11 @@ export async function selectResumeReport(
 ): Promise<BatchReport | undefined> {
   if (explicit && noResume) throw new RotationError('invalid-resume-options')
   if (noResume) return undefined
-  const read = async (path: string) => {
-    const canonical = await permittedReadPath(path)
-    if (
-      !(await Deno.lstat(path)).isFile ||
-      (await Deno.stat(canonical)).size > 8_000_000
-    )
-      throw new RotationError('invalid-resume-file')
-    return validateResumeReport(
-      JSON.parse(await Deno.readTextFile(canonical)),
-      target,
-    )
-  }
   let selected: BatchReport | undefined
-  if (explicit) selected = await read(explicit)
+  if (explicit) selected = await readResumeReport(explicit, target)
   else {
-    const candidates: { name: string; report: BatchReport }[] = []
-    for await (const entry of Deno.readDir(directory)) {
-      if (!entry.isFile || !/^rotation-.*\.json$/.test(entry.name)) continue
-      try {
-        candidates.push({
-          name: entry.name,
-          report: await read(directory + '/' + entry.name),
-        })
-      } catch {
-        inform('Ignoring invalid or nonmatching rotation report: ' + entry.name)
-      }
-    }
-    candidates.sort((a, b) => a.name.localeCompare(b.name))
-    if (!candidates.length) return undefined
-    if (!interactive)
-      throw new RotationError('choose-no-resume-or-explicit-resume-report')
-    inform('0) New run (use current inventory)')
-    candidates.forEach((candidate, index) =>
-      inform(
-        String(index + 1) +
-          ') ' +
-          candidate.name +
-          ' - ' +
-          new Date(candidate.report.finishedAt).toLocaleString('en-GB', {
-            dateStyle: 'medium',
-            timeStyle: 'long',
-            timeZone: 'UTC',
-          }),
-      ),
-    )
-    const choice = ask(
-      'Choose report number, or 0 for a new run (Cancel to stop):',
-    )
-    if (choice === null) throw new RotationError('resume-cancelled')
-    if (choice.trim() === '0') return undefined
-    if (
-      !/^[1-9][0-9]*$/.test(choice.trim()) ||
-      !candidates[Number(choice.trim()) - 1]
-    )
-      throw new RotationError('invalid-report-selection')
-    selected = candidates[Number(choice.trim()) - 1].report
+    const candidates = await rotationCandidates(directory, target, inform)
+    selected = chooseRotationReport(candidates, ask, inform, interactive)
   }
   return selected
 }
@@ -736,6 +763,132 @@ export function outcomeTable(results: RotationResult[]): string {
   ].join('\n')
 }
 
+function parseRotationArgs(args: string[]) {
+  return parseArgs({
+    args,
+    options: {
+      help: { type: 'boolean' },
+      'resume-report': { type: 'string' },
+      'no-resume': { type: 'boolean', default: false },
+      'report-dir': { type: 'string', default: './reports' },
+      apply: { type: 'boolean', default: false },
+      'confirm-cutover': { type: 'boolean', default: false },
+      phase: { type: 'string' },
+      'plc-url': { type: 'string' },
+      did: { type: 'string', multiple: true },
+      'did-file': { type: 'string' },
+      'old-key-file': { type: 'string' },
+      'new-key-file': { type: 'string' },
+    },
+  }).values
+}
+type RotationValues = ReturnType<typeof parseRotationArgs>
+
+async function prepareRotation(
+  values: RotationValues,
+  env: Record<string, string | undefined>,
+  signal: AbortSignal,
+) {
+  if (!values['plc-url'] || !['add', 'remove'].includes(values.phase ?? ''))
+    throw new RotationError('explicit-url-and-phase-required')
+  if (values.apply && values.phase === 'remove' && !values['confirm-cutover'])
+    throw new RotationError('confirm-cutover-required')
+  const client = createRotationClient(values['plc-url'], signal)
+  const oldKey = await loadKey(
+    values['old-key-file'],
+    env.PLC_ROTATION_OLD_KEY_HEX,
+  )
+  const newKey = await loadKey(
+    values['new-key-file'],
+    env.PLC_ROTATION_NEW_KEY_HEX,
+  )
+  const target: RotationTarget = {
+    phase: values.phase as RotationOptions['phase'],
+    apply: values.apply,
+    plcUrl: new URL(values['plc-url']).origin,
+    oldKey: oldKey.did(),
+    newKey: newKey.did(),
+  }
+  return { client, oldKey, newKey, target }
+}
+
+async function rotationInventory(
+  values: RotationValues,
+  previous?: BatchReport,
+): Promise<string[]> {
+  let dids: string[]
+  if (previous) dids = previous.inventory
+  else {
+    if (Boolean(values.did?.length) === Boolean(values['did-file']))
+      throw new RotationError('choose-one-did-source')
+    dids = values['did-file']
+      ? (await Deno.readTextFile(await permittedReadPath(values['did-file'])))
+          .split(/\r?\n/)
+          .map((did) => did.trim())
+          .filter(Boolean)
+      : values.did!
+    validateInventory(dids)
+  }
+  return dids
+}
+
+function finishRotation(
+  batch: BatchReport,
+  report: RotationReport,
+  interrupted: boolean,
+  status: number,
+  diagnostic: (line: string) => void,
+  output: (line: string) => void,
+): number {
+  batch.interrupted = interrupted
+  batch.finishedAt = new Date().toISOString()
+  if (batch.interrupted) status = 130
+  try {
+    report.publish(JSON.stringify(batch))
+  } catch {
+    diagnostic(
+      'Final reporting failed; inspect PLC heads and the private log before retrying.',
+    )
+    if (status !== 130) status = 1
+  }
+  output(outcomeTable(batch.results))
+  output('JSON report: ' + report.reportPath)
+  output('Log: ' + report.logPath)
+  return status
+}
+
+function rotationFailureReason(error: unknown, started: boolean): string {
+  if (error instanceof RotationError) return error.message
+  return started ? 'rotation-or-output-failed' : 'invalid-input-or-key-source'
+}
+
+function confirmRotation(
+  dids: string[],
+  results: RotationResult[],
+  report: RotationReport,
+  ask: Prompt,
+  interactive: boolean,
+) {
+  const skipped = results.filter((result) => result.status === 'skipped').length
+  const pending = results.length - skipped
+  report.message(
+    'Inventory: ' +
+      dids.length +
+      ' DIDs; process ' +
+      pending +
+      ', skip ' +
+      skipped +
+      '.',
+  )
+  if (
+    !interactive ||
+    ask('Process ' + pending + ' DIDs? Type yes to confirm:')
+      ?.trim()
+      .toLowerCase() !== 'yes'
+  )
+    throw new RotationError('rotation-not-confirmed')
+}
+
 export async function runRotationCli(
   args: string[],
   env: Record<string, string | undefined>,
@@ -761,23 +914,7 @@ export async function runRotationCli(
   let listening = false
   let status = 1
   try {
-    const { values } = parseArgs({
-      args,
-      options: {
-        help: { type: 'boolean' },
-        'resume-report': { type: 'string' },
-        'no-resume': { type: 'boolean', default: false },
-        'report-dir': { type: 'string', default: './reports' },
-        apply: { type: 'boolean', default: false },
-        'confirm-cutover': { type: 'boolean', default: false },
-        phase: { type: 'string' },
-        'plc-url': { type: 'string' },
-        did: { type: 'string', multiple: true },
-        'did-file': { type: 'string' },
-        'old-key-file': { type: 'string' },
-        'new-key-file': { type: 'string' },
-      },
-    })
+    const values = parseRotationArgs(args)
     if (values.help) {
       diagnostic(
         'rotate-plc-key --phase add|remove --plc-url URL (--did DID ... | --did-file PATH) [--report-dir PATH] [--resume-report PATH | --no-resume] [--apply] [--confirm-cutover] [--old-key-file PATH --new-key-file PATH]. Dry-run by default. Every run requires terminal confirmation of the DID count before PLC access. Keys: owner-only hex files or PLC_ROTATION_OLD_KEY_HEX / PLC_ROTATION_NEW_KEY_HEX, never CLI hex. PLC only; publish identity separately after verifying results. Remove --apply also requires --confirm-cutover; deployment cutover is manual.',
@@ -788,26 +925,11 @@ export async function runRotationCli(
     Deno.addSignalListener('SIGINT', interrupt)
     Deno.addSignalListener('SIGTERM', interrupt)
     listening = true
-    if (!values['plc-url'] || !['add', 'remove'].includes(values.phase ?? ''))
-      throw new RotationError('explicit-url-and-phase-required')
-    if (values.apply && values.phase === 'remove' && !values['confirm-cutover'])
-      throw new RotationError('confirm-cutover-required')
-    const client = createRotationClient(values['plc-url'], controller.signal)
-    const oldKey = await loadKey(
-      values['old-key-file'],
-      env.PLC_ROTATION_OLD_KEY_HEX,
+    const { client, oldKey, newKey, target } = await prepareRotation(
+      values,
+      env,
+      controller.signal,
     )
-    const newKey = await loadKey(
-      values['new-key-file'],
-      env.PLC_ROTATION_NEW_KEY_HEX,
-    )
-    const target: RotationTarget = {
-      phase: values.phase as RotationOptions['phase'],
-      apply: values.apply,
-      plcUrl: new URL(values['plc-url']).origin,
-      oldKey: oldKey.did(),
-      newKey: newKey.did(),
-    }
     const previous = await selectResumeReport(
       values['report-dir'],
       target,
@@ -817,19 +939,7 @@ export async function runRotationCli(
       values['resume-report'],
       values['no-resume'],
     )
-    let dids: string[]
-    if (previous) dids = previous.inventory
-    else {
-      if (Boolean(values.did?.length) === Boolean(values['did-file']))
-        throw new RotationError('choose-one-did-source')
-      dids = values['did-file']
-        ? (await Deno.readTextFile(await permittedReadPath(values['did-file'])))
-            .split(/\r?\n/)
-            .map((did) => did.trim())
-            .filter(Boolean)
-        : values.did!
-      validateInventory(dids)
-    }
+    const dids = await rotationInventory(values, previous)
     const results: RotationResult[] = previous
       ? resumeResults(previous)
       : dids.map((did) => ({
@@ -837,36 +947,13 @@ export async function runRotationCli(
           status: 'not-completed',
           reason: 'not-started',
         }))
-    const skipped = results.filter(
-      (result) => result.status === 'skipped',
-    ).length
-    const pending = results.length - skipped
-    report.message(
-      'Inventory: ' +
-        dids.length +
-        ' DIDs; process ' +
-        pending +
-        ', skip ' +
-        skipped +
-        '.',
-    )
-    if (
-      !interactive ||
-      ask('Process ' + pending + ' DIDs? Type yes to confirm:')
-        ?.trim()
-        .toLowerCase() !== 'yes'
-    )
-      throw new RotationError('rotation-not-confirmed')
+    confirmRotation(dids, results, report, ask, interactive)
     controller.signal.throwIfAborted()
     batch = {
       kind: 'plc-key-rotation',
       version: 1,
       id: crypto.randomUUID(),
-      phase: values.phase as RotationOptions['phase'],
-      apply: values.apply,
-      plcUrl: new URL(values['plc-url']).origin,
-      oldKey: oldKey.did(),
-      newKey: newKey.did(),
+      ...target,
       inventory: dids,
       results,
       ...(previous ? { resumedFrom: previous.id } : {}),
@@ -898,12 +985,7 @@ export async function runRotationCli(
     try {
       emit({
         event: 'error',
-        reason:
-          error instanceof RotationError
-            ? error.message
-            : started
-              ? 'rotation-or-output-failed'
-              : 'invalid-input-or-key-source',
+        reason: rotationFailureReason(error, started),
         submitted: started,
       })
     } catch {
@@ -912,22 +994,15 @@ export async function runRotationCli(
       )
     }
   } finally {
-    if (batch && report) {
-      batch.interrupted = controller.signal.aborted
-      batch.finishedAt = new Date().toISOString()
-      if (batch.interrupted) status = 130
-      try {
-        report.publish(JSON.stringify(batch))
-      } catch {
-        diagnostic(
-          'Final reporting failed; inspect PLC heads and the private log before retrying.',
-        )
-        if (status !== 130) status = 1
-      }
-      output(outcomeTable(batch.results))
-      output('JSON report: ' + report.reportPath)
-      output('Log: ' + report.logPath)
-    }
+    if (batch && report)
+      status = finishRotation(
+        batch,
+        report,
+        controller.signal.aborted,
+        status,
+        diagnostic,
+        output,
+      )
     if (listening) {
       Deno.removeSignalListener('SIGINT', interrupt)
       Deno.removeSignalListener('SIGTERM', interrupt)

@@ -85,16 +85,11 @@ function diagnostic(stage: Diagnostic['stage'], err: unknown): Diagnostic {
   )
     ? 'E2BIG'
     : (e?.code ?? e?.message)
-  return {
-    stage,
-    code: codes.includes(candidate as Diagnostic['code'])
-      ? (candidate as Diagnostic['code'])
-      : e?.name === 'NotFound'
-        ? 'ENOENT'
-        : e?.name === 'PermissionDenied'
-          ? 'EACCES'
-          : 'unknown',
-  }
+  if (codes.includes(candidate as Diagnostic['code']))
+    return { stage, code: candidate as Diagnostic['code'] }
+  if (e?.name === 'NotFound') return { stage, code: 'ENOENT' }
+  if (e?.name === 'PermissionDenied') return { stage, code: 'EACCES' }
+  return { stage, code: 'unknown' }
 }
 function validDiagnostic(value: unknown): value is Diagnostic {
   const e = value as Diagnostic
@@ -126,7 +121,7 @@ function stderrCode(text: string): Diagnostic['code'] {
       /^(?:E[A-Z]+|SQLITE_|MODULE_|ERR_|SyntaxError|TypeError|RangeError)/.test(
         code,
       ) &&
-      new RegExp('\\b' + code + '\\b').test(text)
+      new RegExp(String.raw`\b${code}\b`).test(text)
     )
       return code
   if (/container .* is not running/i.test(text)) return 'container-not-running'
@@ -164,7 +159,13 @@ const codes = ${JSON.stringify(codes)};
 let ctx, timer, stage = 'workdir', attempted = false;
 const results = [];
 const emit = (kind, value) => console.log('EPDS_IDENTITY_' + kind + ':' + JSON.stringify(value));
-const safe = err => ({stage, code: codes.includes(err?.code) ? err.code : codes.includes(err?.message) ? err.message : codes.includes(err?.name) ? err.name : /migration.*failed|failed.*migration/i.test(err?.message || '') ? 'migration-failure' : 'unknown'});
+const safe = err => {
+  for (const code of [err?.code, err?.message, err?.name]) {
+    if (codes.includes(code)) return {stage, code};
+  }
+  const code = /migration.*failed|failed.*migration/i.test(err?.message || '') ? 'migration-failure' : 'unknown';
+  return {stage, code};
+};
 const enter = value => { stage = value; emit('STAGE', {stage}); };
 const arm = () => {
   clearTimeout(timer);
@@ -183,20 +184,20 @@ try {
   const {pathToFileURL} = await import('node:url');
   const require = createRequire(process.cwd() + '/package.json');
   const {AppContext} = await import(pathToFileURL(require.resolve('@atproto/pds')).href);
-  if (typeof AppContext?.fromEnv !== 'function') throw Error('api-unavailable');
+  if (typeof AppContext?.fromEnv !== 'function') throw new Error('api-unavailable');
   enter('setup');
   ctx = await AppContext.fromEnv();
   enter('api');
-  if (typeof ctx?.accountManager?.getAccount !== 'function' || typeof ctx?.sequencer?.sequenceIdentity !== 'function' || typeof ctx?.destroy !== 'function') throw Error('api-unavailable');
+  if (typeof ctx?.accountManager?.getAccount !== 'function' || typeof ctx?.sequencer?.sequenceIdentity !== 'function' || typeof ctx?.destroy !== 'function') throw new Error('api-unavailable');
   for (const did of dids) {
     arm();
     emit('PROGRESS', {did, status:'started'});
     let sequencingAttempted = false;
     try {
       enter('account');
-      if (!/^did:plc:[a-z2-7]{24}$/.test(did)) throw Error('invalid-did');
+      if (!/^did:plc:[a-z2-7]{24}$/.test(did)) throw new Error('invalid-did');
       const account = await ctx.accountManager.getAccount(did, {includeDeactivated:true, includeTakenDown:true});
-      if (!account || account.did !== did || !account.handle || account.deactivatedAt || account.takedownRef) throw Error('inactive-or-missing-account');
+      if (!account || account.did !== did || !account.handle || account.deactivatedAt || account.takedownRef) throw new Error('inactive-or-missing-account');
       enter('sequence');
       sequencingAttempted = true; attempted = true;
       await ctx.sequencer.sequenceIdentity(did, account.handle);
@@ -237,22 +238,78 @@ type Child = {
 }
 type Spawn = (executable: string, options: Deno.CommandOptions) => Child
 
-export async function publishCommand(
-  executable: string,
-  args: string[],
-  dids: string[],
-  timeoutMs = 20_000 + dids.length * 11_000,
-  spawn: Spawn = (executable, options) =>
-    new Deno.Command(executable, options).spawn(),
-  signal?: AbortSignal,
-  progress: (did: string, status: string) => void = () => {},
-  runtimeOutput: (
+function hasExactKeys(value: object, expected: string[]): boolean {
+  const keys = Object.keys(value)
+  return (
+    keys.length === expected.length &&
+    keys.every((key) => expected.includes(key))
+  )
+}
+
+function validProtocolFields(value: IdentityResult): boolean {
+  const keys = ['did', 'status']
+  if (Object.hasOwn(value, 'error')) keys.push('error')
+  if (Object.hasOwn(value, 'uncertain')) keys.push('uncertain')
+  return (
+    hasExactKeys(value, keys) &&
+    (value.uncertain === undefined ||
+      (value.uncertain === true && value.status === 'not-completed')) &&
+    (value.error === undefined || validDiagnostic(value.error))
+  )
+}
+
+export interface PublishOptions {
+  executable: string
+  args: string[]
+  dids: string[]
+  timeoutMs?: number
+  spawn?: Spawn
+  signal?: AbortSignal
+  progress?: (did: string, status: string) => void
+  runtimeOutput?: (
     channel: 'stdout' | 'stderr',
     bytes: Uint8Array,
     stage: Diagnostic['stage'],
-  ) => void = () => {},
-  payload?: string,
+  ) => void
+  payload?: string
+}
+
+export async function publishCommand(
+  options: PublishOptions,
 ): Promise<IdentityResult[]> {
+  const {
+    executable,
+    args,
+    dids,
+    timeoutMs = 20_000 + dids.length * 11_000,
+    spawn = (executable, options) =>
+      new Deno.Command(executable, options).spawn(),
+    signal,
+    progress = () => {},
+    runtimeOutput = () => {},
+    payload,
+  } = options
+  return await createPublishSession({
+    signal,
+    progress,
+    runtimeOutput,
+    dids,
+  }).run({
+    executable,
+    args,
+    spawn,
+    payload,
+    timeoutMs,
+  })
+}
+
+function createPublishSession({
+  signal,
+  progress,
+  runtimeOutput,
+  dids,
+}: Required<Pick<PublishOptions, 'progress' | 'runtimeOutput' | 'dids'>> &
+  Pick<PublishOptions, 'signal'>) {
   let settled = false
   const bounded = async <T>(promise: Promise<T>): Promise<T | undefined> => {
     let timeout: ReturnType<typeof setTimeout> | undefined
@@ -297,26 +354,29 @@ export async function publishCommand(
   const markers = ['STAGE', 'ERROR', 'PROGRESS', 'RESULT'].map((kind) =>
     new TextEncoder().encode(`EPDS_IDENTITY_${kind}:`),
   )
+  const classifyPrefix = (byte: number, parts: Uint8Array[]): boolean => {
+    prefix.push(byte)
+    const possible = markers.filter((marker) =>
+      prefix.every((b, n) => marker[n] === b),
+    )
+    if (!possible.length) {
+      stdoutProtocol = false
+      parts.push(new Uint8Array(prefix))
+      prefix = []
+      return true
+    } else if (possible.some((marker) => marker.length === prefix.length)) {
+      stdoutProtocol = true
+      prefix = []
+    }
+    return false
+  }
   const rawStdout = (chunk: Uint8Array) => {
     const parts: Uint8Array[] = []
     let start = 0
     for (let i = 0; i < chunk.length; i++) {
       const byte = chunk[i]
-      if (stdoutProtocol === undefined) {
-        prefix.push(byte)
-        const possible = markers.filter((marker) =>
-          prefix.every((b, n) => marker[n] === b),
-        )
-        if (!possible.length) {
-          stdoutProtocol = false
-          parts.push(new Uint8Array(prefix))
-          prefix = []
-          start = i + 1
-        } else if (possible.some((marker) => marker.length === prefix.length)) {
-          stdoutProtocol = true
-          prefix = []
-        }
-      }
+      if (stdoutProtocol === undefined && classifyPrefix(byte, parts))
+        start = i + 1
       if (byte === 10) {
         if (stdoutProtocol === false && start <= i)
           parts.push(chunk.subarray(start, i + 1))
@@ -341,241 +401,23 @@ export async function publishCommand(
       ...(child && !remoteBeforeSequence ? { uncertain: true } : {}),
       ...(failure ? { error: failure } : {}),
     }))
-  try {
-    if (signal?.aborted) {
-      return dids.map((did) => ({
-        did,
-        status: 'not-completed',
-        error: { stage: 'transport', code: 'interrupted' },
-      }))
+  const terminateChild = async (child: Child) => {
+    try {
+      child.kill('SIGTERM')
+    } catch (err) {
+      raw('stderr', new TextEncoder().encode(String(err)))
     }
-    child = spawn(executable, {
-      args,
-      stdin: payload === undefined ? 'null' : 'piped',
-      stdout: 'piped',
-      stderr: 'piped',
-    })
-    const process = child
-    stderrDone = (async () => {
-      let buffer = ''
-      const decoder = new TextDecoder()
-      if (process.stderr)
-        for await (const chunk of process.stderr) {
-          raw('stderr', chunk)
-          // Bounded overlapping windows, drained concurrently to avoid pipe deadlock.
-          for (let i = 0; i < chunk.length; i += 4096) {
-            buffer = (
-              buffer +
-              decoder.decode(chunk.subarray(i, i + 4096), { stream: true })
-            ).slice(-8192)
-            const code = stderrCode(buffer)
-            if (code !== 'unknown' && !stderrFailure)
-              stderrFailure = { stage: remoteStage, code }
-          }
-        }
-    })()
-    const send = async () => {
-      if (payload === undefined) return
-      if (!process.stdin) throw Error('invalid-transport')
-      const writer = process.stdin.getWriter()
+    commandStatus = await bounded(child.status.catch(() => undefined))
+    if (!commandStatus) {
       try {
-        await writer.write(new TextEncoder().encode(payload))
-        await writer.close()
-      } finally {
-        writer.releaseLock()
+        child.kill('SIGKILL')
+      } catch (err) {
+        raw('stderr', new TextEncoder().encode(String(err)))
       }
+      commandStatus = await bounded(child.status.catch(() => undefined))
     }
-    const collect = async () => {
-      let linesRead = 0
-      let size = 0
-      let buffer = ''
-      let final: IdentityResult[] | undefined
-      let index = 0
-      let started = false
-      const provisional: IdentityResult[] = []
-      const decoder = new TextDecoder()
-      const line = (text: string) => {
-        if (text.startsWith('EPDS_IDENTITY_STAGE:')) {
-          remoteStarted = true
-          const value = JSON.parse(text.slice(20))
-          if (
-            !value ||
-            Object.keys(value).join() !== 'stage' ||
-            !stages.includes(value.stage)
-          )
-            throw Error('protocol-mismatch')
-          remoteStage = value.stage
-          if (value.stage === 'sequence') seenSequence = true
-          progress('remote', value.stage)
-        } else if (text.startsWith('EPDS_IDENTITY_ERROR:')) {
-          remoteStarted = true
-          const value = JSON.parse(text.slice(20))
-          if (
-            !value ||
-            Object.keys(value).sort().join() !== 'beforeSequence,error' ||
-            !validDiagnostic(value.error) ||
-            typeof value.beforeSequence !== 'boolean' ||
-            (seenSequence && value.beforeSequence)
-          )
-            throw Error('protocol-mismatch')
-          failure = value.error
-          remoteBeforeSequence = value.beforeSequence
-          progress('remote', JSON.stringify(failure))
-        } else if (text.startsWith('EPDS_IDENTITY_PROGRESS:')) {
-          remoteStarted = true
-          const value = JSON.parse(text.slice(23))
-          if (
-            final ||
-            !value ||
-            ![
-              'did,status',
-              'did,status,uncertain',
-              'did,error,status',
-              'did,error,status,uncertain',
-            ].includes(Object.keys(value).sort().join()) ||
-            (value.uncertain !== undefined &&
-              (value.uncertain !== true || value.status !== 'not-completed')) ||
-            (value.error !== undefined && !validDiagnostic(value.error)) ||
-            value.did !== dids[index]
-          ) {
-            throw Error('protocol')
-          }
-          if (!started && value.status === 'started') started = true
-          else if (
-            started &&
-            (['queued', 'failed'].includes(value.status) ||
-              (value.status === 'not-completed' && value.uncertain === true))
-          ) {
-            provisional.push(value)
-            index++
-            started = false
-          } else throw Error('protocol')
-          if (value.error) progress(value.did, JSON.stringify(value.error))
-          progress(
-            value.did,
-            value.status === 'queued'
-              ? 'stored; cleanup pending'
-              : value.uncertain
-                ? 'not-completed; remote outcome uncertain'
-                : value.status,
-          )
-        } else if (text.startsWith('EPDS_IDENTITY_RESULT:')) {
-          remoteStarted = true
-          if (final) throw Error('duplicate')
-          const value: unknown = JSON.parse(text.slice(21))
-          if (
-            !Array.isArray(value) ||
-            value.length !== dids.length ||
-            value.some(
-              (r, i) =>
-                !r ||
-                ![
-                  'did,status',
-                  'did,status,uncertain',
-                  'did,error,status',
-                  'did,error,status,uncertain',
-                ].includes(Object.keys(r).sort().join()) ||
-                (r.uncertain !== undefined &&
-                  (r.uncertain !== true || r.status !== 'not-completed')) ||
-                (r.error !== undefined && !validDiagnostic(r.error)) ||
-                r.did !== dids[i] ||
-                (!['queued', 'failed'].includes(r.status) &&
-                  !(r.status === 'not-completed' && r.uncertain === true)),
-            )
-          ) {
-            throw Error('result')
-          }
-          if (
-            (index || started) &&
-            (index !== dids.length ||
-              (JSON.stringify(value) !== JSON.stringify(provisional) &&
-                !(
-                  failure?.stage === 'cleanup' &&
-                  value.every(
-                    (r, i) =>
-                      JSON.stringify(r) === JSON.stringify(provisional[i]) ||
-                      (provisional[i]?.status === 'queued' &&
-                        r.status === 'not-completed' &&
-                        r.error?.stage === 'cleanup'),
-                  )
-                )))
-          ) {
-            throw Error('inconsistent-progress')
-          }
-          final = value
-        }
-      }
-      for await (const chunk of process.stdout) {
-        if (settled) return incomplete()
-        if (signal?.aborted) throw Error('interrupted')
-        rawStdout(chunk)
-        size += chunk.length
-        if (size > 32_000_000) throw Error('output-limit')
-        buffer += decoder.decode(chunk, { stream: true })
-        let end: number
-        while ((end = buffer.indexOf('\n')) !== -1) {
-          line(buffer.slice(0, end).replace(/\r$/, ''))
-          buffer = buffer.slice(end + 1)
-          if (++linesRead % 100 === 0) {
-            await new Promise((resolve) => setTimeout(resolve, 0))
-            if (settled || signal?.aborted) throw Error('interrupted')
-          }
-        }
-      }
-      if (prefix.length) raw('stdout', new Uint8Array(prefix))
-      buffer += decoder.decode()
-      if (buffer) line(buffer)
-      const status = await process.status
-      commandStatus = status
-      await stderrDone
-      progress(
-        'runtime',
-        `last stage=${remoteStage}; exit code=${status.code}; signal=${status.signal ?? 'none'}`,
-      )
-      if (
-        !final ||
-        status.signal ||
-        status.code !== (final.every((r) => r.status === 'queued') ? 0 : 1) ||
-        status.success !== final.every((r) => r.status === 'queued')
-      ) {
-        failure ??= stderrFailure
-        failure ??= {
-          stage: stored.stderr || stored.stdout ? remoteStage : 'protocol',
-          code:
-            !final && !stored.stderr && !stored.stdout
-              ? 'missing-result'
-              : 'exit-failure',
-        }
-        failure = {
-          ...failure,
-          exitCode: status.code,
-          ...(status.signal ? { signal: status.signal } : {}),
-        }
-        if (
-          !remoteStarted &&
-          [
-            'container-not-running',
-            'container-unknown',
-            'executable-absent',
-            'authentication',
-            'invalid-workdir',
-          ].includes(failure.code)
-        )
-          remoteBeforeSequence = true
-        throw Error('exit-failure')
-      }
-      return final
-    }
-    return await Promise.race([
-      Promise.all([collect(), send()]).then(([results]) => results),
-      new Promise<never>((_, reject) => {
-        rejectAbort = () => reject(Error('interrupted'))
-        signal?.addEventListener('abort', abort, { once: true })
-        if (signal?.aborted) rejectAbort()
-        timer = setTimeout(() => reject(Error('timeout')), timeoutMs)
-      }),
-    ])
-  } catch (err) {
+  }
+  const handleFailure = async (err: unknown): Promise<IdentityResult[]> => {
     if (!child)
       raw(
         'stderr',
@@ -592,22 +434,7 @@ export async function publishCommand(
     )
       failure.stage = 'protocol'
     if (failure.code === 'unknown' && child) failure.code = 'protocol-mismatch'
-    if (child) {
-      try {
-        child.kill('SIGTERM')
-      } catch (err) {
-        raw('stderr', new TextEncoder().encode(String(err)))
-      }
-      commandStatus = await bounded(child.status.catch(() => undefined))
-      if (!commandStatus) {
-        try {
-          child.kill('SIGKILL')
-        } catch (err) {
-          raw('stderr', new TextEncoder().encode(String(err)))
-        }
-        commandStatus = await bounded(child.status.catch(() => undefined))
-      }
-    }
+    if (child) await terminateChild(child)
     await bounded(stderrDone.catch(() => {}))
     if (commandStatus)
       failure = {
@@ -617,10 +444,268 @@ export async function publishCommand(
       }
     progress('failure', JSON.stringify(failure))
     return incomplete()
-  } finally {
-    settled = true
-    clearTimeout(timer)
-    signal?.removeEventListener('abort', abort)
+  }
+  const drainStderr = async (process: Child) => {
+    let buffer = ''
+    const decoder = new TextDecoder()
+    if (process.stderr)
+      for await (const chunk of process.stderr) {
+        raw('stderr', chunk)
+        // Bounded overlapping windows, drained concurrently to avoid pipe deadlock.
+        for (let i = 0; i < chunk.length; i += 4096) {
+          buffer = (
+            buffer +
+            decoder.decode(chunk.subarray(i, i + 4096), { stream: true })
+          ).slice(-8192)
+          const code = stderrCode(buffer)
+          if (code !== 'unknown' && !stderrFailure)
+            stderrFailure = { stage: remoteStage, code }
+        }
+      }
+  }
+  const send = async (process: Child, payload?: string) => {
+    if (payload === undefined) return
+    if (!process.stdin) throw new Error('invalid-transport')
+    const writer = process.stdin.getWriter()
+    try {
+      await writer.write(new TextEncoder().encode(payload))
+      await writer.close()
+    } finally {
+      writer.releaseLock()
+    }
+  }
+  const collect = async (process: Child) => {
+    let linesRead = 0
+    let size = 0
+    let buffer = ''
+    let final: IdentityResult[] | undefined
+    let index = 0
+    let started = false
+    const provisional: IdentityResult[] = []
+    const decoder = new TextDecoder()
+    const stage = (text: string) => {
+      const value = JSON.parse(text)
+      if (
+        !value ||
+        !hasExactKeys(value, ['stage']) ||
+        !stages.includes(value.stage)
+      )
+        throw new Error('protocol-mismatch')
+      remoteStage = value.stage
+      if (value.stage === 'sequence') seenSequence = true
+      progress('remote', value.stage)
+    }
+    const error = (text: string) => {
+      const value = JSON.parse(text)
+      if (
+        !value ||
+        !hasExactKeys(value, ['beforeSequence', 'error']) ||
+        !validDiagnostic(value.error) ||
+        typeof value.beforeSequence !== 'boolean' ||
+        (seenSequence && value.beforeSequence)
+      )
+        throw new Error('protocol-mismatch')
+      failure = value.error
+      remoteBeforeSequence = value.beforeSequence
+      progress('remote', JSON.stringify(failure))
+    }
+    const progressResult = (text: string) => {
+      const value = JSON.parse(text)
+      if (
+        final ||
+        !value ||
+        !validProtocolFields(value) ||
+        value.did !== dids[index]
+      ) {
+        throw new Error('protocol')
+      }
+      if (!started && value.status === 'started') started = true
+      else if (
+        started &&
+        (['queued', 'failed'].includes(value.status) ||
+          (value.status === 'not-completed' && value.uncertain === true))
+      ) {
+        provisional.push(value)
+        index++
+        started = false
+      } else throw new Error('protocol')
+      if (value.error) progress(value.did, JSON.stringify(value.error))
+      let message = value.status
+      if (value.uncertain) message = 'not-completed; remote outcome uncertain'
+      if (value.status === 'queued') message = 'stored; cleanup pending'
+      progress(value.did, message)
+    }
+    const consistentProgress = (value: IdentityResult[]): boolean => {
+      if (index !== dids.length) return false
+      if (JSON.stringify(value) === JSON.stringify(provisional)) return true
+      return (
+        failure?.stage === 'cleanup' &&
+        value.every(
+          (r, i) =>
+            JSON.stringify(r) === JSON.stringify(provisional[i]) ||
+            (provisional[i]?.status === 'queued' &&
+              r.status === 'not-completed' &&
+              r.error?.stage === 'cleanup'),
+        )
+      )
+    }
+    const result = (text: string) => {
+      if (final) throw new Error('duplicate')
+      const value: unknown = JSON.parse(text)
+      if (
+        !Array.isArray(value) ||
+        value.length !== dids.length ||
+        value.some(
+          (r, i) =>
+            !r ||
+            !validProtocolFields(r) ||
+            r.did !== dids[i] ||
+            (!['queued', 'failed'].includes(r.status) &&
+              !(r.status === 'not-completed' && r.uncertain === true)),
+        )
+      ) {
+        throw new Error('result')
+      }
+      if ((index || started) && !consistentProgress(value))
+        throw new Error('inconsistent-progress')
+      final = value
+    }
+    const line = (text: string) => {
+      if (text.startsWith('EPDS_IDENTITY_STAGE:')) {
+        remoteStarted = true
+        stage(text.slice(20))
+        return
+      }
+      if (text.startsWith('EPDS_IDENTITY_ERROR:')) {
+        remoteStarted = true
+        error(text.slice(20))
+        return
+      }
+      if (text.startsWith('EPDS_IDENTITY_PROGRESS:')) {
+        remoteStarted = true
+        progressResult(text.slice(23))
+        return
+      }
+      if (text.startsWith('EPDS_IDENTITY_RESULT:')) {
+        remoteStarted = true
+        result(text.slice(21))
+        return
+      }
+    }
+    const consumeLines = async () => {
+      let end: number
+      while ((end = buffer.indexOf('\n')) !== -1) {
+        line(buffer.slice(0, end).replace(/\r$/, ''))
+        buffer = buffer.slice(end + 1)
+        if (++linesRead % 100 === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          if (settled || signal?.aborted) throw new Error('interrupted')
+        }
+      }
+    }
+    const readOutput = async () => {
+      for await (const chunk of process.stdout) {
+        if (settled) return incomplete()
+        if (signal?.aborted) throw new Error('interrupted')
+        rawStdout(chunk)
+        size += chunk.length
+        if (size > 32_000_000) throw new Error('output-limit')
+        buffer += decoder.decode(chunk, { stream: true })
+        await consumeLines()
+      }
+      if (prefix.length) raw('stdout', new Uint8Array(prefix))
+      buffer += decoder.decode()
+      if (buffer) line(buffer)
+    }
+    const early = await readOutput()
+    if (early) return early
+    const status = await process.status
+    commandStatus = status
+    await stderrDone
+    progress(
+      'runtime',
+      `last stage=${remoteStage}; exit code=${status.code}; signal=${status.signal ?? 'none'}`,
+    )
+    if (
+      !final ||
+      status.signal ||
+      status.code !== (final.every((r) => r.status === 'queued') ? 0 : 1) ||
+      status.success !== final.every((r) => r.status === 'queued')
+    ) {
+      failure ??= stderrFailure
+      failure ??= {
+        stage: stored.stderr || stored.stdout ? remoteStage : 'protocol',
+        code:
+          !final && !stored.stderr && !stored.stdout
+            ? 'missing-result'
+            : 'exit-failure',
+      }
+      failure = {
+        ...failure,
+        exitCode: status.code,
+        ...(status.signal ? { signal: status.signal } : {}),
+      }
+      if (
+        !remoteStarted &&
+        [
+          'container-not-running',
+          'container-unknown',
+          'executable-absent',
+          'authentication',
+          'invalid-workdir',
+        ].includes(failure.code)
+      )
+        remoteBeforeSequence = true
+      throw new Error('exit-failure')
+    }
+    return final
+  }
+  return {
+    async run({
+      executable,
+      args,
+      spawn,
+      payload,
+      timeoutMs,
+    }: Required<
+      Pick<PublishOptions, 'executable' | 'args' | 'spawn' | 'timeoutMs'>
+    > &
+      Pick<PublishOptions, 'payload'>): Promise<IdentityResult[]> {
+      try {
+        if (signal?.aborted) {
+          return dids.map((did) => ({
+            did,
+            status: 'not-completed',
+            error: { stage: 'transport', code: 'interrupted' },
+          }))
+        }
+        child = spawn(executable, {
+          args,
+          stdin: payload === undefined ? 'null' : 'piped',
+          stdout: 'piped',
+          stderr: 'piped',
+        })
+        const process = child
+        stderrDone = drainStderr(process)
+        return await Promise.race([
+          Promise.all([collect(process), send(process, payload)]).then(
+            ([results]) => results,
+          ),
+          new Promise<never>((_, reject) => {
+            rejectAbort = () => reject(new Error('interrupted'))
+            signal?.addEventListener('abort', abort, { once: true })
+            if (signal?.aborted) rejectAbort()
+            timer = setTimeout(() => reject(new Error('timeout')), timeoutMs)
+          }),
+        ])
+      } catch (err) {
+        return await handleFailure(err)
+      } finally {
+        settled = true
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', abort)
+      }
+    },
   }
 }
 
@@ -670,8 +755,20 @@ export function validateReport(
   const r = value as Report
   if (
     !r ||
-    Object.keys(r).sort().join() !==
-      'apply,finishedAt,id,interrupted,inventory,kind,results,resumedFrom,startedAt,target,transport,version' ||
+    !hasExactKeys(r, [
+      'apply',
+      'finishedAt',
+      'id',
+      'interrupted',
+      'inventory',
+      'kind',
+      'results',
+      'resumedFrom',
+      'startedAt',
+      'target',
+      'transport',
+      'version',
+    ]) ||
     r.version !== 1 ||
     r.kind !== 'identity-publishing' ||
     r.transport !== transport ||
@@ -696,48 +793,9 @@ export function validateReport(
     !Array.isArray(r.results) ||
     r.results.length !== r.inventory.length
   ) {
-    throw Error('incompatible-report')
+    throw new Error('incompatible-report')
   }
-  for (const [i, result] of r.results.entries()) {
-    if (
-      !result ||
-      result.did !== r.inventory[i] ||
-      (result.error !== undefined && !validDiagnostic(result.error)) ||
-      Object.keys(result).some(
-        (k) => !['did', 'status', 'uncertain', 'queuedIn', 'error'].includes(k),
-      ) ||
-      !['planned', 'queued', 'failed', 'not-completed', 'skipped'].includes(
-        result.status,
-      )
-    ) {
-      throw Error('invalid-result')
-    }
-    if (
-      result.uncertain !== undefined &&
-      (result.uncertain !== true ||
-        result.status !== 'not-completed' ||
-        !r.apply)
-    ) {
-      throw Error('invalid-uncertainty')
-    }
-    if (['queued', 'skipped'].includes(result.status)) {
-      if (
-        !r.apply ||
-        !validId(result.queuedIn) ||
-        !result.queuedIn.startsWith(`identity-${transport}-`) ||
-        (result.status === 'queued' && result.queuedIn !== r.id) ||
-        (result.status === 'skipped' &&
-          (!r.resumedFrom || result.queuedIn === r.id))
-      ) {
-        throw Error('invalid-provenance')
-      }
-    } else if (
-      result.queuedIn !== undefined ||
-      (result.status === 'planned' && r.apply)
-    ) {
-      throw Error('invalid-status')
-    }
-  }
+  r.results.forEach((result, i) => validateReportResult(r, result, i))
   return r
 }
 
@@ -752,7 +810,7 @@ async function trustedDirectory(path: string): Promise<string> {
     info.uid !== Deno.uid() ||
     (info.mode! & 0o022) !== 0
   ) {
-    throw Error('untrusted-directory')
+    throw new Error('untrusted-directory')
   }
   return absolute
 }
@@ -771,7 +829,7 @@ async function readReport(
     info.uid !== Deno.uid() ||
     (info.mode! & 0o077) !== 0
   ) {
-    throw Error('unsafe-report')
+    throw new Error('unsafe-report')
   }
   return validateReport(
     JSON.parse(await Deno.readTextFile(path)),
@@ -779,6 +837,449 @@ async function readReport(
     apply,
     dids,
   )
+}
+
+function parseCliArgs(args: string[]) {
+  return parseArgs({
+    args,
+    options: {
+      help: { type: 'boolean' },
+      apply: { type: 'boolean', default: false },
+      container: { type: 'string' },
+      user: { type: 'string' },
+      workdir: { type: 'string', default: '/app/packages/pds-core' },
+      did: { type: 'string', multiple: true },
+      'did-file': { type: 'string' },
+      'report-dir': { type: 'string', default: './reports' },
+      'resume-report': { type: 'string' },
+      'no-resume': { type: 'boolean', default: false },
+    },
+  }).values
+}
+type CliValues = ReturnType<typeof parseCliArgs>
+
+function cliTarget(values: CliValues) {
+  if (
+    !values.container ||
+    !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(values.container) ||
+    (values.user !== undefined &&
+      !/^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,63}(?::[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,63})?$/.test(
+        values.user,
+      )) ||
+    !/^\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+$/.test(values.workdir)
+  ) {
+    throw new Error('invalid-target')
+  }
+  const target = [values.container, values.user ?? '', values.workdir]
+  const args = [
+    'exec',
+    '-i',
+    ...(values.user === undefined ? [] : ['--user', values.user]),
+    '--workdir',
+    values.workdir,
+    target[0],
+    'node',
+    '--input-type=module',
+    '-',
+  ]
+  return { target, args }
+}
+
+async function cliInventory(values: CliValues): Promise<string[]> {
+  if (values['no-resume'] && values['resume-report']) {
+    throw new Error('conflicting-resume')
+  }
+  if (Boolean(values.did?.length) === Boolean(values['did-file'])) {
+    throw new Error('choose-one-source')
+  }
+  const dids = [
+    ...new Set(
+      values['did-file']
+        ? (await Deno.readTextFile(values['did-file']))
+            .split(/\s+/)
+            .filter(Boolean)
+        : values.did,
+    ),
+  ]
+  if (
+    !dids.length ||
+    dids.length > 15000 ||
+    dids.some((did) => !validDid(did))
+  ) {
+    throw new Error('invalid-inventory')
+  }
+  return dids
+}
+
+async function resumeCandidates(directory: string, report: Report) {
+  const candidates: { name: string; report: Report }[] = []
+  for await (const entry of Deno.readDir(directory)) {
+    if (
+      !entry.isFile ||
+      !entry.name.startsWith(`identity-${transport}-`) ||
+      !entry.name.endsWith('.json')
+    ) {
+      continue
+    }
+    try {
+      candidates.push({
+        name: entry.name,
+        report: await readReport(
+          join(directory, entry.name),
+          report.target,
+          report.apply,
+          report.inventory,
+        ),
+      })
+    } catch {
+      continue
+    }
+  }
+  return candidates
+}
+
+async function resumeReport(
+  directory: string,
+  report: Report,
+  values: CliValues,
+  output: (line: string) => void,
+  interaction: Interaction,
+) {
+  let selected = values['resume-report']
+  if (!selected && !values['no-resume']) {
+    const candidates = await resumeCandidates(directory, report)
+    candidates.sort((a, b) => a.name.localeCompare(b.name))
+    if (candidates.length) {
+      output('0) New run')
+      candidates.forEach((candidate, i) =>
+        output(
+          `${i + 1}) ${candidate.name} - ${new Date(
+            candidate.report.startedAt,
+          ).toUTCString()}`,
+        ),
+      )
+      if (!interaction.terminal()) throw new Error('terminal-required')
+      const answer = interaction.prompt('Select report number (0 for new run):')
+      if (
+        answer === null ||
+        !/^(0|[1-9][0-9]*)$/.test(answer) ||
+        Number(answer) > candidates.length
+      ) {
+        throw new Error('invalid-selection')
+      }
+      if (Number(answer)) {
+        selected = join(directory, candidates[Number(answer) - 1].name)
+      }
+    }
+  }
+  if (selected) {
+    const previous = await readReport(
+      selected,
+      report.target,
+      report.apply,
+      report.inventory,
+    )
+    report.resumedFrom = previous.id
+    report.results = previous.results.map((r) =>
+      ['queued', 'skipped'].includes(r.status)
+        ? { did: r.did, status: 'skipped', queuedIn: r.queuedIn }
+        : {
+            did: r.did,
+            status: 'not-completed',
+            ...(r.uncertain ? { uncertain: true } : {}),
+            ...(r.error ? { error: r.error } : {}),
+          },
+    )
+  }
+}
+
+function confirmRun(
+  report: Report,
+  values: CliValues,
+  signal: AbortSignal,
+  output: (line: string) => void,
+  interaction: Interaction,
+  writeLog: (line: string) => void,
+) {
+  const pending = report.results
+    .filter((r) => r.status !== 'skipped')
+    .map((r) => r.did)
+  output(
+    `Inventory: ${report.inventory.length} | Process: ${pending.length} | Skip: ${
+      report.inventory.length - pending.length
+    }`,
+  )
+  if (report.results.some((r) => r.uncertain)) {
+    writeLog(
+      'WARNING: Pending DIDs have uncertain remote outcomes. A prior remote job might still run. Inspect the runtime and wait for it to stop before retrying; duplicate notifications are possible.',
+    )
+  }
+  if (signal.aborted) throw new Error('interrupted')
+  if (
+    !interaction.terminal() ||
+    interaction.prompt('Type yes to proceed:') !== 'yes'
+  ) {
+    throw new Error('confirmation-required')
+  }
+  if (signal.aborted) throw new Error('interrupted')
+  writeLog(
+    `${values.apply ? 'Apply' : 'Preview'} starting: ${pending.length} DIDs`,
+  )
+  return pending
+}
+
+function mergePublishedResults(
+  report: Report,
+  pending: string[],
+  results: IdentityResult[],
+  priorUncertain: Set<string>,
+) {
+  if (
+    results.length !== pending.length ||
+    results.some(
+      (r, i) =>
+        r.did !== pending[i] ||
+        !['queued', 'failed', 'not-completed'].includes(r.status),
+    )
+  ) {
+    throw new Error('invalid-transport')
+  }
+  let resultIndex = 0
+  report.results = report.results.map((r) => {
+    if (r.status === 'skipped') return r
+    const result = results[resultIndex++]
+    if (result.status === 'queued') return { ...result, queuedIn: report.id }
+    if (priorUncertain.has(r.did))
+      return { ...result, status: 'not-completed' as const, uncertain: true }
+    return { ...result }
+  })
+}
+
+async function planInventory(
+  report: Report,
+  signal: AbortSignal,
+  writeLog: (line: string) => void,
+) {
+  let planned = 0
+  for (const r of report.results) {
+    if (signal.aborted) break
+    r.status = 'planned'
+    if (report.results.length <= 20) writeLog(`${r.did}: planned`)
+    if (++planned % 100 === 0)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+}
+
+async function publishReport(
+  report: Report,
+  tempPath: string,
+  jsonPath: string,
+) {
+  const file = await Deno.open(tempPath, {
+    write: true,
+    createNew: true,
+    mode: 0o600,
+  })
+  try {
+    const bytes = new TextEncoder().encode(
+      JSON.stringify(report, null, 2) + '\n',
+    )
+    let offset = 0
+    while (offset < bytes.length) {
+      offset += await file.write(bytes.subarray(offset))
+    }
+    await file.sync()
+  } finally {
+    file.close()
+  }
+  await Deno.link(tempPath, jsonPath)
+  await Deno.remove(tempPath)
+}
+
+function reportSummary(
+  report: Report,
+  jsonPath: string,
+  logPath: string,
+  writeLog: (line: string) => void,
+  output: (line: string) => void,
+) {
+  writeLog(
+    `Final summary: ${JSON.stringify(Object.fromEntries(['queued', 'planned', 'failed', 'not-completed', 'skipped'].map((status) => [status, report.results.filter((r) => r.status === status).length])))}`,
+  )
+  output('Outcome                       Count')
+  for (const [label, status] of [
+    ['Queued', 'queued'],
+    ['Planned', 'planned'],
+    ['Failed', 'failed'],
+    ['Not completed', 'not-completed'],
+    ['Skipped', 'skipped'],
+  ]) {
+    output(
+      `${label.padEnd(29)} ${
+        report.results.filter((r) => r.status === status).length
+      }`,
+    )
+  }
+  output(`Total                         ${report.inventory.length}`)
+  output(`JSON: ${jsonPath}`)
+  output(`Log: ${logPath}`)
+}
+
+function validateProvenance(r: Report, result: IdentityResult) {
+  if (['queued', 'skipped'].includes(result.status)) {
+    if (
+      !r.apply ||
+      !validId(result.queuedIn) ||
+      !result.queuedIn.startsWith(`identity-${transport}-`) ||
+      (result.status === 'queued' && result.queuedIn !== r.id) ||
+      (result.status === 'skipped' &&
+        (!r.resumedFrom || result.queuedIn === r.id))
+    ) {
+      throw new Error('invalid-provenance')
+    }
+  } else if (
+    result.queuedIn !== undefined ||
+    (result.status === 'planned' && r.apply)
+  ) {
+    throw new Error('invalid-status')
+  }
+}
+
+function validateReportResult(r: Report, result: IdentityResult, i: number) {
+  if (
+    !result ||
+    result.did !== r.inventory[i] ||
+    (result.error !== undefined && !validDiagnostic(result.error)) ||
+    Object.keys(result).some(
+      (k) => !['did', 'status', 'uncertain', 'queuedIn', 'error'].includes(k),
+    ) ||
+    !['planned', 'queued', 'failed', 'not-completed', 'skipped'].includes(
+      result.status,
+    )
+  ) {
+    throw new Error('invalid-result')
+  }
+  if (
+    result.uncertain !== undefined &&
+    (result.uncertain !== true || result.status !== 'not-completed' || !r.apply)
+  ) {
+    throw new Error('invalid-uncertainty')
+  }
+  validateProvenance(r, result)
+}
+
+async function finalizeReport(
+  report: Report,
+  paths: { tempPath: string; jsonPath: string; logPath: string },
+  interrupted: boolean,
+  writeLog: (line: string) => void,
+  output: (line: string) => void,
+): Promise<boolean> {
+  const { tempPath, jsonPath, logPath } = paths
+  report.interrupted = interrupted
+  report.finishedAt = new Date().toISOString()
+  try {
+    await publishReport(report, tempPath, jsonPath)
+    reportSummary(report, jsonPath, logPath, writeLog, output)
+  } catch (err) {
+    output(
+      'Report publication failed: ' +
+        JSON.stringify(diagnostic('reporting', err)) +
+        '; no success claimed.',
+    )
+    await Deno.remove(tempPath).catch((err) =>
+      output(
+        'Temporary report cleanup failed: ' +
+          JSON.stringify(diagnostic('reporting', err)),
+      ),
+    )
+    return false
+  }
+  return true
+}
+
+function recordRunFailure(
+  err: unknown,
+  report: Report | undefined,
+  publishing: boolean,
+  interrupted: boolean,
+  writeLog: (line: string) => void,
+  output: (line: string) => void,
+) {
+  try {
+    writeLog(
+      interrupted
+        ? 'Interrupted; finalizing full inventory'
+        : 'Failed: ' + JSON.stringify(diagnostic('input', err)),
+    )
+  } catch (err) {
+    output('Log write failed: ' + JSON.stringify(diagnostic('reporting', err)))
+  }
+  if (report && publishing)
+    report.results = report.results.map((r) =>
+      r.status === 'skipped'
+        ? r
+        : {
+            ...r,
+            status: 'not-completed',
+            uncertain: true,
+            error: diagnostic('transport', err),
+          },
+    )
+}
+
+async function batchDiagnostics(
+  report: Report,
+  writeLog: (line: string) => void,
+) {
+  const failed = report.results.filter((r) => r.error)
+  if (failed.length)
+    writeLog(
+      `Batch outcomes: ${failed.length} errors; first=${JSON.stringify(failed[0].error)}; full outcomes in JSON`,
+    )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  if (report.results.some((r) => r.uncertain)) {
+    writeLog(
+      'Remote completion uncertain; local client termination does not stop remote Node. Inspect runtime before retrying; duplicates possible.',
+    )
+  }
+}
+
+function runtimeLog(
+  getLog: () => Deno.FsFile | undefined,
+  interaction: Interaction,
+) {
+  const writeLog = (message: string) => {
+    const line = `[${new Date().toISOString()}] ${message}\n`
+    const log = getLog()
+    if (log) {
+      const bytes = new TextEncoder().encode(line)
+      let offset = 0
+      while (offset < bytes.length) {
+        offset += log.writeSync(bytes.subarray(offset))
+      }
+      log.syncSync()
+    }
+    interaction.progress(line.trimEnd())
+  }
+  const writeRaw = (
+    channel: 'stdout' | 'stderr',
+    bytes: Uint8Array,
+    stage: Diagnostic['stage'],
+  ) => {
+    const log = getLog()
+    if (!log || !bytes.length) return
+    const header = new TextEncoder().encode(
+      `\n[${new Date().toISOString()}] RAW ${channel} stage=${stage} bytes=${bytes.length}\n`,
+    )
+    for (const block of [header, bytes]) {
+      let offset = 0
+      while (offset < block.length)
+        offset += log.writeSync(block.subarray(offset))
+    }
+    log.syncSync()
+  }
+  return { writeLog, writeRaw }
 }
 
 export async function runDockerIdentityCli(
@@ -797,90 +1298,17 @@ export async function runDockerIdentityCli(
   let listening = false
   let runFailed = false
   let publishing = false
-  const writeLog = (message: string) => {
-    const line = `[${new Date().toISOString()}] ${message}\n`
-    if (log) {
-      const bytes = new TextEncoder().encode(line)
-      let offset = 0
-      while (offset < bytes.length) {
-        offset += log.writeSync(bytes.subarray(offset))
-      }
-      log.syncSync()
-    }
-    interaction.progress(line.trimEnd())
-  }
-  const writeRaw = (
-    channel: 'stdout' | 'stderr',
-    bytes: Uint8Array,
-    stage: Diagnostic['stage'],
-  ) => {
-    if (!log || !bytes.length) return
-    const header = new TextEncoder().encode(
-      `\n[${new Date().toISOString()}] RAW ${channel} stage=${stage} bytes=${bytes.length}\n`,
-    )
-    for (const block of [header, bytes]) {
-      let offset = 0
-      while (offset < block.length)
-        offset += log.writeSync(block.subarray(offset))
-    }
-    log.syncSync()
-  }
+  const { writeLog, writeRaw } = runtimeLog(() => log, interaction)
   try {
-    const { values } = parseArgs({
-      args,
-      options: {
-        help: { type: 'boolean' },
-        apply: { type: 'boolean', default: false },
-        container: { type: 'string' },
-        user: { type: 'string' },
-        workdir: { type: 'string', default: '/app/packages/pds-core' },
-        did: { type: 'string', multiple: true },
-        'did-file': { type: 'string' },
-        'report-dir': { type: 'string', default: './reports' },
-        'resume-report': { type: 'string' },
-        'no-resume': { type: 'boolean', default: false },
-      },
-    })
+    const values = parseCliArgs(args)
     if (values.help) {
       output(
         'publish-identity-docker --container NAME_OR_ID (--did DID ... | --did-file PATH) [--user USER[:GROUP]] [--workdir /app/packages/pds-core] [--report-dir PATH] [--apply] [--resume-report PATH | --no-resume]. Offline preview by default. Uses Docker configured user unless --user is supplied. Every run requires terminal confirmation (type yes). Reports and timestamped logs are private and flat. Resume only compatible inventory/target/mode, preserving queued provenance. Ctrl+C/SIGTERM saves unfinished work and exits 130. Local client termination cannot stop remote work: inspect runtime before retrying uncertain results. No PLC writes, secret copying, or PDS stop. At most 15000 DIDs.',
       )
       return 0
     }
-    if (
-      !values.container ||
-      !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(values.container) ||
-      (values.user !== undefined &&
-        !/^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,63}(?::[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,63})?$/.test(
-          values.user,
-        )) ||
-      !/^\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+$/.test(values.workdir)
-    ) {
-      throw Error('invalid-target')
-    }
-    const target = [values.container, values.user ?? '', values.workdir]
-    if (values['no-resume'] && values['resume-report']) {
-      throw Error('conflicting-resume')
-    }
-    if (Boolean(values.did?.length) === Boolean(values['did-file'])) {
-      throw Error('choose-one-source')
-    }
-    const dids = [
-      ...new Set(
-        values['did-file']
-          ? (await Deno.readTextFile(values['did-file']))
-              .split(/\s+/)
-              .filter(Boolean)
-          : values.did,
-      ),
-    ]
-    if (
-      !dids.length ||
-      dids.length > 15000 ||
-      dids.some((did) => !validDid(did))
-    ) {
-      throw Error('invalid-inventory')
-    }
+    const { target, args: commandArgs } = cliTarget(values)
+    const dids = await cliInventory(values)
     const directory = await trustedDirectory(values['report-dir'])
     const id = `identity-${transport}-${new Date().toISOString()}-${crypto.randomUUID()}`
     jsonPath = join(directory, `${id}.json`)
@@ -910,264 +1338,71 @@ export async function runDockerIdentityCli(
     listening = true
     writeLog(`JSON: ${jsonPath}`)
     writeLog(`Log: ${logPath}`)
-    let selected = values['resume-report']
-    if (!selected && !values['no-resume']) {
-      const candidates: { name: string; report: Report }[] = []
-      for await (const entry of Deno.readDir(directory)) {
-        if (
-          !entry.isFile ||
-          !entry.name.startsWith(`identity-${transport}-`) ||
-          !entry.name.endsWith('.json')
-        ) {
-          continue
-        }
-        try {
-          candidates.push({
-            name: entry.name,
-            report: await readReport(
-              join(directory, entry.name),
-              target,
-              values.apply,
-              dids,
-            ),
-          })
-        } catch {
-          continue
-        }
-      }
-      candidates.sort((a, b) => a.name.localeCompare(b.name))
-      if (candidates.length) {
-        output('0) New run')
-        candidates.forEach((candidate, i) =>
-          output(
-            `${i + 1}) ${candidate.name} - ${new Date(
-              candidate.report.startedAt,
-            ).toUTCString()}`,
-          ),
-        )
-        if (!interaction.terminal()) throw Error('terminal-required')
-        const answer = interaction.prompt(
-          'Select report number (0 for new run):',
-        )
-        if (
-          answer === null ||
-          !/^(0|[1-9][0-9]*)$/.test(answer) ||
-          Number(answer) > candidates.length
-        ) {
-          throw Error('invalid-selection')
-        }
-        if (Number(answer)) {
-          selected = join(directory, candidates[Number(answer) - 1].name)
-        }
-      }
-    }
-    if (selected) {
-      const previous = await readReport(selected, target, values.apply, dids)
-      report.resumedFrom = previous.id
-      report.results = previous.results.map((r) =>
-        ['queued', 'skipped'].includes(r.status)
-          ? { did: r.did, status: 'skipped', queuedIn: r.queuedIn }
-          : {
-              did: r.did,
-              status: 'not-completed',
-              ...(r.uncertain ? { uncertain: true } : {}),
-              ...(r.error ? { error: r.error } : {}),
-            },
-      )
-    }
-    const pending = report.results
-      .filter((r) => r.status !== 'skipped')
-      .map((r) => r.did)
-    output(
-      `Inventory: ${dids.length} | Process: ${pending.length} | Skip: ${
-        dids.length - pending.length
-      }`,
-    )
-    if (report.results.some((r) => r.uncertain)) {
-      writeLog(
-        'WARNING: Pending DIDs have uncertain remote outcomes. A prior remote job might still run. Inspect the runtime and wait for it to stop before retrying; duplicate notifications are possible.',
-      )
-    }
-    if (controller.signal.aborted) throw Error('interrupted')
-    if (
-      !interaction.terminal() ||
-      interaction.prompt('Type yes to proceed:') !== 'yes'
-    ) {
-      throw Error('confirmation-required')
-    }
-    if (controller.signal.aborted) throw Error('interrupted')
-    writeLog(
-      `${values.apply ? 'Apply' : 'Preview'} starting: ${pending.length} DIDs`,
+    await resumeReport(directory, report, values, output, interaction)
+    const pending = confirmRun(
+      report,
+      values,
+      controller.signal,
+      output,
+      interaction,
+      writeLog,
     )
     if (values.apply && pending.length) {
       const priorUncertain = new Set(
         report.results.filter((r) => r.uncertain).map((r) => r.did),
       )
       publishing = true
-      const results = await publish(
-        'docker',
-        [
-          'exec',
-          '-i',
-          ...(values.user === undefined ? [] : ['--user', values.user]),
-          '--workdir',
-          values.workdir,
-          values.container,
-          'node',
-          '--input-type=module',
-          '-',
-        ],
-        pending,
-        undefined,
-        undefined,
-        controller.signal,
-        (did, status) => writeLog(`${did}: ${status}`),
-        writeRaw,
-        remotePayload(pending, values.workdir),
-      )
-      if (
-        results.length !== pending.length ||
-        results.some(
-          (r, i) =>
-            r.did !== pending[i] ||
-            !['queued', 'failed', 'not-completed'].includes(r.status),
-        )
-      ) {
-        throw Error('invalid-transport')
-      }
-      let resultIndex = 0
-      report.results = report.results.map((r) => {
-        if (r.status === 'skipped') return r
-        const result = results[resultIndex++]
-        return {
-          ...result,
-          ...(result.status === 'queued'
-            ? { queuedIn: id }
-            : priorUncertain.has(r.did)
-              ? { status: 'not-completed' as const, uncertain: true }
-              : {}),
-        }
+      const results = await publish({
+        executable: 'docker',
+        args: commandArgs,
+        dids: pending,
+        signal: controller.signal,
+        progress: (did, status) => writeLog(`${did}: ${status}`),
+        runtimeOutput: writeRaw,
+        payload: remotePayload(pending, values.workdir),
       })
+      mergePublishedResults(report, pending, results, priorUncertain)
       publishing = false
     } else if (!values.apply) {
-      let planned = 0
-      for (const r of report.results) {
-        if (controller.signal.aborted) break
-        r.status = 'planned'
-        if (report.results.length <= 20) writeLog(`${r.did}: planned`)
-        if (++planned % 100 === 0)
-          await new Promise((resolve) => setTimeout(resolve, 0))
-      }
+      await planInventory(report, controller.signal, writeLog)
     }
-    const failed = report.results.filter((r) => r.error)
-    if (failed.length)
-      writeLog(
-        `Batch outcomes: ${failed.length} errors; first=${JSON.stringify(failed[0].error)}; full outcomes in JSON`,
-      )
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    if (report.results.some((r) => r.uncertain)) {
-      writeLog(
-        'Remote completion uncertain; local client termination does not stop remote Node. Inspect runtime before retrying; duplicates possible.',
-      )
-    }
+    await batchDiagnostics(report, writeLog)
   } catch (err) {
     runFailed = true
-    try {
-      writeLog(
-        controller.signal.aborted
-          ? 'Interrupted; finalizing full inventory'
-          : 'Failed: ' + JSON.stringify(diagnostic('input', err)),
-      )
-    } catch (err) {
-      output(
-        'Log write failed: ' + JSON.stringify(diagnostic('reporting', err)),
-      )
-    }
-    if (report && publishing)
-      report.results = report.results.map((r) =>
-        r.status === 'skipped'
-          ? r
-          : {
-              ...r,
-              status: 'not-completed',
-              uncertain: true,
-              error: diagnostic('transport', err),
-            },
-      )
+    recordRunFailure(
+      err,
+      report,
+      publishing,
+      controller.signal.aborted,
+      writeLog,
+      output,
+    )
     if (!report) return controller.signal.aborted ? 130 : 1
   } finally {
-    if (report) {
-      report.interrupted = controller.signal.aborted
-      report.finishedAt = new Date().toISOString()
-      try {
-        const file = await Deno.open(tempPath, {
-          write: true,
-          createNew: true,
-          mode: 0o600,
-        })
-        try {
-          const bytes = new TextEncoder().encode(
-            JSON.stringify(report, null, 2) + '\n',
-          )
-          let offset = 0
-          while (offset < bytes.length) {
-            offset += await file.write(bytes.subarray(offset))
-          }
-          await file.sync()
-        } finally {
-          file.close()
-        }
-        await Deno.link(tempPath, jsonPath)
-        await Deno.remove(tempPath)
-        writeLog(
-          `Final summary: ${JSON.stringify(Object.fromEntries(['queued', 'planned', 'failed', 'not-completed', 'skipped'].map((status) => [status, report!.results.filter((r) => r.status === status).length])))}`,
-        )
-        output('Outcome                       Count')
-        for (const [label, status] of [
-          ['Queued', 'queued'],
-          ['Planned', 'planned'],
-          ['Failed', 'failed'],
-          ['Not completed', 'not-completed'],
-          ['Skipped', 'skipped'],
-        ]) {
-          output(
-            `${label.padEnd(29)} ${
-              report.results.filter((r) => r.status === status).length
-            }`,
-          )
-        }
-        output(`Total                         ${report.inventory.length}`)
-        output(`JSON: ${jsonPath}`)
-        output(`Log: ${logPath}`)
-      } catch (err) {
-        output(
-          'Report publication failed: ' +
-            JSON.stringify(diagnostic('reporting', err)) +
-            '; no success claimed.',
-        )
-        runFailed = true
-        await Deno.remove(tempPath).catch((err) =>
-          output(
-            'Temporary report cleanup failed: ' +
-              JSON.stringify(diagnostic('reporting', err)),
-          ),
-        )
-      }
-    }
+    if (
+      report &&
+      !(await finalizeReport(
+        report,
+        { tempPath, jsonPath, logPath },
+        controller.signal.aborted,
+        writeLog,
+        output,
+      ))
+    )
+      runFailed = true
     log?.close()
     if (listening) {
       Deno.removeSignalListener('SIGINT', interrupt)
       Deno.removeSignalListener('SIGTERM', interrupt)
     }
   }
-  return controller.signal.aborted
-    ? 130
-    : runFailed ||
-        report?.results.some((r) =>
-          ['failed', 'not-completed'].includes(r.status),
-        )
-      ? 1
-      : 0
+  if (controller.signal.aborted) return 130
+  if (
+    runFailed ||
+    report?.results.some((r) => ['failed', 'not-completed'].includes(r.status))
+  )
+    return 1
+  return 0
 }
 
 if (import.meta.main) {
