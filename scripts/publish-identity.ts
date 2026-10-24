@@ -712,7 +712,7 @@ function createPublishSession({
 interface Report {
   version: number
   kind: string
-  transport: string
+  transport: Transport
   id: string
   startedAt: string
   finishedAt: string
@@ -735,7 +735,7 @@ const nativeInteraction: Interaction = {
   progress: (line) => console.error(line),
 }
 
-const transport = 'railway'
+type Transport = 'docker' | 'railway'
 const validDid = (did: unknown): did is string =>
   typeof did === 'string' && /^did:plc:[a-z2-7]{24}$/.test(did)
 const validId = (id: unknown): id is string =>
@@ -747,6 +747,7 @@ const timestamp = (value: unknown): value is string =>
   new Date(value).toISOString() === value
 
 export function validateReport(
+  transport: Transport,
   value: unknown,
   target: string[],
   apply: boolean,
@@ -786,7 +787,9 @@ export function validateReport(
     !Array.isArray(r.target) ||
     r.target.length !== target.length ||
     r.target.some((value, i) =>
-      i === target.length - 2 ? typeof value !== 'string' : value !== target[i],
+      transport === 'railway' && i === target.length - 2
+        ? typeof value !== 'string'
+        : value !== target[i],
     ) ||
     !Array.isArray(r.inventory) ||
     !r.inventory.length ||
@@ -820,6 +823,7 @@ async function trustedDirectory(path: string): Promise<string> {
 }
 
 async function readReport(
+  transport: Transport,
   path: string,
   target: string[],
   apply: boolean,
@@ -836,6 +840,7 @@ async function readReport(
     throw new Error('unsafe-report')
   }
   return validateReport(
+    transport,
     JSON.parse(await Deno.readTextFile(path)),
     target,
     apply,
@@ -849,10 +854,13 @@ function parseCliArgs(args: string[]) {
     options: {
       help: { type: 'boolean' },
       apply: { type: 'boolean', default: false },
+      target: { type: 'string' },
       project: { type: 'string' },
       environment: { type: 'string' },
       service: { type: 'string' },
       instance: { type: 'string' },
+      container: { type: 'string' },
+      user: { type: 'string' },
       workdir: { type: 'string', default: '/app/packages/pds-core' },
       did: { type: 'string', multiple: true },
       'did-file': { type: 'string' },
@@ -864,7 +872,34 @@ function parseCliArgs(args: string[]) {
 }
 type CliValues = ReturnType<typeof parseCliArgs>
 
-function cliTarget(values: CliValues) {
+function dockerTarget(values: CliValues) {
+  if (
+    !values.container ||
+    !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(values.container) ||
+    (values.user !== undefined &&
+      !/^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,63}(?::[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,63})?$/.test(
+        values.user,
+      )) ||
+    !/^\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+$/.test(values.workdir)
+  ) {
+    throw new Error('invalid-target')
+  }
+  const target = [values.container, values.user ?? '', values.workdir]
+  const args = [
+    'exec',
+    '-i',
+    ...(values.user === undefined ? [] : ['--user', values.user]),
+    '--workdir',
+    values.workdir,
+    target[0],
+    'node',
+    '--input-type=module',
+    '-',
+  ]
+  return { target, args }
+}
+
+function railwayTarget(values: CliValues) {
   const target: string[] = []
   for (const name of ['project', 'environment', 'service'] as const) {
     const value = values[name]
@@ -886,6 +921,28 @@ function cliTarget(values: CliValues) {
   target.push('', values.workdir)
   const args = ['ssh', ...sshTarget, '--', 'node --input-type=module -']
   return { target, args }
+}
+
+function cliTarget(values: CliValues): {
+  transport: Transport
+  target: string[]
+  args: string[]
+} {
+  const transport = values.target
+  if (transport !== 'docker' && transport !== 'railway') {
+    throw new Error('invalid-target')
+  }
+  const disallowed =
+    transport === 'docker'
+      ? (['project', 'environment', 'service', 'instance'] as const)
+      : (['container', 'user'] as const)
+  if (disallowed.some((name) => values[name] !== undefined)) {
+    throw new Error('invalid-target')
+  }
+  return {
+    transport,
+    ...(transport === 'docker' ? dockerTarget(values) : railwayTarget(values)),
+  }
 }
 
 async function cliInventory(values: CliValues): Promise<string[]> {
@@ -919,7 +976,7 @@ async function resumeCandidates(directory: string, report: Report) {
   for await (const entry of Deno.readDir(directory)) {
     if (
       !entry.isFile ||
-      !entry.name.startsWith(`identity-${transport}-`) ||
+      !entry.name.startsWith(`identity-${report.transport}-`) ||
       !entry.name.endsWith('.json')
     ) {
       continue
@@ -928,6 +985,7 @@ async function resumeCandidates(directory: string, report: Report) {
       candidates.push({
         name: entry.name,
         report: await readReport(
+          report.transport,
           join(directory, entry.name),
           report.target,
           report.apply,
@@ -977,6 +1035,7 @@ async function resumeReport(
   }
   if (selected) {
     const previous = await readReport(
+      report.transport,
       selected,
       report.target,
       report.apply,
@@ -1133,7 +1192,7 @@ function validateProvenance(r: Report, result: IdentityResult) {
     if (
       !r.apply ||
       !validId(result.queuedIn) ||
-      !result.queuedIn.startsWith(`identity-${transport}-`) ||
+      !result.queuedIn.startsWith(`identity-${r.transport}-`) ||
       (result.status === 'queued' && result.queuedIn !== r.id) ||
       (result.status === 'skipped' &&
         (!r.resumedFrom || result.queuedIn === r.id))
@@ -1306,11 +1365,11 @@ export async function runIdentityCli(
     const values = parseCliArgs(args)
     if (values.help) {
       output(
-        'publish-identity-railway --project ID --environment ID --service ID [--instance ID] (--did DID ... | --did-file PATH) [--workdir /app/packages/pds-core] [--report-dir PATH] [--apply] [--resume-report PATH | --no-resume]. Offline preview by default. Uses the Railway SSH login user without switching or checking it. Every run requires terminal confirmation (type yes). Reports and timestamped logs are private and flat. Resume only compatible inventory/target/mode, preserving queued provenance. Ctrl+C/SIGTERM saves unfinished work and exits 130. Local client termination cannot stop remote work: inspect runtime before retrying uncertain results. No PLC writes, secret copying, or PDS stop. At most 15000 DIDs.',
+        'publish-identity --target railway|docker (Railway: --project ID --environment ID --service ID [--instance ID]; Docker: --container NAME_OR_ID [--user USER[:GROUP]]) (--did DID ... | --did-file PATH) [--workdir /app/packages/pds-core] [--report-dir PATH] [--apply] [--resume-report PATH | --no-resume]. Offline preview by default. Uses Docker configured user unless --user is supplied; Railway uses its SSH login user without an expected-user check. Every run requires terminal confirmation (type yes). Reports and timestamped logs are private and flat. Resume only compatible inventory/target/mode, preserving queued provenance. Ctrl+C/SIGTERM saves unfinished work and exits 130. Local client termination cannot stop remote work: inspect runtime before retrying uncertain results. No PLC writes, secret copying, or PDS stop. At most 15000 DIDs.',
       )
       return 0
     }
-    const { target, args: commandArgs } = cliTarget(values)
+    const { transport, target, args: commandArgs } = cliTarget(values)
     const dids = await cliInventory(values)
     const directory = await trustedDirectory(values['report-dir'])
     const id = `identity-${transport}-${new Date().toISOString()}-${crypto.randomUUID()}`
@@ -1356,7 +1415,7 @@ export async function runIdentityCli(
       )
       publishing = true
       const results = await publish({
-        executable: 'railway',
+        executable: transport,
         args: commandArgs,
         dids: pending,
         signal: controller.signal,
