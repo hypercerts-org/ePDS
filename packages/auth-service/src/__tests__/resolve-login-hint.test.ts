@@ -33,17 +33,55 @@ describe('resolveLoginHint', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('returns email directly when hint contains @', async () => {
-    const email = 'user@example.com'
-    expect(await resolveLoginHint(email, PDS_URL, SECRET)).toBe(email)
-    expect(fetchSpy).not.toHaveBeenCalled()
-  })
+  it.each([
+    ['plain', 'user@example.com'],
+    ['mixed case', 'User@Example.COM'],
+    [
+      'plus-addressed on a multi-label domain',
+      'first.last+tag@mail.example.co.uk',
+    ],
+    ['hyphen inside a domain label', 'user@my-example.com'],
+  ])(
+    'returns a well-formed email hint (%s) directly',
+    async (_label, email) => {
+      expect(await resolveLoginHint(email, PDS_URL, SECRET)).toBe(email)
+      expect(fetchSpy).not.toHaveBeenCalled()
+    },
+  )
 
-  it('returns email for mixed-case email hint', async () => {
-    const email = 'User@Example.COM'
-    expect(await resolveLoginHint(email, PDS_URL, SECRET)).toBe(email)
-    expect(fetchSpy).not.toHaveBeenCalled()
-  })
+  it.each([
+    ['object (?login_hint[a]=b)', { a: 'b' }],
+    ['array (?login_hint=a&login_hint=b)', ['a@example.com', 'b']],
+    ['number', 42],
+  ])(
+    'returns null without throwing for a non-string hint (%s)',
+    async (_label, hint) => {
+      expect(
+        await resolveLoginHint(hint as unknown as string, PDS_URL, SECRET),
+      ).toBeNull()
+      expect(fetchSpy).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each([
+    ['script-closing payload', 'a@</script><script>alert(1)</script>'],
+    ['attribute breakout', 'a@example.com"><img src=x onerror=alert(1)>'],
+    ['whitespace in domain', 'user@exa mple.com'],
+    ['trailing newline', 'user@example.com\n'],
+    ['empty local part', '@example.com'],
+    ['single-label domain', 'user@example'],
+    ['double @', 'user@@example.com'],
+    ['empty domain label', 'user@example..com'],
+    ['label starting with a hyphen', 'user@-example.com'],
+    ['label ending with a hyphen', 'user@example-.com'],
+    ['over-long address', `${'a'.repeat(250)}@example.com`],
+  ])(
+    'returns null for malformed email-shaped hint (%s) without calling the internal API',
+    async (_label, hint) => {
+      expect(await resolveLoginHint(hint, PDS_URL, SECRET)).toBeNull()
+      expect(fetchSpy).not.toHaveBeenCalled()
+    },
+  )
 
   it('resolves handle to email via internal API', async () => {
     fetchSpy.mockResolvedValueOnce(

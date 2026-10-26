@@ -1069,3 +1069,61 @@ describe('renderLoginPage link-affordance convention', () => {
     }
   })
 })
+
+describe('renderLoginPage login hint script safety', () => {
+  // The renderer is called directly so the payload bypasses resolveLoginHint:
+  // this pins the output-encoding layer independently of input validation.
+  const PAYLOAD = 'a@</script><script>alert(1)</script>'
+
+  function loginHintLiteral(html: string): string {
+    const match = /var loginHint = (.*?);\n/s.exec(html)
+    if (!match) throw new Error('loginHint assignment not found in page')
+    return match[1]
+  }
+
+  it('does not let a hint close the inline script element', () => {
+    const html = renderDefault({
+      loginHint: PAYLOAD,
+      initialStep: 'otp',
+    })
+    expect(html).not.toContain('</script><script>alert(1)')
+    expect(html).not.toContain('<script>alert(1)')
+  })
+
+  it('escapes the hint so the literal round-trips to the original value', () => {
+    const html = renderDefault({
+      loginHint: PAYLOAD,
+      initialStep: 'otp',
+    })
+    const literal = loginHintLiteral(html)
+    expect(literal).not.toMatch(/[<>&\u2028\u2029]/)
+    expect(JSON.parse(literal)).toBe(PAYLOAD)
+  })
+
+  it('escapes ampersands and line separators in script literals', () => {
+    const hint = 'a&b\u2028c\u2029d@example.com'
+    const literal = loginHintLiteral(renderDefault({ loginHint: hint }))
+    expect(literal).toBe('"a\\u0026b\\u2028c\\u2029d@example.com"')
+    expect(JSON.parse(literal)).toBe(hint)
+  })
+
+  it('escapes a client-supplied handle login URL so it cannot close the script', () => {
+    // isSafeHttpUrl only checks that the value parses as an http(s) URL, so
+    // client metadata can still carry `</script>` in the path.
+    const url = 'https://c.example/</script><script>alert(1)</script>'
+    const baseline = renderDefault()
+    const html = renderDefault({ branding: { epds_handle_login_url: url } })
+    const count = (s: string) => (s.match(/<script\b/g) ?? []).length
+
+    expect(count(html)).toBe(count(baseline))
+    expect(html).not.toContain('<script>alert(1)')
+    expect(html).toContain(
+      'var handleLoginUrl = "https://c.example/\\u003c/script\\u003e\\u003cscript\\u003ealert(1)\\u003c/script\\u003e";',
+    )
+  })
+
+  it('leaves a plain email literal unchanged', () => {
+    const html = renderDefault({ loginHint: 'user@example.com' })
+    expect(html).toContain('var loginHint = "user@example.com";')
+  })
+})

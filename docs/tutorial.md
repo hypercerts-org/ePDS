@@ -670,7 +670,10 @@ directly. Handles and DIDs are resolved internally by the auth service.
 
 If the identifier doesn't match any existing account, ePDS falls back to
 its own email input form (the same form used in Flow 2), so passing a
-stale or unknown handle is safe.
+stale or unknown handle is safe. An email `login_hint` must be a plain
+address (letters, digits and `._%+-` before the `@`, a dotted domain
+after it); a malformed value containing `@` is ignored and gets the same
+fallback.
 
 In Flow 2 you either omit `login_hint` entirely (pass the PDS URL to
 `client.authorize()`), or pass a handle or DID which the library resolves
