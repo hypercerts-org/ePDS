@@ -103,6 +103,24 @@ function isSafeHttpUrl(value: string | undefined): boolean {
   }
 }
 
+/**
+ * JSON-serialise a value for interpolation into an inline <script>.
+ *
+ * Plain JSON.stringify leaves `</script>` and `<!--` intact, so a string
+ * value could close the script element and inject markup. Escaping `<`, `>`
+ * and `&` as \uXXXX keeps the literal valid JS/JSON while making it inert to
+ * the HTML parser; U+2028/U+2029 are escaped because they terminate lines in
+ * older JS engines. The typed parameter excludes `undefined`, which
+ * JSON.stringify would return as a non-string.
+ */
+function toScriptJson(value: string | boolean | null): string {
+  return JSON.stringify(value).replace(
+    /[<>&\u2028\u2029]/g,
+    (ch) =>
+      String.raw`\u${(ch.codePointAt(0) ?? 0).toString(16).padStart(4, '0')}`,
+  )
+}
+
 export async function safeResolveClientMetadata(
   clientId: string | undefined,
 ): Promise<ClientMetadata> {
@@ -166,7 +184,12 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
   router.get('/oauth/authorize', async (req: Request, res: Response) => {
     const requestUri = req.query.request_uri as string | undefined
     const clientId = req.query.client_id as string | undefined
-    const loginHint = req.query.login_hint as string | undefined
+    // Express's qs parser turns `?login_hint[a]=b` into an object, so a
+    // plain `as string` cast would let non-strings reach `.replace` below.
+    const loginHint =
+      typeof req.query.login_hint === 'string'
+        ? req.query.login_hint
+        : undefined
     if (!requestUri) {
       res
         .status(400)
@@ -765,9 +788,9 @@ export function renderLoginPage(opts: {
   ${renderEmailTypoGuardScript('form-send-otp', 'email')}
   <script>
     (function() {
-      var authBasePath = ${JSON.stringify(opts.authBasePath)};
-      var handleLoginUrl = ${JSON.stringify(handleLoginUrl)};
-      var requestUri = ${JSON.stringify('')};  // not needed client-side; flow_id is in cookie
+      var authBasePath = ${toScriptJson(opts.authBasePath)};
+      var handleLoginUrl = ${toScriptJson(handleLoginUrl)};
+      var requestUri = ${toScriptJson('')};  // not needed client-side; flow_id is in cookie
       var currentEmail = '';
       var loginMode = 'email'; // 'email' | 'handle'
       var verifying = false;
@@ -786,14 +809,14 @@ export function renderLoginPage(opts: {
       var otpBoxes = Array.prototype.slice.call(document.querySelectorAll('.otp-box'));
       var hiddenCode = document.getElementById('code');
       var otpLength = ${opts.otpLength};
-      var otpCharset = ${JSON.stringify(opts.otpCharset)};
+      var otpCharset = ${toScriptJson(opts.otpCharset)};
 
       // PAR heartbeat — slides the upstream request_uri inactivity
       // timer (atproto's AUTHORIZATION_INACTIVITY_TIMEOUT, 5 min) so
       // a user who waits >5 min for the OTP email doesn't trip the
       // dead-PAR path on submit. Disabled when ?no_heartbeat=1 was
       // passed on the original /oauth/authorize URL with EPDS_TEST_HOOKS=1.
-      var heartbeatEnabled = ${JSON.stringify(opts.heartbeatEnabled)};
+      var heartbeatEnabled = ${toScriptJson(opts.heartbeatEnabled)};
       var heartbeatHandle = null;
       var heartbeatIntervalMs = 3 * 60 * 1000;
       // Upstream's AUTHORIZATION_INACTIVITY_TIMEOUT — once this much
@@ -1501,9 +1524,9 @@ export function renderLoginPage(opts: {
       // server-side — no DOM transition needed.
       // Pillar 2: Auto-fire the OTP send as a client-side POST.
       // Pillar 3: Skip auto-send if this is a duplicate GET (otpAlreadySent).
-      var loginHint = ${JSON.stringify(opts.loginHint)};
-      var initialStep = ${JSON.stringify(opts.initialStep)};
-      var otpAlreadySent = ${JSON.stringify(opts.otpAlreadySent)};
+      var loginHint = ${toScriptJson(opts.loginHint)};
+      var initialStep = ${toScriptJson(opts.initialStep)};
+      var otpAlreadySent = ${toScriptJson(opts.otpAlreadySent)};
 
       if (initialStep === 'otp' && loginHint) {
         currentEmail = loginHint;
