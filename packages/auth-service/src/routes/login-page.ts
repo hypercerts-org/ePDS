@@ -15,6 +15,12 @@
  *        hide via --recovery-link-display: none in branding.css)
  *      - Client branding from OAuth metadata
  *
+ * Handle/DID login_hints: the resolved account email is held on the
+ * auth_flow row and never rendered. The page shows a masked label and sends
+ * `useFlowEmail` to the OTP endpoints; lib/flow-email-plugin.ts substitutes
+ * the stored address server-side. Email hints pre-fill as before, since the
+ * caller already knows them.
+ *
  * The better-auth flow after login:
  *   - Email OTP: user submits code to /api/auth/sign-in/email-otp/verify
  *   - Social: user clicks button → /api/auth/sign-in/{provider} → OAuth exchange
@@ -47,6 +53,9 @@ import {
   resolveLoginHint,
   fetchParLoginHint,
 } from '../lib/resolve-login-hint.js'
+import { splitResolvedHint } from '../lib/login-hint.js'
+import { maskEmail } from '../lib/mask-email.js'
+import { FLOW_EMAIL_UNAVAILABLE_CODE } from '../lib/flow-email-plugin.js'
 import { ensurePdsUrl } from '../lib/pds-url.js'
 import {
   renderOptionalStyleTag,
@@ -265,6 +274,10 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
           internalSecret,
         )
       : null
+    const { prefillEmail, flowEmail } = splitResolvedHint(
+      effectiveLoginHint,
+      resolvedEmail,
+    )
 
     // Only fetch device-bound emails when we actually need them: the
     // cookie pair is present AND a hint resolved. Otherwise the existing
@@ -375,10 +388,29 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
           requestUri,
           clientId: clientId ?? null,
           handleMode,
+          loginHintEmail: flowEmail,
           expiresAt: Date.now() + AUTH_FLOW_TTL_MS,
         })
       } catch (err) {
         logger.error({ err }, 'Failed to create auth_flow')
+        res
+          .status(500)
+          .type('html')
+          .send(renderError('Internal server error. Please try again.'))
+        return
+      }
+    }
+
+    // A reused flow may carry a stale address (e.g. the "Another account"
+    // rebind dropped the hint), so always bring it in line with this
+    // request. The page below only sends `useFlowEmail` when the row holds
+    // the address, so a failed write must not fall through to a page that
+    // would then have nothing to substitute.
+    if (existingFlow) {
+      try {
+        ctx.db.setAuthFlowLoginHintEmail(flowId, flowEmail)
+      } catch (err) {
+        logger.error({ err, flowId }, 'Failed to update auth_flow login email')
         res
           .status(500)
           .type('html')
@@ -461,10 +493,6 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
       'Serving login page for auth_flow',
     )
 
-    // Use the resolved email (not the raw loginHint) for pre-filling forms.
-    // This ensures handle-based hints get resolved to the correct email.
-    const emailHint = resolvedEmail ?? ''
-
     res.type('html').send(
       renderLoginPage({
         flowId,
@@ -474,7 +502,8 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
         customCss,
         customFaviconUrl,
         customFaviconUrlDark,
-        loginHint: emailHint,
+        loginHint: prefillEmail,
+        flowEmailMasked: flowEmail ? maskEmail(flowEmail) : null,
         initialStep,
         otpAlreadySent,
         csrfToken: res.locals.csrfToken,
@@ -493,7 +522,7 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
   return router
 }
 
-export function renderLoginPage(opts: {
+export function renderLoginPage(input: {
   flowId: string
   clientId: string
   clientName: string
@@ -501,7 +530,19 @@ export function renderLoginPage(opts: {
   customCss: string | null
   customFaviconUrl: string | null
   customFaviconUrlDark: string | null
+  /**
+   * Email to pre-fill, for hints the caller supplied as an email. Never put
+   * an address resolved from a handle/DID here — use `flowEmailMasked`.
+   */
   loginHint: string
+  /**
+   * Masked label (`al***@example.com`) for an email the server resolved from
+   * a handle/DID hint and holds on the auth_flow row. When set, the page
+   * renders only this label: no address in any input, script, or attribute.
+   * The OTP calls send `useFlowEmail` instead and the auth service
+   * substitutes the stored address. Takes precedence over `loginHint`.
+   */
+  flowEmailMasked?: string | null
   initialStep: 'email' | 'otp'
   otpAlreadySent: boolean
   csrfToken: string
@@ -521,6 +562,11 @@ export function renderLoginPage(opts: {
    */
   heartbeatEnabled: boolean
 }): string {
+  // Flow-email mode (handle/DID hint, see `flowEmailMasked`): the full
+  // address must not appear anywhere in the page. Blank `loginHint` here, so
+  // every use of it below (inputs, subtitle, script) is empty by
+  // construction, whatever the caller passed.
+  const opts = input.flowEmailMasked ? { ...input, loginHint: '' } : input
   const b = opts.branding
   const appName = b.client_name || opts.clientName || 'Certified'
   // brand_color is interpolated into <style> below. escapeHtml() doesn't
@@ -538,6 +584,9 @@ export function renderLoginPage(opts: {
 
   const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
   const inputFilter = buildOtpInputFilter(opts.otpCharset)
+
+  const flowEmailMasked = opts.flowEmailMasked || ''
+  const useFlowEmail = flowEmailMasked !== ''
 
   // ATProto/Bluesky handle login button.
   //
@@ -742,7 +791,11 @@ export function renderLoginPage(opts: {
     <div id="step-otp" class="step-otp${opts.initialStep === 'otp' ? ' active' : ''}">
       <p class="subtitle" id="otp-subtitle">${
         opts.initialStep === 'otp' && opts.otpAlreadySent
-          ? `Code already sent to ${escapeHtml(opts.loginHint.replace(/(.{2})[^@]*(@.*)/, '$1***$2'))}`
+          ? `Code already sent to ${escapeHtml(
+              useFlowEmail
+                ? flowEmailMasked
+                : opts.loginHint.replace(/(.{2})[^@]*(@.*)/, '$1***$2'),
+            )}`
           : ''
       }</p>
       <form id="form-verify-otp">
@@ -792,6 +845,13 @@ export function renderLoginPage(opts: {
       var handleLoginUrl = ${toScriptJson(handleLoginUrl)};
       var requestUri = ${toScriptJson('')};  // not needed client-side; flow_id is in cookie
       var currentEmail = '';
+      // True while the server holds this flow's email (handle/DID login_hint)
+      // and the page does not. sendOtp/verifyOtp then send useFlowEmail
+      // instead of an address, and the auth service substitutes the stored
+      // one. Cleared the moment the user supplies an email themselves.
+      var useFlowEmail = ${toScriptJson(useFlowEmail)};
+      var flowEmailMasked = ${toScriptJson(flowEmailMasked)};
+      var FLOW_EMAIL_UNAVAILABLE = ${toScriptJson(FLOW_EMAIL_UNAVAILABLE_CODE)};
       var loginMode = 'email'; // 'email' | 'handle'
       var verifying = false;
       var errorEl = document.getElementById('error-msg');
@@ -1252,6 +1312,9 @@ export function renderLoginPage(opts: {
 
       function showOtpStep(email) {
         currentEmail = email;
+        // The user supplied this address themselves, so it, not the
+        // server-held one, is what later resend/verify calls must use.
+        useFlowEmail = false;
         otpEmailInput.value = email;
         var masked = email.replace(/(.{2})[^@]*(@.*)/, '$1***$2');
         otpSubtitle.textContent = 'We sent a ' + otpLength + (otpCharset === 'alphanumeric' ? '-character' : '-digit') + ' code to ' + masked;
@@ -1283,7 +1346,30 @@ export function renderLoginPage(opts: {
         // immediately.
         emailInput.value = '';
         currentEmail = '';
+        // Whatever they type next is theirs; never fall back to the
+        // address the server resolved from the hint.
+        useFlowEmail = false;
         emailInput.focus();
+      }
+
+      /**
+       * The server no longer holds an email for this sign-in (the flow
+       * expired or its cookie is gone), so there is nothing to
+       * substitute. Hand the user the email form with the server's
+       * explanation instead of leaving them on a code step that cannot
+       * work.
+       */
+      function fallBackToEmailStep(message) {
+        showEmailStep();
+        clearOtpBoxes();
+        showError(message);
+      }
+
+      /** Identify the account for an OTP call: an address, or the server-held one. */
+      function identityFields(email) {
+        if (email) return { email: email };
+        if (useFlowEmail) return { useFlowEmail: true };
+        return { email: email };
       }
 
       // Send OTP via better-auth
@@ -1292,11 +1378,14 @@ export function renderLoginPage(opts: {
           var res = await fetch(authBasePath + '/email-otp/send-verification-otp', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: email, type: 'sign-in' }),
+            body: JSON.stringify(Object.assign({ type: 'sign-in' }, identityFields(email))),
           });
           if (!res.ok) {
             var data = await res.json().catch(function() { return {}; });
-            return { error: data.message || data.error || 'Failed to send code' };
+            return {
+              error: data.message || data.error || 'Failed to send code',
+              flowEmailUnavailable: data.code === FLOW_EMAIL_UNAVAILABLE,
+            };
           }
           return { ok: true };
         } catch (err) {
@@ -1310,7 +1399,7 @@ export function renderLoginPage(opts: {
           var res = await fetch(authBasePath + '/sign-in/email-otp', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: email, otp: otp }),
+            body: JSON.stringify(Object.assign({ otp: otp }, identityFields(email))),
           });
           if (!res.ok) {
             var data = await res.json().catch(function() { return {}; });
@@ -1319,7 +1408,11 @@ export function renderLoginPage(opts: {
             // branch on it (see isExpired below), and branching on the
             // rewritten copy would couple control flow to wording, so
             // an innocuous copy edit could silently change behaviour.
-            return { error: otpErrorText(raw), rawError: raw };
+            return {
+              error: otpErrorText(raw),
+              rawError: raw,
+              flowEmailUnavailable: data.code === FLOW_EMAIL_UNAVAILABLE,
+            };
           }
           // Success: redirect to /auth/complete to complete the AT Protocol flow
           window.location.href = '/auth/complete';
@@ -1392,7 +1485,9 @@ export function renderLoginPage(opts: {
 
         try {
           var result = await verifyOtp(currentEmail, otp);
-          if (result && result.error) {
+          if (result && result.flowEmailUnavailable) {
+            fallBackToEmailStep(result.error);
+          } else if (result && result.error) {
             // Inline a "Send a new code" action when the error
             // indicates the OTP has aged out — too easy to miss the
             // separate Resend button below the form. The substring
@@ -1473,8 +1568,10 @@ export function renderLoginPage(opts: {
             btn.disabled = false;
             btn.textContent = 'Verify';
             // Verify failed (typo, expired OTP, etc.) — the form is
-            // still live, so resume keeping the PAR alive.
-            startHeartbeat();
+            // still live, so resume keeping the PAR alive. After a
+            // fall-back to the email step there is no code form to
+            // keep alive.
+            if (stepOtp.classList.contains('active')) startHeartbeat();
           }
         }
       });
@@ -1492,7 +1589,9 @@ export function renderLoginPage(opts: {
         var result = await sendOtp(currentEmail);
         this.disabled = false;
         this.textContent = 'Send a new code';
-        if (result.error) {
+        if (result.flowEmailUnavailable) {
+          fallBackToEmailStep(result.error);
+        } else if (result.error) {
           showError(result.error);
         } else {
           // Clear any characters typed for the old code so the new code
@@ -1528,14 +1627,20 @@ export function renderLoginPage(opts: {
       var initialStep = ${toScriptJson(opts.initialStep)};
       var otpAlreadySent = ${toScriptJson(opts.otpAlreadySent)};
 
-      if (initialStep === 'otp' && loginHint) {
+      if (initialStep === 'otp' && (loginHint || useFlowEmail)) {
+        // loginHint is empty in flow-email mode; currentEmail stays empty
+        // and identityFields() sends useFlowEmail instead.
         currentEmail = loginHint;
-        var masked = loginHint.replace(/(.{2})[^@]*(@.*)/, '$1***$2');
+        var masked = useFlowEmail
+          ? flowEmailMasked
+          : loginHint.replace(/(.{2})[^@]*(@.*)/, '$1***$2');
         if (otpBoxes.length) otpBoxes[0].focus();
         if (!otpAlreadySent) {
           // First load — fire the OTP send in the background.
-          sendOtp(loginHint).then(function(result) {
-            if (result.error) {
+          sendOtp(currentEmail).then(function(result) {
+            if (result.flowEmailUnavailable) {
+              fallBackToEmailStep(result.error);
+            } else if (result.error) {
               showError(result.error);
             } else {
               otpSubtitle.textContent = 'We sent a ' + otpLength + (otpCharset === 'alphanumeric' ? '-character' : '-digit') + ' code to ' + masked;

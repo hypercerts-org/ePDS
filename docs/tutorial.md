@@ -650,6 +650,15 @@ All three behave the same way from the client's perspective: ePDS sends
 the OTP to the account's email address and shows the code-entry screen
 directly. Handles and DIDs are resolved internally by the auth service.
 
+The address a handle or DID resolves to is private and never reaches the
+browser: the code-entry screen shows only a partly hidden address such as
+`al***@example.com` (shorter addresses are hidden further, down to
+`***@example.com`), and the auth service keeps the real one server-side for
+the life of the sign-in. An email `login_hint` is different: you supplied it,
+so it pre-fills the form as before. If the sign-in has expired by the time the
+code is requested or checked, the page falls back to its email form and asks
+the user to type their address.
+
 If the identifier doesn't match any existing account, ePDS falls back to
 its own email input form (the same form used in Flow 2), so passing a
 stale or unknown handle is safe. An email `login_hint` must be a plain

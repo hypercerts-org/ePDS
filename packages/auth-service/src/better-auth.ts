@@ -19,6 +19,7 @@ import { getMigrations } from 'better-auth/db'
 import { emailOTP } from 'better-auth/plugins'
 import Database from 'better-sqlite3'
 import type { EmailSender } from './email/sender.js'
+import { flowEmailPlugin } from './lib/flow-email-plugin.js'
 import { getDidByEmail } from './lib/get-did-by-email.js'
 import { ensurePdsUrl } from './lib/pds-url.js'
 
@@ -303,6 +304,11 @@ export function createBetterAuth(
     socialProviders,
 
     plugins: [
+      // Substitutes the auth_flow's stored email into the OTP endpoints'
+      // request body when the login page sends `useFlowEmail` instead of
+      // an address. Must be registered here (the instance mounted at
+      // /api/auth/*); the migrations-only instance serves no routes.
+      flowEmailPlugin(db),
       emailOTP({
         otpLength,
         expiresIn: 600,

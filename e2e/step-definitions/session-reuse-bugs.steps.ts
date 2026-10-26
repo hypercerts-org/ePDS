@@ -291,24 +291,29 @@ When(
 )
 
 Then(
-  "the OTP form will submit the other user's email",
+  "the OTP is sent to the other user's email without the page exposing it",
   async function (this: EpdsWorld) {
     if (!this.otherUserEmail) {
       throw new Error(
         'world.otherUserEmail missing — "another user has a separate PDS account" step must run first',
       )
     }
-    // #otp-email is a hidden input — the resolved email rides along on
-    // the OTP submit so the verify endpoint matches the right account.
-    // Asserting on it (rather than the auth-host alone) proves the
-    // auth-service skipped the chooser AND resolved the hinted handle
-    // to the right account before rendering OTP.
     const page = getPage(this)
-    const value = await page.locator('#otp-email').getAttribute('value')
-    expect(value).toBe(this.otherUserEmail)
     const url = new URL(page.url())
     const authHost = new URL(testEnv.authUrl).host
     expect(url.host).toBe(authHost)
+
+    // A handle login_hint resolves to the account's private email. The
+    // server keeps it on the auth_flow row, so it must not appear anywhere
+    // in the page — hidden input included.
+    expect(await page.locator('#otp-email').getAttribute('value')).toBe('')
+    expect(await page.content()).not.toContain(this.otherUserEmail)
+
+    // The OTP still reaching the other user's mailbox proves auth-service
+    // skipped the chooser AND resolved the hinted handle to the right
+    // account, which the old assertion on the hidden input used to prove.
+    if (!testEnv.mailpitPass) return 'pending'
+    await waitForEmail(`to:${this.otherUserEmail}`)
   },
 )
 
