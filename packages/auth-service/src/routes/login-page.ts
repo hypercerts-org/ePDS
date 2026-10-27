@@ -130,6 +130,19 @@ function toScriptJson(value: string | boolean | null): string {
   )
 }
 
+/**
+ * Address shown in the "Code already sent to …" subtitle. A flow email is
+ * already masked server-side; a caller-supplied hint keeps its first two
+ * characters and domain. Uses indexOf rather than a regex to avoid
+ * backtracking on long input.
+ */
+function otpSubtitleEmail(loginHint: string, flowEmailMasked: string): string {
+  if (flowEmailMasked) return flowEmailMasked
+  const at = loginHint.indexOf('@', 2)
+  if (at < 0) return loginHint
+  return `${loginHint.slice(0, 2)}***${loginHint.slice(at)}`
+}
+
 export async function safeResolveClientMetadata(
   clientId: string | undefined,
 ): Promise<ClientMetadata> {
@@ -587,6 +600,10 @@ export function renderLoginPage(input: {
 
   const flowEmailMasked = opts.flowEmailMasked || ''
   const useFlowEmail = flowEmailMasked !== ''
+  const otpSubtitle =
+    opts.initialStep === 'otp' && opts.otpAlreadySent
+      ? `Code already sent to ${escapeHtml(otpSubtitleEmail(opts.loginHint, flowEmailMasked))}`
+      : ''
 
   // ATProto/Bluesky handle login button.
   //
@@ -789,15 +806,7 @@ export function renderLoginPage(input: {
 
     <!-- Step 2: OTP entry (calls better-auth verifyOtp) -->
     <div id="step-otp" class="step-otp${opts.initialStep === 'otp' ? ' active' : ''}">
-      <p class="subtitle" id="otp-subtitle">${
-        opts.initialStep === 'otp' && opts.otpAlreadySent
-          ? `Code already sent to ${escapeHtml(
-              useFlowEmail
-                ? flowEmailMasked
-                : opts.loginHint.replace(/(.{2})[^@]*(@.*)/, '$1***$2'),
-            )}`
-          : ''
-      }</p>
+      <p class="subtitle" id="otp-subtitle">${otpSubtitle}</p>
       <form id="form-verify-otp">
         <input type="hidden" id="otp-email" name="email" value="${escapeHtml(opts.loginHint)}">
         <input type="hidden" id="code" name="code">

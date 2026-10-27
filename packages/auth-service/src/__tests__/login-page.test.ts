@@ -557,6 +557,23 @@ describe('renderLoginPage flow-email mode (handle/DID hint)', () => {
   })
 })
 
+describe('renderLoginPage OTP subtitle for a caller-supplied email hint', () => {
+  it.each([
+    ['alice@example.com', 'al***@example.com'],
+    ['ab@example.com', 'ab***@example.com'],
+    ['a@b@example.com', 'a@***@example.com'],
+    ['no-at-sign', 'no-at-sign'],
+  ])('masks %s as %s', (loginHint, expected) => {
+    const html = renderDefault({
+      loginHint,
+      initialStep: 'otp',
+      otpAlreadySent: true,
+    })
+
+    expect(html).toContain(`Code already sent to ${expected}</p>`)
+  })
+})
+
 describe('renderLoginPage sign-in error copy', () => {
   it.each([
     ['Invalid OTP', "That code didn't work."],
