@@ -1455,6 +1455,10 @@ export function renderLoginPage(input: {
         }
 
         var email = raw.toLowerCase();
+        // Same reactive gate as Resend and Verify: a code sent for a dead
+        // flow can never be redeemed, and this form is reachable after the
+        // flow-email fallback, long after the page loaded.
+        if (await abortIfFlowDead()) return;
         var result = await sendOtp(email);
         btn.disabled = false;
         btn.textContent = defaultLabel;

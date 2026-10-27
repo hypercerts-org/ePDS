@@ -142,6 +142,8 @@ function mountPage(
 
   const calls: FetchCall[] = []
   const location = { href: '' }
+  // Mutable so a test can kill the flow after the page has loaded.
+  const ping: { body: Record<string, unknown> } = { body: { ok: true } }
   const sandbox = {
     document: {
       getElementById: (id: string) => elements.get(id) ?? null,
@@ -161,7 +163,7 @@ function mountPage(
     window: { addEventListener: () => {}, location },
     fetch: (url: string, init?: { body?: string }) => {
       if (url === '/auth/ping') {
-        return Promise.resolve({ json: () => Promise.resolve({ ok: true }) })
+        return Promise.resolve({ json: () => Promise.resolve(ping.body) })
       }
       const call = {
         url,
@@ -195,7 +197,7 @@ function mountPage(
     await el('form-send-otp').fire('submit')
     await settle()
   }
-  return { el, calls, location, settle, submitCode, submitEmail }
+  return { el, calls, location, ping, settle, submitCode, submitEmail }
 }
 
 const flowMode = {
@@ -278,6 +280,18 @@ describe('login page script with a server-held email (handle/DID hint)', () => {
 
     expect(page.calls).toHaveLength(1)
     expect(page.calls[0].body).not.toHaveProperty('useFlowEmail')
+  })
+
+  it('does not send a code for a typed email once the flow has died', async () => {
+    const page = mountPage({ ...flowMode, otpAlreadySent: true })
+    await page.settle()
+    await page.el('btn-back').fire('click')
+    page.ping.body = { ok: false, reason: 'expired' }
+
+    await page.submitEmail('typed@example.com')
+
+    expect(page.calls).toEqual([])
+    expect(page.location.href).toBe('/auth/abort')
   })
 
   describe('when the server reports it no longer holds the email', () => {
