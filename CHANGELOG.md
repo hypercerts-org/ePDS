@@ -1,5 +1,41 @@
 # ePDS
 
+## 0.10.0
+
+### Who should read this release
+
+- **End users:**
+  - [Fixed a security flaw where a specially crafted sign-in link could run unwanted code on the sign-in page.](#v0.10.0-fixed-a-security-flaw-where-a-specially-crafted-sign-in)
+- **Client app developers:**
+  - [Fixed a security flaw where a specially crafted sign-in link could run unwanted code on the sign-in page.](#v0.10.0-fixed-a-security-flaw-where-a-specially-crafted-sign-in)
+- **Operators:**
+  - [Add standalone shared PLC key rotation, active DID inventory, and Docker/Railway identity publishing tools with resumable private reports.](#v0.10.0-add-standalone-shared-plc-key-rotation-active-did-inventory)
+  - [Fixed a security flaw where a specially crafted sign-in link could run unwanted code on the sign-in page.](#v0.10.0-fixed-a-security-flaw-where-a-specially-crafted-sign-in)
+
+### Minor Changes
+
+- <a id="v0.10.0-add-standalone-shared-plc-key-rotation-active-did-inventory"></a> [#263](https://github.com/hypercerts-org/ePDS/pull/263) [`40e0a5c`](https://github.com/hypercerts-org/ePDS/commit/40e0a5c31bc848ed6b061c9002d975d4b62ef8c7) Thanks [@Ashex](https://github.com/Ashex)! - Add standalone shared PLC key rotation, active DID inventory, and Docker/Railway identity publishing tools with resumable private reports.
+
+  **Affects:** Operators
+
+  **Operators:** Use Deno 2.8.3 and follow `docs/plc-key-rotation.md`:
+  - Build an inventory with `scripts/list-active-dids.ts --pds-url https://HOST` using scoped network permission; active DIDs are printed one per line only after all pages succeed. Preview/add/remove keys with `scripts/rotate-plc-key.sh`. During outages, add only; after recovery, freeze writers, reconcile accounts, manually switch and verify every replica, then remove the old key. The tools do not change deployment secrets, redeploy services, or eliminate PLC's historical recovery window.
+  - Independently publish identity events with `scripts/publish-identity.sh --target docker` (`CONTAINER`) or `scripts/publish-identity.sh --target railway` (`PROJECT`, `ENVIRONMENT`, `SERVICE`), a reviewed `DIDS` file of up to 15,000 DIDs, and `--apply`; preview is offline. Both default to the ePDS workdir `/app/packages/pds-core`; set `WORKDIR=/app` for a reference PDS. Docker uses its configured user unless overridden by `EXEC_USER` / `--user USER[:GROUP]`; Railway uses its SSH login user, ignores `EXEC_USER`, and no longer accepts `--user`. Verify runtime/storage access before applying; `queued` confirms PDS storage, not relay receipt.
+  - Every rotation or publishing run requires terminal confirmation with `yes`. Select a compatible numbered report, `0` for a fresh run, or use `--no-resume` / `--resume-report PATH`; these do not bypass confirmation. Unique owner-only JSON and timestamped logs are saved directly in `REPORT_DIR` (default `./reports`) without changing existing directory permissions; stdout shows outcomes and report paths. Resume preserves successful provenance and retries unfinished work, never using preview successes to skip apply work. Railway reports ignore the obsolete expected-user field while retaining other target checks.
+  - Failures exit nonzero; Ctrl+C/SIGTERM saves the full inventory and exits 130. Inspect uncertain PLC heads or remote processes before retrying: local cancellation does not stop remote publishing, and duplicate notifications are possible. Check publisher JSON `error.stage` / `error.code` and private logs for runtime failures; raw logs may contain secrets and retain at most 1,000,000 bytes per output channel. Rotation wrappers accept PLC URLs with a trailing slash.
+
+### Patch Changes
+
+- <a id="v0.10.0-fixed-a-security-flaw-where-a-specially-crafted-sign-in"></a> [#264](https://github.com/hypercerts-org/ePDS/pull/264) [`e921d79`](https://github.com/hypercerts-org/ePDS/commit/e921d793125f08ad32d9487f129a80f441a2f9db) Thanks [@Kzoeps](https://github.com/Kzoeps)! - Fixed a security flaw where a specially crafted sign-in link could run unwanted code on the sign-in page.
+
+  **Affects:** End users, Client app developers, Operators
+
+  **End users:** If a sign-in link carries an email address that isn't written correctly, you now see the normal email form and type your address, instead of going straight to the code step.
+
+  **Client app developers:** An email `login_hint` is now accepted only if it looks like a plain email address (letters, digits and `._%+-` before the `@`, a dotted domain after it with no empty labels or labels starting or ending in `-`, at most 254 characters). A malformed value containing `@` is ignored, and the user sees the normal email form instead of a pre-filled code step. Handle and DID hints are unchanged.
+
+  **Operators:** Deploy the updated auth service to pick up the fix. No configuration changes are needed.
+
 ## 0.9.0
 
 ### Who should read this release
