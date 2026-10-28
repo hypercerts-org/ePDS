@@ -381,6 +381,24 @@ Constraints:
 - If `epds_handle_login_url` is unset or invalid, the button is not
   rendered. Existing clients see no behaviour change.
 
+#### Optional: offer Google or GitHub sign-in
+
+If the PDS operator has configured a social provider (see
+[Social providers](./configuration.md#social-providers-optional)), opt in
+by listing it in your client metadata:
+
+```json
+{
+  "epds_social_providers": ["google"]
+}
+```
+
+The login page then renders that provider's button above the email form.
+A button appears only when both the operator configured the provider and
+your client lists it, so a provider enabled for one app does not appear on
+other apps' login pages. Accepted values: `"google"`, `"github"`. Unknown
+values are ignored; if the field is unset, no social buttons are rendered.
+
 #### Optional: custom CSS and favicon for ePDS pages (trusted clients)
 
 If your app is in the PDS operator's `PDS_OAUTH_TRUSTED_CLIENTS`, you can

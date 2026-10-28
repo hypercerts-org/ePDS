@@ -5,10 +5,12 @@
  * - GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET
  * - GITHUB_CLIENT_ID + GITHUB_CLIENT_SECRET
  *
- * When configured, the login page renders social login buttons that redirect
- * to better-auth's provider endpoints (/api/auth/sign-in/social?provider=...).
- * After OAuth exchange, better-auth redirects to /auth/complete (bridge route)
- * which reads the session and issues an HMAC-signed epds-callback.
+ * When configured, the login page renders social login buttons whose click
+ * handler POSTs { provider, callbackURL } to better-auth's
+ * /api/auth/sign-in/social (POST-only) and follows the provider URL it
+ * returns (see login-page-social-buttons.test.ts). After the OAuth exchange,
+ * better-auth redirects to /auth/complete (bridge route) which reads the
+ * session and issues an HMAC-signed epds-callback.
  */
 import { describe, it, expect } from 'vitest'
 
@@ -96,17 +98,19 @@ describe('Social provider detection', () => {
 })
 
 describe('Social login flow (unit)', () => {
-  it('social login URLs follow better-auth convention', () => {
-    // Social login should redirect to /api/auth/sign-in/social?provider=...
-    const googleUrl =
-      '/api/auth/sign-in/social?provider=google&callbackURL=/auth/complete'
-    const githubUrl =
-      '/api/auth/sign-in/social?provider=github&callbackURL=/auth/complete'
+  it('social sign-in follows better-auth convention', () => {
+    // Social sign-in starts with a POST to /api/auth/sign-in/social; a GET
+    // with the same fields as query parameters is a 404 (the endpoint is
+    // POST-only). better-auth answers with the provider URL to follow.
+    const endpoint = '/api/auth/sign-in/social'
+    const googleBody = { provider: 'google', callbackURL: '/auth/complete' }
+    const githubBody = { provider: 'github', callbackURL: '/auth/complete' }
 
-    expect(googleUrl).toContain('provider=google')
-    expect(googleUrl).toContain('callbackURL=/auth/complete')
-    expect(githubUrl).toContain('provider=github')
-    expect(githubUrl).toContain('callbackURL=/auth/complete')
+    expect(endpoint).not.toContain('?')
+    expect(googleBody.provider).toBe('google')
+    expect(githubBody.provider).toBe('github')
+    expect(googleBody.callbackURL).toBe('/auth/complete')
+    expect(githubBody.callbackURL).toBe('/auth/complete')
   })
 
   it('bridge route /auth/complete is the callback for all auth methods', () => {

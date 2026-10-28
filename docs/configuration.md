@@ -169,8 +169,10 @@ card when both `PDS_TERMS_OF_SERVICE_URL` and `PDS_PRIVACY_POLICY_URL`
 
 ### Social providers (optional)
 
-Both ID and SECRET must be set to enable a provider. When set, social login
-buttons appear on the login page.
+Both ID and SECRET must be set to enable a provider. A provider's button
+appears on the login page only for OAuth clients that also list it in their
+client metadata (`"epds_social_providers": ["google"]`), so enabling a
+provider does not change the login page of clients that did not ask for it.
 
 | Variable               | Description                                                                                  |
 | ---------------------- | -------------------------------------------------------------------------------------------- |

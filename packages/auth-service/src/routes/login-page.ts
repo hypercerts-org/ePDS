@@ -17,7 +17,8 @@
  *
  * The better-auth flow after login:
  *   - Email OTP: user submits code to /api/auth/sign-in/email-otp/verify
- *   - Social: user clicks button → /api/auth/sign-in/{provider} → OAuth exchange
+ *   - Social: user clicks button → page script POSTs /api/auth/sign-in/social
+ *     → browser follows the returned provider URL → OAuth exchange
  *   - On success, better-auth redirects to /auth/complete (the bridge route)
  *   - Bridge reads epds_auth_flow cookie → auth_flow → HMAC-signed redirect
  */
@@ -579,8 +580,18 @@ export function renderLoginPage(opts: {
       )}" class="terms-link" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</div>`
     : ''
 
-  const hasGoogle = 'google' in socialProviders
-  const hasGithub = 'github' in socialProviders
+  // Social buttons are opt-in per client: a provider's button renders only
+  // when the operator configured it AND the client lists it in
+  // `epds_social_providers`, the same way `epds_handle_login_url` gates the
+  // ATProto/Bluesky button. Configuring Google on a shared PDS therefore
+  // leaves the login page of every other client unchanged.
+  const requestedSocial = Array.isArray(b.epds_social_providers)
+    ? b.epds_social_providers
+    : []
+  const hasGoogle =
+    'google' in socialProviders && requestedSocial.includes('google')
+  const hasGithub =
+    'github' in socialProviders && requestedSocial.includes('github')
   const hasSocialProviders = hasGoogle || hasGithub
 
   // The flash region is a single element shared by both steps, so there
@@ -591,7 +602,9 @@ export function renderLoginPage(opts: {
   const flashRegionHtml =
     '<div id="error-msg" class="flash-msg hidden" role="status" aria-live="polite"></div>'
 
-  // Social login buttons — redirect to better-auth provider endpoints
+  // Social login buttons. better-auth's /sign-in/social is POST-only, so
+  // these are buttons handled by the page script, not links (a link's GET
+  // is a 404).
   const socialButtonsHtml = hasSocialProviders
     ? `
     <div class="divider"><span>or continue with</span></div>
@@ -599,7 +612,7 @@ export function renderLoginPage(opts: {
       ${
         hasGoogle
           ? `
-      <a href="${opts.authBasePath}/sign-in/social?provider=google&callbackURL=/auth/complete" class="btn-social btn-google">
+      <button type="button" class="btn-social btn-google" data-social-provider="google">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
           <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
           <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
@@ -607,18 +620,18 @@ export function renderLoginPage(opts: {
           <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
         </svg>
         Sign in with Google
-      </a>`
+      </button>`
           : ''
       }
       ${
         hasGithub
           ? `
-      <a href="${opts.authBasePath}/sign-in/social?provider=github&callbackURL=/auth/complete" class="btn-social btn-github">
+      <button type="button" class="btn-social btn-github" data-social-provider="github">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
           <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
         </svg>
         Sign in with GitHub
-      </a>`
+      </button>`
           : ''
       }
     </div>
@@ -666,7 +679,7 @@ export function renderLoginPage(opts: {
     .btn-secondary { display: inline-block; color: var(--muted-foreground); background: none; border: none; font-size: 14px; font-weight: 500; cursor: pointer; padding: 4px 0; border-radius: 4px; text-decoration: none; }
     .btn-secondary:hover { color: #1A130F; }
     .btn-secondary:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; }
-    .btn-social { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 13px 20px; border: 1px solid var(--btn-secondary-border); border-radius: 9999px; font-size: 15px; font-weight: 500; cursor: pointer; text-decoration: none; background: white; color: #333; margin-bottom: 8px; transition: background 0.15s; }
+    .btn-social { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 13px 20px; border: 1px solid var(--btn-secondary-border); border-radius: 9999px; font-family: inherit; font-size: 15px; font-weight: 500; cursor: pointer; text-decoration: none; background: white; color: #333; margin-bottom: 8px; transition: background 0.15s; }
     .btn-social:hover { background: #fafafa; }
     .btn-atproto { margin-top: 12px; margin-bottom: 0; color: #1A130F !important; background: var(--input-bg) !important; border-color: var(--input-border) !important; }
     .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: var(--muted-foreground); font-size: 13px; }
@@ -793,7 +806,6 @@ export function renderLoginPage(opts: {
       var requestUri = ${toScriptJson('')};  // not needed client-side; flow_id is in cookie
       var currentEmail = '';
       var loginMode = 'email'; // 'email' | 'handle'
-      var verifying = false;
       var errorEl = document.getElementById('error-msg');
       var stepEmail = document.getElementById('step-email');
       var stepOtp = document.getElementById('step-otp');
@@ -1250,6 +1262,96 @@ export function renderLoginPage(opts: {
         });
       }
 
+      // One sign-in attempt at a time, whatever the method: a social
+      // button, sending or verifying an email code, a resend, or a handle
+      // hand-off. Two in flight race each other (a second /sign-in/social
+      // replaces the first one's OAuth state; a verify can land while the
+      // page is already leaving for a provider). Every handler claims the
+      // guard before it starts a request, releases it when the attempt
+      // fails and the page stays usable, and keeps it while the page is
+      // navigating away. Sending a code releases it once the code is sent,
+      // so the verify that follows can claim it.
+      var socialButtons = Array.prototype.slice.call(
+        document.querySelectorAll('[data-social-provider]'),
+      );
+      // The buttons that start a sign-in from the first step, shown as
+      // disabled while any attempt holds the guard.
+      var startButtons = socialButtons.concat(sendOtpBtn ? [sendOtpBtn] : []);
+      var signInBusy = false;
+      function setStartButtonsDisabled(disabled) {
+        startButtons.forEach(function(btn) { btn.disabled = disabled; });
+      }
+      function claimSignIn() {
+        if (signInBusy) return false;
+        signInBusy = true;
+        setStartButtonsDisabled(true);
+        return true;
+      }
+      function releaseSignIn() {
+        signInBusy = false;
+        setStartButtonsDisabled(false);
+      }
+
+      // better-auth's /sign-in/social is POST-only (a GET is a 404), so
+      // the social buttons POST it and follow the provider URL it returns.
+      // Only ever leave this page for the provider's own authorization
+      // server: an https URL on the host better-auth sends that provider
+      // to. Anything else in the response is treated as a failed start.
+      var socialProviderOrigins = {
+        google: 'https://accounts.google.com',
+        github: 'https://github.com',
+      };
+      function socialProviderUrl(provider, url) {
+        if (typeof url !== 'string') return null;
+        var expected = Object.prototype.hasOwnProperty.call(
+          socialProviderOrigins,
+          provider,
+        )
+          ? socialProviderOrigins[provider]
+          : null;
+        if (!expected) return null;
+        try {
+          var parsed = new URL(url);
+          if (parsed.protocol !== 'https:' || parsed.origin !== expected) {
+            return null;
+          }
+          return parsed.href;
+        } catch (err) {
+          return null;
+        }
+      }
+      // A page restored from the back/forward cache keeps its script
+      // state, so the guard held on the way out would otherwise still
+      // block every sign-in when the user comes back.
+      window.addEventListener('pageshow', function(e) {
+        if (e.persisted) releaseSignIn();
+      });
+      socialButtons.forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          if (!claimSignIn()) return;
+          clearError();
+          var provider = btn.getAttribute('data-social-provider');
+          try {
+            var res = await fetch(authBasePath + '/sign-in/social', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                provider: provider,
+                callbackURL: '/auth/complete',
+              }),
+            });
+            var data = await res.json().catch(function() { return {}; });
+            var target = res.ok && data ? socialProviderUrl(provider, data.url) : null;
+            if (target) {
+              window.location.assign(target);
+              return;
+            }
+          } catch (err) {}
+          releaseSignIn();
+          showError('Could not start sign-in. Please try again.');
+        });
+      });
+
       function showOtpStep(email) {
         currentEmail = email;
         otpEmailInput.value = email;
@@ -1332,9 +1434,9 @@ export function renderLoginPage(opts: {
       // Form: send OTP (email mode) or hand off to client (handle mode)
       sendOtpForm.addEventListener('submit', async function(e) {
         e.preventDefault();
-        clearError();
         var raw = emailInput.value.trim();
-        if (!raw) return;
+        if (!raw || !claimSignIn()) return;
+        clearError();
         var btn = this.querySelector('button[type=submit]');
         var defaultLabel = loginMode === 'handle' ? 'Sign in' : 'Continue';
         btn.disabled = true;
@@ -1354,6 +1456,7 @@ export function renderLoginPage(opts: {
 
         var email = raw.toLowerCase();
         var result = await sendOtp(email);
+        releaseSignIn();
         btn.disabled = false;
         btn.textContent = defaultLabel;
 
@@ -1370,9 +1473,9 @@ export function renderLoginPage(opts: {
         // Collapse duplicate submits (auto-submit on 6th digit + Enter, OTP
         // autofill firing input on every box, paste+input pair, etc.). The
         // first call consumes the code; a second one races the redirect and
-        // flashes "Invalid OTP" before the page unloads.
-        if (verifying) return;
-        verifying = true;
+        // flashes "Invalid OTP" before the page unloads. The shared guard
+        // also keeps a verify from starting while another sign-in is.
+        if (!claimSignIn()) return;
         // Stop pinging the moment a verify is in flight — the redirect
         // is imminent and any further heartbeat is wasted.
         stopHeartbeat();
@@ -1466,10 +1569,10 @@ export function renderLoginPage(opts: {
             if (otpBoxes.length) otpBoxes[0].focus();
           }
         } finally {
-          // Leave the latch set on success: verifyOtp triggers a redirect,
+          // Keep the guard on success: verifyOtp triggers a redirect,
           // and we don't want late events to re-open the form mid-navigation.
           if (!result || result.error) {
-            verifying = false;
+            releaseSignIn();
             btn.disabled = false;
             btn.textContent = 'Verify';
             // Verify failed (typo, expired OTP, etc.) — the form is
@@ -1481,6 +1584,7 @@ export function renderLoginPage(opts: {
 
       // Send a new code (the element id predates the relabel)
       document.getElementById('btn-resend').addEventListener('click', async function() {
+        if (!claimSignIn()) return;
         clearError();
         this.disabled = true;
         this.textContent = 'Sending...';
@@ -1490,6 +1594,7 @@ export function renderLoginPage(opts: {
         // submit it. Bounce to /auth/abort instead.
         if (await abortIfFlowDead()) return;
         var result = await sendOtp(currentEmail);
+        releaseSignIn();
         this.disabled = false;
         this.textContent = 'Send a new code';
         if (result.error) {
@@ -1534,7 +1639,9 @@ export function renderLoginPage(opts: {
         if (otpBoxes.length) otpBoxes[0].focus();
         if (!otpAlreadySent) {
           // First load — fire the OTP send in the background.
+          claimSignIn();
           sendOtp(loginHint).then(function(result) {
+            releaseSignIn();
             if (result.error) {
               showError(result.error);
             } else {
