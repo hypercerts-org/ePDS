@@ -524,6 +524,56 @@ function renderDefault(overrides: Partial<LoginPageOpts> = {}): string {
   })
 }
 
+describe('renderLoginPage flow-email mode (handle/DID hint)', () => {
+  const email = 'alice.private@example.com'
+
+  it('renders no address even when the caller also passes one as loginHint', () => {
+    // flowEmailMasked takes precedence, so a caller that wires the resolved
+    // address into the wrong option still cannot put it in the page.
+    const html = renderDefault({
+      loginHint: email,
+      flowEmailMasked: 'al***@example.com',
+      initialStep: 'otp',
+      otpAlreadySent: true,
+    })
+
+    expect(html.toLowerCase()).not.toContain(email)
+    expect(html).toContain('Code already sent to al***@example.com')
+    expect(html).toContain('var useFlowEmail = true;')
+    expect(html).toContain('var loginHint = "";')
+  })
+
+  it('escapes the masked label for the script and the markup', () => {
+    const html = renderDefault({
+      flowEmailMasked: '<b>x</b>***@example.com',
+      initialStep: 'otp',
+      otpAlreadySent: true,
+    })
+
+    expect(html).toContain('Code already sent to &lt;b&gt;')
+    expect(html).toContain(
+      'var flowEmailMasked = "\\u003cb\\u003ex\\u003c/b\\u003e***@example.com";',
+    )
+  })
+})
+
+describe('renderLoginPage OTP subtitle for a caller-supplied email hint', () => {
+  it.each([
+    ['alice@example.com', 'al***@example.com'],
+    ['ab@example.com', 'ab***@example.com'],
+    ['a@b@example.com', 'a@***@example.com'],
+    ['no-at-sign', 'no-at-sign'],
+  ])('masks %s as %s', (loginHint, expected) => {
+    const html = renderDefault({
+      loginHint,
+      initialStep: 'otp',
+      otpAlreadySent: true,
+    })
+
+    expect(html).toContain(`Code already sent to ${expected}</p>`)
+  })
+})
+
 describe('renderLoginPage sign-in error copy', () => {
   it.each([
     ['Invalid OTP', "That code didn't work."],

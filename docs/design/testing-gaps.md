@@ -16,7 +16,7 @@ pds-core callback, full OAuth flow).
 | `auth-service/middleware/`    | ~91%     | `rate-limit.ts` timer cleanup at 82%                                   |
 | `auth-service/email/`         | ~71%     | Template conditional branches partially covered                        |
 | `auth-service/routes/`        | ~35%     | Resend webhook is HTTP-tested; browser/OAuth routes remain gaps        |
-| `auth-service/better-auth.ts` | 0%       | better-auth wiring — see below                                         |
+| `auth-service/better-auth.ts` | ~85%     | `createBetterAuth` wiring covered through the HTTP router — see below  |
 | `auth-service/context.ts`     | 0%       | Minimal glue class                                                     |
 | `auth-service/index.ts`       | 0%       | Express app assembly + `main()`                                        |
 | `demo/lib/auth.ts`            | ~51%     | Network-dependent resolution functions                                 |
@@ -84,6 +84,13 @@ this area's main gap: `login-page.ts`, `consent.ts`, `recovery.ts`, `account-log
 - Provider webhook routes can be tested through an ephemeral Express server
   with locally signed payloads, as demonstrated by
   `resend-webhook.test.ts`.
+- `GET /oauth/authorize` can be tested through an ephemeral Express server
+  with the resolver modules mocked, as in `login-page-prompt-login.test.ts`.
+  That is where the handle/DID `login_hint` privacy rule (the resolved email
+  must never appear in the page) is pinned. The page's inline script is run
+  in a `vm` sandbox against a fake DOM in
+  `login-page-flow-email-script.test.ts`; there is no jsdom, so extend that
+  fake rather than adding a DOM library for one test.
 - The DB-level logic used by these routes is already well-covered via
   `consent.test.ts` (auth_flow operations, client login tracking,
   signCallback round-trip).
@@ -100,7 +107,7 @@ this area's main gap: `login-page.ts`, `consent.ts`, `recovery.ts`, `account-log
 - Alternatively, cover them via e2e tests (Playwright or similar) that
   exercise the full stack.
 
-### 3. `auth-service/src/better-auth.ts` (0% — 213 lines)
+### 3. `auth-service/src/better-auth.ts` (~85%)
 
 **Why it's hard:**
 
@@ -116,6 +123,14 @@ this area's main gap: `login-page.ts`, `consent.ts`, `recovery.ts`, `account-log
 
 **What can be tested:**
 
+- `createBetterAuth()` can be driven through `toNodeHandler` on an
+  ephemeral Express server against a temp SQLite file migrated with
+  `runBetterAuthMigrations()`, with a fake `EmailSender` and a mocked
+  `getDidByEmail`. `flow-email-router.test.ts` does this to prove the
+  flow-email plugin is registered, the OTP is mailed to the stored address,
+  the session cookie is set, and better-auth's rate limiter still applies to
+  the rewritten request. It is also the canary for better-auth upgrades (see
+  item 20 in [`pds-white-boxing.md`](pds-white-boxing.md)).
 - `buildSocialProviders()` is already tested (indirectly) in
   `social-providers.test.ts` by reimplementing the logic.
 - The social provider detection could be tested directly if
@@ -124,8 +139,9 @@ this area's main gap: `login-page.ts`, `consent.ts`, `recovery.ts`, `account-log
 **Recommended strategy:**
 
 - Consider exporting `buildSocialProviders` for direct unit testing.
-- The OTP email wiring is best verified by integration or e2e tests
-  that trigger a real OTP flow.
+- The `sendVerificationOTP` branding lookup runs inside
+  `flow-email-router.test.ts`, but the `clientId` it hands the sender is not
+  asserted; that remains covered by e2e tests that trigger a real OTP flow.
 - `extractOtp` in `e2e/support/mailpit.ts` uses heuristic regex patterns
   rather than `OTP_LENGTH` / `OTP_CHARSET` env vars. This is slightly flaky
   by nature — the robust alternative would be keeping those env vars in sync
