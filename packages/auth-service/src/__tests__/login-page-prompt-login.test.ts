@@ -358,6 +358,29 @@ describe('GET /oauth/authorize never renders an email resolved from a handle/DID
     ).toBeNull()
   })
 
+  it('uses the URL email hint over a handle in the stored PAR request', async () => {
+    // Each hint resolves to a different account email, so the page and the
+    // flow row show which hint won.
+    mocks.fetchParLoginHint.mockResolvedValue('alice.test.local')
+    mocks.resolveLoginHint.mockImplementation((hint: string) =>
+      Promise.resolve(
+        hint === 'alice.test.local' ? 'alice.private@example.com' : hint,
+      ),
+    )
+
+    const res = await authorize({ login_hint: 'bob@example.com' })
+    const html = await res.text()
+
+    expect(html).toMatch(
+      /<input type="email" id="email"[^>]*value="bob@example\.com">/,
+    )
+    expect(html).toContain('var useFlowEmail = false;')
+    expect(html.toLowerCase()).not.toContain('alice.private@example.com')
+    expect(
+      ctx.db.getAuthFlowLoginHintEmail(flowIdOf(flowCookie(res))),
+    ).toBeNull()
+  })
+
   it('drops the stored email when the same flow is reopened without a hint', async () => {
     // "Another account" rebind: the user opted out of the RP's hint.
     mocks.resolveLoginHint.mockResolvedValue('alice.private@example.com')
