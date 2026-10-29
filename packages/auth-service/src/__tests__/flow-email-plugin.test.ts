@@ -7,11 +7,11 @@
  * router, ahead of its rate limiter, is covered separately in
  * flow-email-router.test.ts.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { randomBytes } from 'node:crypto'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { EpdsDb } from '@certified-app/shared'
 import {
   FLOW_EMAIL_UNAVAILABLE_CODE,

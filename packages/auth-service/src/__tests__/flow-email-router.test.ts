@@ -14,17 +14,17 @@
  * Both go through `toNodeHandler` on an Express app, exactly as index.ts
  * mounts better-auth.
  */
+import * as fs from 'node:fs'
+import * as os from 'node:os'
+import * as path from 'node:path'
+import { randomBytes } from 'node:crypto'
+import type { AddressInfo } from 'node:net'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
 import Database from 'better-sqlite3'
 import { betterAuth } from 'better-auth'
 import { emailOTP } from 'better-auth/plugins'
 import { toNodeHandler } from 'better-auth/node'
-import * as fs from 'node:fs'
-import * as os from 'node:os'
-import * as path from 'node:path'
-import { randomBytes } from 'node:crypto'
-import type { AddressInfo } from 'node:net'
 import { EpdsDb } from '@certified-app/shared'
 import { createBetterAuth, runBetterAuthMigrations } from '../better-auth.js'
 import { flowEmailPlugin } from '../lib/flow-email-plugin.js'
@@ -221,10 +221,7 @@ describe('flow-email hook inside better-auth', () => {
     beforeEach(async () => {
       const auth = betterAuth({
         secret: process.env.AUTH_SESSION_SECRET,
-        // TS4058 workaround, as in better-auth.ts: the better-sqlite3 type
-        // must not leak into the inferred instance type.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        database: new Database(dbPath) as any,
+        database: new Database(dbPath),
         baseURL: ORIGIN,
         basePath: '/api/auth',
         rateLimit: { enabled: true, storage: 'memory' },

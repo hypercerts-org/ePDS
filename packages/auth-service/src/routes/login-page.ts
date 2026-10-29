@@ -535,16 +535,16 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
   return router
 }
 
-function resolveBrandColor(brandColor: string | undefined): string {
+const DEFAULT_BRAND_COLOR = '#1A130F'
+
+function resolveBrandColor(brandColor = DEFAULT_BRAND_COLOR): string {
   // brand_color is interpolated into the page <style>. escapeHtml() doesn't
   // make a value safe in CSS context — a `;` or `}` would break out of the
-  // declaration — so restrict to a hex literal before use.
-  const rawBrandColor = brandColor || '#1A130F'
-  return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(
-    rawBrandColor,
-  )
-    ? rawBrandColor
-    : '#1A130F'
+  // declaration — so restrict to a hex literal before use. An empty string
+  // fails this check and falls back to the default too.
+  return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(brandColor)
+    ? brandColor
+    : DEFAULT_BRAND_COLOR
 }
 
 function renderTermsHtml(opts: {

@@ -9,8 +9,8 @@
  * makes to better-auth. No browser or DOM library is involved; the fake
  * implements only what the script touches.
  */
-import { describe, it, expect } from 'vitest'
 import vm from 'node:vm'
+import { describe, it, expect } from 'vitest'
 import { renderLoginPage } from '../routes/login-page.js'
 
 const FLOW_MASKED = 'al***@example.com'
