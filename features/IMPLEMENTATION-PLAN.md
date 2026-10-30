@@ -18,15 +18,15 @@ running services.
 
 ## Decisions
 
-| Decision              | Choice                       | Rationale                                                                                      |
-| --------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------- |
-| Browser automation    | Playwright                   | Deterministic, fast, free, no LLM costs. Stagehand can layer on later (Playwright-compatible). |
-| BDD framework         | cucumber-js                  | Gherkin step definitions, good Playwright integration, widely used.                            |
-| Social login E2E      | Deferred (`@manual`)         | Requires mocking Google/GitHub OAuth; unit tests cover the integration code for now.           |
-| Local DNS (Docker)    | dnsmasq in a sidecar         | Resolves `*.pds.test` to container IPs. Simple, no host-level config needed.                   |
-| Preview DNS (Railway) | CloudFlare DNS API           | Ephemeral wildcard DNS records for preview environments. See safety guardrails below.          |
-| TLS in Docker         | Caddy internal CA            | Self-signed certs for `*.pds.test`; Playwright accepts via `--ignore-https-errors`.            |
-| Email trap            | MailHog (already in compose) | HTTP API on port 8025 for OTP retrieval in tests and manual inspection.                        |
+| Decision              | Choice                        | Rationale                                                                                      |
+| --------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------- |
+| Browser automation    | Playwright                    | Deterministic, fast, free, no LLM costs. Stagehand can layer on later (Playwright-compatible). |
+| BDD framework         | cucumber-js                   | Gherkin step definitions, good Playwright integration, widely used.                            |
+| Social login E2E      | Faked Google (`@fake-google`) | Google only; see `e2e/README.md#google-sign-in`.                                               |
+| Local DNS (Docker)    | dnsmasq in a sidecar          | Resolves `*.pds.test` to container IPs. Simple, no host-level config needed.                   |
+| Preview DNS (Railway) | CloudFlare DNS API            | Ephemeral wildcard DNS records for preview environments. See safety guardrails below.          |
+| TLS in Docker         | Caddy internal CA             | Self-signed certs for `*.pds.test`; Playwright accepts via `--ignore-https-errors`.            |
+| Email trap            | MailHog (already in compose)  | HTTP API on port 8025 for OTP retrieval in tests and manual inspection.                        |
 
 ## Architecture
 
@@ -281,17 +281,14 @@ email body.
 | `tls-certificate-management.feature` | 7         | TLS handshake + routing assertions (Docker only) |
 | `pds-behavior-at-risk.feature`       | ~6        | Standard ATProto ops via `@atproto/api` client   |
 
-#### Deferred — Social login
+#### Social login (Google, faked)
 
-| Feature file           | Scenarios | Notes                                   |
-| ---------------------- | --------- | --------------------------------------- |
-| `social-login.feature` | 6         | Tagged `@manual`, skipped in automation |
+| Feature file           | Scenarios | Notes                                     |
+| ---------------------- | --------- | ----------------------------------------- |
+| `social-login.feature` | 3         | Tagged `@fake-google`; Google only, faked |
 
-Social login scenarios require interacting with real Google/GitHub OAuth
-screens. These are deferred from automated testing. The feature file remains
-as living documentation and can be run manually against a real environment. If
-automated testing becomes necessary, a mock OAuth provider container can be
-added later.
+Google is faked at both ends rather than driven for real: see
+[`e2e/README.md`](../e2e/README.md#google-sign-in).
 
 ### Phase 4: Railway preview environment
 

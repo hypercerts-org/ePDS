@@ -59,18 +59,19 @@ scenarios are excluded at discovery time when their configuration is absent.
 
 ## Environment variables
 
-| Variable                 | Required | Default   | Description                                                                                                                                             |
-| ------------------------ | -------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `E2E_PDS_URL`            | Yes      | —         | PDS core base URL                                                                                                                                       |
-| `E2E_AUTH_URL`           | Yes      | —         | Auth service base URL                                                                                                                                   |
-| `E2E_DEMO_URL`           | Yes      | —         | Trusted demo client base URL (its `client_id` URL, i.e. `<base>/client-metadata.json`, is listed in `pds-core`'s `PDS_OAUTH_TRUSTED_CLIENTS`)           |
-| `E2E_DEMO_UNTRUSTED_URL` | No       | —         | Untrusted demo client base URL. When unset, scenarios tagged `@untrusted-client` are automatically excluded. See [Two demo clients](#two-demo-clients). |
-| `E2E_MAILPIT_URL`        | No       | —         | Mailpit base URL. Required for OTP scenarios.                                                                                                           |
-| `E2E_MAILPIT_USER`       | No       | `karma`   | Mailpit HTTP basic auth username                                                                                                                        |
-| `E2E_MAILPIT_PASS`       | No       | _(empty)_ | Mailpit HTTP basic auth password. Leave empty to skip OTP scenarios.                                                                                    |
-| `E2E_HEADLESS`           | No       | `false`   | Set to `true` to run without a visible browser window                                                                                                   |
-| `E2E_PARALLEL`           | No       | `3`       | Number of Cucumber worker processes for the default profile. Lower this on constrained local machines; use `0` or `1` for serial debugging.             |
-| `CUCUMBER_RETRY`         | No       | `0`       | Number of times Cucumber retries a failed scenario after the first attempt. `1` means up to two total attempts.                                         |
+| Variable                 | Required | Default   | Description                                                                                                                                                                                  |
+| ------------------------ | -------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `E2E_PDS_URL`            | Yes      | —         | PDS core base URL                                                                                                                                                                            |
+| `E2E_AUTH_URL`           | Yes      | —         | Auth service base URL                                                                                                                                                                        |
+| `E2E_DEMO_URL`           | Yes      | —         | Trusted demo client base URL (its `client_id` URL, i.e. `<base>/client-metadata.json`, is listed in `pds-core`'s `PDS_OAUTH_TRUSTED_CLIENTS`)                                                |
+| `E2E_DEMO_UNTRUSTED_URL` | No       | —         | Untrusted demo client base URL. When unset, scenarios tagged `@untrusted-client` are automatically excluded. See [Two demo clients](#two-demo-clients).                                      |
+| `E2E_MAILPIT_URL`        | No       | —         | Mailpit base URL. Required for OTP scenarios.                                                                                                                                                |
+| `E2E_MAILPIT_USER`       | No       | `karma`   | Mailpit HTTP basic auth username                                                                                                                                                             |
+| `E2E_MAILPIT_PASS`       | No       | _(empty)_ | Mailpit HTTP basic auth password. Leave empty to skip OTP scenarios.                                                                                                                         |
+| `E2E_FAKE_GOOGLE`        | No       | —         | Set to `1` when the auth service runs with `EPDS_TEST_FAKE_GOOGLE=1` and Google configured. When unset, scenarios tagged `@fake-google` are excluded. See [Google sign-in](#google-sign-in). |
+| `E2E_HEADLESS`           | No       | `false`   | Set to `true` to run without a visible browser window                                                                                                                                        |
+| `E2E_PARALLEL`           | No       | `3`       | Number of Cucumber worker processes for the default profile. Lower this on constrained local machines; use `0` or `1` for serial debugging.                                                  |
+| `CUCUMBER_RETRY`         | No       | `0`       | Number of times Cucumber retries a failed scenario after the first attempt. `1` means up to two total attempts.                                                                              |
 
 ## Two demo clients
 
@@ -170,6 +171,24 @@ For prior art when adding new untrusted-client scenarios, see:
   for untrusted clients.
 - [`e2e/support/flows.ts`](support/flows.ts) — `startSignUpAwaitingConsent`
   is documented as intended for untrusted clients specifically.
+
+## Google sign-in
+
+`features/social-login.feature` (tag `@fake-google`) signs in with a faked
+Google, since the private stack has no internet and the suite has no Google
+account. The browser's navigation to `accounts.google.com` is intercepted
+with Playwright's `page.route` and redirected straight back to
+`/api/auth/callback/google`, with the ID token claims the scenario wants
+encoded in the authorization code (or `error=access_denied` for a cancel).
+The auth service, started with `EPDS_TEST_HOOKS=1` and
+`EPDS_TEST_FAKE_GOOGLE=1`, answers better-auth's token request with an
+unsigned ID token for those claims
+(`packages/auth-service/src/lib/test-google-token.ts`). Everything after
+that, including ePDS's Google claim check, runs as in production.
+
+The private Atmosphere stack sets both flags, placeholder Google
+credentials, and `E2E_FAKE_GOOGLE=1` on the runner. The demo client lists
+`google` in `epds_social_providers`.
 
 ## Running the tests
 

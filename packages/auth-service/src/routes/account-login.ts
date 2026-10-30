@@ -20,6 +20,7 @@ import type { AuthServiceContext } from '../context.js'
 import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
 import type { BetterAuthInstance } from '../better-auth.js'
 import { POWERED_BY_CSS, POWERED_BY_HTML } from '../lib/page-helpers.js'
+import { hasVerifiedEmail } from '../lib/verified-email.js'
 import {
   EMAIL_TYPO_GUARD_CSS,
   renderEmailTypoGuardMarkup,
@@ -40,7 +41,10 @@ export function createAccountLoginRouter(
       const session = await auth.api.getSession({
         headers: fromNodeHeaders(req.headers),
       })
-      if (session?.user.email) {
+      // Mirrors requireBetterAuth in account-settings.ts, with the same
+      // check: an unverified session does not count as signed in, and
+      // redirecting it to /account would loop straight back here.
+      if (session?.user.email && hasVerifiedEmail(session.user)) {
         res.redirect(303, '/account')
         return
       }

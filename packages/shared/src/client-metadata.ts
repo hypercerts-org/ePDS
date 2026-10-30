@@ -89,6 +89,17 @@ export interface ClientMetadata {
    * parseable as http(s), the button is not rendered.
    */
   epds_handle_login_url?: string
+  /**
+   * ePDS extension — the social sign-in buttons this client wants on the
+   * login page, e.g. `["google"]`. A provider's button is rendered only when
+   * the client lists it here AND the operator has configured that provider
+   * (`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`/
+   * `GITHUB_CLIENT_SECRET`). Opt-in per client, like `epds_handle_login_url`,
+   * so configuring a provider on a shared PDS does not change the login page
+   * of clients that did not ask for it. Unknown names and non-array values
+   * are ignored.
+   */
+  epds_social_providers?: string[]
 }
 
 interface CacheEntry {
