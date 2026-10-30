@@ -67,6 +67,31 @@ async function storedUser(auth: Auth, email: string) {
   return ctx.internalAdapter.findUserByEmail(email, { includeAccounts: true })
 }
 
+describe('Google authorization URL (real better-auth)', () => {
+  it('asks Google for its account chooser and passes the login hint', async () => {
+    const auth = await makeAuth()
+    const res = await auth.handler(
+      new Request('https://auth.example/api/auth/sign-in/social', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin: 'https://auth.example',
+        },
+        body: JSON.stringify({
+          provider: 'google',
+          callbackURL: '/auth/complete',
+          loginHint: 'alice@gmail.com',
+        }),
+      }),
+    )
+    expect(res.status).toBe(200)
+    const { url } = (await res.json()) as { url: string }
+    const params = new URL(url).searchParams
+    expect(params.get('prompt')).toBe('select_account')
+    expect(params.get('login_hint')).toBe('alice@gmail.com')
+  })
+})
+
 describe('Google sign-in emailVerified (real better-auth)', () => {
   it.each([
     ['a boolean true on a Gmail address', 'alice@gmail.com', true, undefined],

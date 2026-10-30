@@ -166,6 +166,10 @@ export function buildSocialProviders(
     providers.google = {
       clientId: googleId,
       clientSecret: googleSecret,
+      // Always show Google's account chooser. Otherwise Google silently
+      // reuses whichever account the browser is signed in to, which may
+      // not be the one the user meant to sign in with.
+      prompt: 'select_account',
       mapProfileToUser: mapGoogleProfileToUser,
     }
   }
@@ -179,8 +183,12 @@ export function buildSocialProviders(
   return providers
 }
 
-/** Social providers that were configured — exported for use by the login page. */
-export let socialProviders: SocialProvidersConfig = {}
+/**
+ * Social providers that were configured — exported for use by the login
+ * page. createBetterAuth refills this object in place, so importers always
+ * see the providers of the running instance.
+ */
+export const socialProviders: SocialProvidersConfig = {}
 
 /**
  * The message better-auth reports when {@link refuseUnverifiedUser} refuses
@@ -301,7 +309,9 @@ export function createBetterAuth(
     10,
   )
 
-  socialProviders = buildSocialProviders()
+  delete socialProviders.google
+  delete socialProviders.github
+  Object.assign(socialProviders, buildSocialProviders())
 
   const betterAuthDb = new Database(dbLocation)
 
