@@ -292,14 +292,27 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     // A client can start a social sign-in straight away by naming the
     // provider in ?epds_social_provider= (for example from a "Sign in with
     // Google" button on its own page): the page then hands off to the
-    // provider without sending an email code. An error return carries the
-    // same parameter to name the provider that failed, so it never starts
-    // one, and a refused sign-in cannot restart itself. Choosing a provider
-    // is a fresh sign-in with it, so like prompt=login it also skips
+    // provider without sending an email code. It only counts for a
+    // provider this client's page offers (see clientSocialProviders);
+    // any other value is ignored. An error return carries the same
+    // parameter to name the provider that failed, so it never starts one,
+    // and a refused sign-in cannot restart itself. Choosing a provider is
+    // a fresh sign-in with it, so like prompt=login it also skips
     // device-session reuse below.
     const requestedSocialStart = socialErrorReturn
       ? null
       : socialProviderId(req.query[SOCIAL_PROVIDER_PARAM])
+    const startSocialProvider =
+      requestedSocialStart &&
+      clientSocialProviders(
+        await safeResolveClientMetadata(
+          ctx.db.getAuthFlowByRequestUri(requestUri)?.clientId ??
+            clientId ??
+            undefined,
+        ),
+      ).includes(requestedSocialStart)
+        ? requestedSocialStart
+        : null
     const skipParHint =
       req.query.epds_skip_par_hint === '1' || socialErrorReturn
     const pdsInternalUrl = ensurePdsUrl(
@@ -341,7 +354,7 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
 
     if (
       !socialErrorReturn &&
-      !requestedSocialStart &&
+      !startSocialProvider &&
       shouldReuseSession(sessionReuseReq, {
         resolvedEmail,
         deviceBoundEmails,
@@ -503,16 +516,9 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     // and the email step falls out without a special case here. A social
     // sign-in error return skips the PAR hint the same way (see above).
     //
-    // A social start (see requestedSocialStart) only counts when this
-    // client's page offers that provider; it renders the email step and
-    // sends no code, and a hinted email address goes to the provider as
-    // its login hint instead. Otherwise the request is served as if the
-    // parameter were absent.
-    const startSocialProvider =
-      requestedSocialStart &&
-      clientSocialProviders(clientMeta).includes(requestedSocialStart)
-        ? requestedSocialStart
-        : null
+    // A social start (see startSocialProvider) renders the email step and
+    // sends no code; a hinted email address goes to the provider as its
+    // login hint instead.
     const hasLoginHint = !!resolvedEmail
     const initialStep = hasLoginHint && !startSocialProvider ? 'otp' : 'email'
 
@@ -1449,7 +1455,9 @@ export function renderLoginPage(opts: {
               window.location.assign(target);
               return;
             }
-          } catch (err) {}
+          } catch (err) {
+            console.debug('Social sign-in could not start', err);
+          }
           releaseSignIn();
           showError('Could not start sign-in. Please try again.');
         });

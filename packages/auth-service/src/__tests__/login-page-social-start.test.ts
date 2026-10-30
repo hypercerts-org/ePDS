@@ -138,10 +138,19 @@ describe('GET /oauth/authorize with epds_social_provider', () => {
     ).not.toHaveProperty('loginHint')
   })
 
+  /** The URLs of the requests the page script made on load. */
+  async function requestsOnLoad(html: string): Promise<string[]> {
+    const { fetchSpy } = await runOnLoad(html)
+    return fetchSpy.mock.calls.map(([url]) => url)
+  }
+
   it('sends a code for a login_hint without the parameter (control)', async () => {
     const html = await loginPage(withHint('alice@gmail.com'))
     expect(html).toContain('var initialStep = "otp";')
     expect(html).toContain('var startSocialProvider = "";')
+    expect(await requestsOnLoad(html)).toEqual([
+      '/api/auth/email-otp/send-verification-otp',
+    ])
   })
 
   it.each([
@@ -154,6 +163,9 @@ describe('GET /oauth/authorize with epds_social_provider', () => {
     )
     expect(html).toContain('var initialStep = "otp";')
     expect(html).toContain('var startSocialProvider = "";')
+    expect(await requestsOnLoad(html)).toEqual([
+      '/api/auth/email-otp/send-verification-otp',
+    ])
   })
 
   it('ignores Google when the client does not list it', async () => {
@@ -174,11 +186,36 @@ describe('GET /oauth/authorize with epds_social_provider', () => {
     expect(flash.text).toContain('Sign-in was cancelled.')
   })
 
-  it('starts Google instead of handing a device session to pds-core', async () => {
+  describe('with a device session in the browser', () => {
     const deviceSession = { cookie: 'dev-id=dev-1; ses-id=ses-1' }
-    expect((await authorize('', deviceSession)).status).toBe(302)
 
-    const html = await loginPage('&epds_social_provider=google', deviceSession)
-    expect(html).toContain('var startSocialProvider = "google";')
+    it('is handed to pds-core without the parameter (control)', async () => {
+      expect((await authorize('', deviceSession)).status).toBe(302)
+    })
+
+    it('starts Google instead of handing it to pds-core', async () => {
+      const html = await loginPage(
+        '&epds_social_provider=google',
+        deviceSession,
+      )
+      expect(html).toContain('var startSocialProvider = "google";')
+    })
+
+    it.each([
+      ['a provider this client does not offer', 'github'],
+      ['an unknown provider', 'facebook'],
+    ])('is still handed to pds-core for %s', async (_label, provider) => {
+      const res = await authorize(
+        `&epds_social_provider=${provider}`,
+        deviceSession,
+      )
+      expect(res.status).toBe(302)
+    })
+
+    it('is still handed to pds-core when the client does not list Google', async () => {
+      offerProviders([])
+      const res = await authorize('&epds_social_provider=google', deviceSession)
+      expect(res.status).toBe(302)
+    })
   })
 })

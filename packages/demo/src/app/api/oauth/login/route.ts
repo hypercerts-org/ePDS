@@ -47,7 +47,11 @@ export async function GET(request: Request) {
 
   try {
     const url = new URL(request.url)
-    const email = url.searchParams.get('email') || ''
+    const socialProvider = url.searchParams.get('social_provider') || ''
+    // With social_provider the email is only a hint for the provider, so
+    // a malformed one is dropped instead of refusing the sign-in.
+    const typedEmail = url.searchParams.get('email') || ''
+    const email = socialProvider && !validateEmail(typedEmail) ? '' : typedEmail
     const handle = (url.searchParams.get('handle') || '')
       .replace(/^@/, '')
       .trim()
@@ -55,7 +59,6 @@ export async function GET(request: Request) {
     const handleModeParam = handleMode
       ? `&epds_handle_mode=${encodeURIComponent(handleMode)}`
       : ''
-    const socialProvider = url.searchParams.get('social_provider') || ''
     const socialProviderParam = socialProvider
       ? `&epds_social_provider=${encodeURIComponent(socialProvider)}`
       : ''
