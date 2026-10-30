@@ -399,6 +399,16 @@ your client lists it, so a provider enabled for one app does not appear on
 other apps' login pages. Accepted values: `"google"`, `"github"`. Unknown
 values are ignored; if the field is unset, no social buttons are rendered.
 
+To put a "Sign in with Google" button on your own page instead, start the
+OAuth flow as usual and add `epds_social_provider=google` to the
+`/oauth/authorize` URL you redirect to. The login page then goes straight
+to Google without sending an email code; a `login_hint` email address on
+the same request becomes Google's login hint. The parameter is ignored for
+a provider your client does not list in `epds_social_providers`, and a
+cancelled or refused Google sign-in returns to the login page without
+starting Google again. The demo app's "Sign in with Google" button
+(`packages/demo/src/app/components/LoginForm.tsx`) does this.
+
 #### Optional: custom CSS and favicon for ePDS pages (trusted clients)
 
 If your app is in the PDS operator's `PDS_OAUTH_TRUSTED_CLIENTS`, you can

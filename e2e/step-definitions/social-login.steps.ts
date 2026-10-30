@@ -18,7 +18,12 @@ import { Given, Then, When } from '@cucumber/cucumber'
 import { expect, type Page } from '@playwright/test'
 import { testEnv } from '../support/env.js'
 import { sharedBrowser } from '../support/hooks.js'
-import { clearMailpit, extractOtp, waitForEmail } from '../support/mailpit.js'
+import {
+  clearMailpit,
+  countMessages,
+  extractOtp,
+  waitForEmail,
+} from '../support/mailpit.js'
 import { fillOtp } from '../support/otp.js'
 import {
   assertDemoClientSession,
@@ -41,14 +46,17 @@ function verifiedGoogleAccount(email: string): Record<string, unknown> {
 /**
  * Answer the browser's trip to Google: send it back to the redirect_uri
  * Google was given, with the state, and either an authorization code that
- * carries `claims` or the error Google returns when the user cancels.
+ * carries `claims` or the error Google returns when the user cancels. The
+ * URL Google was sent is kept on the world.
  */
 async function fakeGoogle(
+  world: EpdsWorld,
   page: Page,
   outcome: { claims: Record<string, unknown> } | 'cancel',
 ): Promise<void> {
   await page.route('https://accounts.google.com/**', async (route) => {
     const request = new URL(route.request().url())
+    world.googleAuthorizeUrl = request
     const back = new URL(request.searchParams.get('redirect_uri') ?? '')
     back.searchParams.set('state', request.searchParams.get('state') ?? '')
     if (outcome === 'cancel') {
@@ -72,7 +80,7 @@ async function signInWithGoogle(
   outcome: { claims: Record<string, unknown> } | 'cancel',
 ): Promise<void> {
   const page = getPage(world)
-  await fakeGoogle(page, outcome)
+  await fakeGoogle(world, page, outcome)
   await page.goto(`${demoBaseUrl}/flow2`)
   await page.click('button[type=submit]')
   await page.waitForLoadState('networkidle')
@@ -151,6 +159,21 @@ When(
 )
 
 When(
+  'the user enters their email on the demo client and chooses Google',
+  async function (this: EpdsWorld) {
+    if (!testEnv.fakeGoogle || !testEnv.mailpitPass) return 'pending'
+    if (!this.googleClaims) throw new Error('No Google identity set up')
+    const email = testEmail(this)
+    await clearMailpit(email)
+    const page = getPage(this)
+    await fakeGoogle(this, page, { claims: this.googleClaims })
+    await page.goto(testEnv.demoUrl)
+    await page.fill('#email', email)
+    await page.getByRole('button', { name: 'Sign in with Google' }).click()
+  },
+)
+
+When(
   'the user signs in with a code sent to that address',
   async function (this: EpdsWorld) {
     if (!testEnv.mailpitPass) return 'pending'
@@ -168,6 +191,23 @@ When(
     const page = getPage(this)
     await page.goto(testEnv.demoUrl)
     await signInWithEmailCode(page, testEmail(this), 'button[type=submit]')
+  },
+)
+
+Then(
+  'Google is asked to show its account chooser for that address',
+  function (this: EpdsWorld) {
+    const url = this.googleAuthorizeUrl
+    if (!url) throw new Error('The browser was never sent to Google')
+    expect(url.searchParams.get('prompt')).toBe('select_account')
+    expect(url.searchParams.get('login_hint')).toBe(testEmail(this))
+  },
+)
+
+Then(
+  'no email code was sent to that address',
+  async function (this: EpdsWorld) {
+    expect(await countMessages(`to:${testEmail(this)}`)).toBe(0)
   },
 )
 

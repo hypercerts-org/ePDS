@@ -8,6 +8,10 @@
  * auth server as epds_handle_mode, overriding the default handle assignment
  * mode for the session.
  *
+ * Optional ?social_provider=google is forwarded as epds_social_provider:
+ * the auth server starts that sign-in straight away instead of sending an
+ * email code, with the email, if one was entered, as Google's login hint.
+ *
  * Flow:
  * 1. Generate PKCE code verifier/challenge + DPoP key pair + state
  * 2. Send Pushed Authorization Request (PAR) to PDS
@@ -50,6 +54,10 @@ export async function GET(request: Request) {
     const handleMode = url.searchParams.get('handle_mode') || ''
     const handleModeParam = handleMode
       ? `&epds_handle_mode=${encodeURIComponent(handleMode)}`
+      : ''
+    const socialProvider = url.searchParams.get('social_provider') || ''
+    const socialProviderParam = socialProvider
+      ? `&epds_social_provider=${encodeURIComponent(socialProvider)}`
       : ''
     // Raw login_hint override: accept any identifier (email, handle, DID) and
     // forward it verbatim. When set, takes precedence over the derived
@@ -257,7 +265,7 @@ export async function GET(request: Request) {
         }
 
         const parData2 = (await parRes2.json()) as { request_uri: string }
-        const authUrl = `${authEndpoint}?client_id=${encodeURIComponent(clientId)}&request_uri=${encodeURIComponent(parData2.request_uri)}${loginHintQueryParam}${handleModeParam}${promptQueryParam}`
+        const authUrl = `${authEndpoint}?client_id=${encodeURIComponent(clientId)}&request_uri=${encodeURIComponent(parData2.request_uri)}${loginHintQueryParam}${handleModeParam}${promptQueryParam}${socialProviderParam}`
         console.log('[oauth/login] Redirecting to auth (after nonce retry)')
         const resp2 = NextResponse.redirect(authUrl)
         resp2.cookies.set(oauthCookie.name, oauthCookie.value, {
@@ -276,7 +284,7 @@ export async function GET(request: Request) {
     }
 
     const parData = (await parRes.json()) as { request_uri: string }
-    const authUrl = `${authEndpoint}?client_id=${encodeURIComponent(clientId)}&request_uri=${encodeURIComponent(parData.request_uri)}${loginHintQueryParam}${handleModeParam}${promptQueryParam}`
+    const authUrl = `${authEndpoint}?client_id=${encodeURIComponent(clientId)}&request_uri=${encodeURIComponent(parData.request_uri)}${loginHintQueryParam}${handleModeParam}${promptQueryParam}${socialProviderParam}`
 
     console.log('[oauth/login] Redirecting to auth')
     const response = NextResponse.redirect(authUrl)

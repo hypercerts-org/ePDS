@@ -186,6 +186,33 @@ export function heartbeatEnabledFor(req: Request): boolean {
   return true
 }
 
+/** The social providers the login page knows how to offer. */
+type SocialProviderId = 'google' | 'github'
+const SOCIAL_PROVIDER_IDS: readonly SocialProviderId[] = ['google', 'github']
+
+/**
+ * The social providers a client's login page offers: configured on this
+ * auth service AND listed in the client's `epds_social_providers`, the same
+ * way `epds_handle_login_url` gates the ATProto/Bluesky button. Configuring
+ * Google on a shared PDS therefore leaves the login page of every other
+ * client unchanged.
+ */
+export function clientSocialProviders(
+  branding: ClientMetadata,
+): SocialProviderId[] {
+  const requested: unknown[] = Array.isArray(branding.epds_social_providers)
+    ? branding.epds_social_providers
+    : []
+  return SOCIAL_PROVIDER_IDS.filter(
+    (id) => id in socialProviders && requested.includes(id),
+  )
+}
+
+/** A known social provider id from a query value, or null. */
+function socialProviderId(value: unknown): SocialProviderId | null {
+  return SOCIAL_PROVIDER_IDS.find((id) => id === value) ?? null
+}
+
 export function createLoginPageRouter(ctx: AuthServiceContext): Router {
   const router = Router()
 
@@ -261,6 +288,18 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     // or epds_skip_par_hint back, so the PAR hint is ignored as well and
     // the email step renders, which is what the message asks for.
     const socialErrorReturn = req.query[SOCIAL_ERROR_PARAM] !== undefined
+
+    // A client can start a social sign-in straight away by naming the
+    // provider in ?epds_social_provider= (for example from a "Sign in with
+    // Google" button on its own page): the page then hands off to the
+    // provider without sending an email code. An error return carries the
+    // same parameter to name the provider that failed, so it never starts
+    // one, and a refused sign-in cannot restart itself. Choosing a provider
+    // is a fresh sign-in with it, so like prompt=login it also skips
+    // device-session reuse below.
+    const requestedSocialStart = socialErrorReturn
+      ? null
+      : socialProviderId(req.query[SOCIAL_PROVIDER_PARAM])
     const skipParHint =
       req.query.epds_skip_par_hint === '1' || socialErrorReturn
     const pdsInternalUrl = ensurePdsUrl(
@@ -302,6 +341,7 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
 
     if (
       !socialErrorReturn &&
+      !requestedSocialStart &&
       shouldReuseSession(sessionReuseReq, {
         resolvedEmail,
         deviceBoundEmails,
@@ -462,13 +502,24 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     // suppresses both URL and PAR hint resolution, so resolvedEmail is null
     // and the email step falls out without a special case here. A social
     // sign-in error return skips the PAR hint the same way (see above).
+    //
+    // A social start (see requestedSocialStart) only counts when this
+    // client's page offers that provider; it renders the email step and
+    // sends no code, and a hinted email address goes to the provider as
+    // its login hint instead. Otherwise the request is served as if the
+    // parameter were absent.
+    const startSocialProvider =
+      requestedSocialStart &&
+      clientSocialProviders(clientMeta).includes(requestedSocialStart)
+        ? requestedSocialStart
+        : null
     const hasLoginHint = !!resolvedEmail
-    const initialStep = hasLoginHint ? 'otp' : 'email'
+    const initialStep = hasLoginHint && !startSocialProvider ? 'otp' : 'email'
 
     // Pillar 3 — Idempotency (Option A): when this is a duplicate GET for an
     // existing flow (e.g. browser extension, StayFocusd), tell the client-side
     // script that OTP was already sent so it skips the auto-send.
-    const otpAlreadySent = hasLoginHint && !!existingFlow
+    const otpAlreadySent = initialStep === 'otp' && !!existingFlow
 
     logger.info(
       {
@@ -478,6 +529,7 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
         reused: !!existingFlow,
         initialStep,
         otpAlreadySent,
+        startSocialProvider,
       },
       'Serving login page for auth_flow',
     )
@@ -507,6 +559,7 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
         otpLength: ctx.config.otpLength,
         otpCharset: ctx.config.otpCharset,
         heartbeatEnabled: heartbeatEnabledFor(req),
+        startSocialProvider,
         initialError: socialSignInErrorMessage(
           req.query[SOCIAL_ERROR_PARAM],
           req.query[SOCIAL_PROVIDER_PARAM],
@@ -545,6 +598,11 @@ export function renderLoginPage(opts: {
    * `?no_heartbeat=1` test toggle (see `heartbeatEnabledFor`).
    */
   heartbeatEnabled: boolean
+  /**
+   * A social provider to start on load, as if its button were pressed.
+   * Only ever one this client's page offers (see clientSocialProviders).
+   */
+  startSocialProvider?: SocialProviderId | null
   /**
    * Error shown in the flash region on load. Only ever one of the fixed
    * messages from socialSignInErrorMessage(), never request text.
@@ -609,19 +667,15 @@ export function renderLoginPage(opts: {
       )}" class="terms-link" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</div>`
     : ''
 
-  // Social buttons are opt-in per client: a provider's button renders only
-  // when the operator configured it AND the client lists it in
-  // `epds_social_providers`, the same way `epds_handle_login_url` gates the
-  // ATProto/Bluesky button. Configuring Google on a shared PDS therefore
-  // leaves the login page of every other client unchanged.
-  const requestedSocial = Array.isArray(b.epds_social_providers)
-    ? b.epds_social_providers
-    : []
-  const hasGoogle =
-    'google' in socialProviders && requestedSocial.includes('google')
-  const hasGithub =
-    'github' in socialProviders && requestedSocial.includes('github')
-  const hasSocialProviders = hasGoogle || hasGithub
+  // Social buttons are opt-in per client (see clientSocialProviders).
+  const offeredSocial = clientSocialProviders(b)
+  const hasGoogle = offeredSocial.includes('google')
+  const hasGithub = offeredSocial.includes('github')
+  const hasSocialProviders = offeredSocial.length > 0
+  const startSocialProvider =
+    opts.startSocialProvider && offeredSocial.includes(opts.startSocialProvider)
+      ? opts.startSocialProvider
+      : ''
 
   // The flash region is a single element shared by both steps, so there
   // is only ever one live region for assistive tech to track. It is
@@ -1360,21 +1414,34 @@ export function renderLoginPage(opts: {
           if (!claimSignIn()) return;
           clearError();
           var provider = btn.getAttribute('data-social-provider');
+          var body = {
+            provider: provider,
+            callbackURL: '/auth/complete',
+            // Cancels and refusals come back to /auth/complete with
+            // ?error= too, which returns to this page with a message
+            // naming the provider, rather than ending on better-auth's
+            // bare error page.
+            errorCallbackURL:
+              '/auth/complete?${SOCIAL_PROVIDER_PARAM}=' +
+              encodeURIComponent(provider),
+          };
+          // Google preselects the account for an address the user has
+          // already entered. The field holds a handle in ATProto mode, so
+          // it is only sent while it holds a valid email address.
+          var typedEmail = emailInput.value.trim();
+          if (
+            provider === 'google' &&
+            loginMode === 'email' &&
+            typedEmail &&
+            emailInput.checkValidity()
+          ) {
+            body.loginHint = typedEmail;
+          }
           try {
             var res = await fetch(authBasePath + '/sign-in/social', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                provider: provider,
-                callbackURL: '/auth/complete',
-                // Cancels and refusals come back to /auth/complete with
-                // ?error= too, which returns to this page with a message
-                // naming the provider, rather than ending on better-auth's
-                // bare error page.
-                errorCallbackURL:
-                  '/auth/complete?${SOCIAL_PROVIDER_PARAM}=' +
-                  encodeURIComponent(provider),
-              }),
+              body: JSON.stringify(body),
             });
             var data = await res.json().catch(function() { return {}; });
             var target = res.ok && data ? socialProviderUrl(provider, data.url) : null;
@@ -1694,8 +1761,19 @@ export function renderLoginPage(opts: {
 
       // A social sign-in that was cancelled or refused returns here with
       // a fixed message chosen server-side (see /auth/complete).
-      var initialError = ${JSON.stringify(opts.initialError ?? '')};
+      var initialError = ${toScriptJson(opts.initialError ?? '')};
       if (initialError) showError(initialError);
+
+      // The client asked to start with a social provider (see
+      // ?epds_social_provider=): hand off as if the user had pressed its
+      // button. No email code was sent; if the hand-off fails, the page
+      // stays usable and shows why.
+      var startSocialProvider = ${toScriptJson(startSocialProvider)};
+      socialButtons.forEach(function(btn) {
+        if (btn.getAttribute('data-social-provider') === startSocialProvider) {
+          btn.click();
+        }
+      });
     })();
   </script>
 </body>

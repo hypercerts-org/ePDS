@@ -116,6 +116,15 @@ function fakeElement(
   return el
 }
 
+function unescapeHtml(text: string): string {
+  return text
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+}
+
 type FetchImpl = (url: string, init: RequestInit) => unknown
 
 /** The page's forms and controls, keyed by what they do. */
@@ -162,8 +171,17 @@ export function runPageScript(
   }
   const sendOtpButton = fakeElement()
   const verifyButton = fakeElement()
+  // The email field starts with the value the server rendered into it, and
+  // validates like the browser's required type="email" input, which strips
+  // surrounding whitespace from its value.
+  const emailInput = fakeElement()
+  emailInput.value = unescapeHtml(
+    /id="email"[^>]*?value="([^"]*)"/.exec(html)?.[1] ?? '',
+  )
+  emailInput.checkValidity = () =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput.value.trim())
   const elements: PageElements = {
-    emailInput: fakeElement(),
+    emailInput,
     sendOtpForm: fakeElement({}, { 'button[type=submit]': sendOtpButton }),
     sendOtpButton,
     verifyForm: fakeElement({}, { 'button[type=submit]': verifyButton }),

@@ -32,6 +32,15 @@ Feature: Google sign-in
     When the user signs in with a code sent to that address
     Then the demo client is signed in to the same PDS account
 
+  Scenario: An app can start Google sign-in from its own page without an email code
+    Given a returning user has a PDS account
+    And Google reports a verified email for the test user
+    And Google's ID token has the "hd" claim "example.com"
+    When the user enters their email on the demo client and chooses Google
+    Then the demo client is signed in to the same PDS account
+    And Google is asked to show its account chooser for that address
+    And no email code was sent to that address
+
   Scenario: Cancelling at Google returns to the login page
     When the user signs in with Google but cancels at Google
     Then the browser returns to the login page

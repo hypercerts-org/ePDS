@@ -17,7 +17,11 @@
 /** Query parameter that carries the error back to GET /oauth/authorize. */
 export const SOCIAL_ERROR_PARAM = 'epds_social_error'
 
-/** Query parameter that carries the provider through the same round trip. */
+/**
+ * Query parameter that carries the provider through the same round trip.
+ * On a request without {@link SOCIAL_ERROR_PARAM} it is a client's request
+ * to start that provider's sign-in straight away (see login-page.ts).
+ */
 export const SOCIAL_PROVIDER_PARAM = 'epds_social_provider'
 
 /** Display names for the social providers the login page can offer. */

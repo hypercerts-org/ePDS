@@ -39,6 +39,12 @@ function runPage(
   return runPageScript(html, fetchImpl)
 }
 
+/** Both social buttons plus the ATProto/Bluesky hand-off button. */
+const LOGIN_PAGE_BRANDING_WITH_HANDLE_LOGIN = {
+  epds_social_providers: ['google', 'github'],
+  epds_handle_login_url: 'https://app.example.com/login',
+}
+
 /** Authorization URLs of the shape better-auth returns for each provider. */
 const PROVIDER_URLS = {
   google:
@@ -80,6 +86,52 @@ describe('renderLoginPage social sign-in buttons', () => {
       expect(assign).toHaveBeenCalledWith(providerUrl)
     },
   )
+
+  it('sends Google the email address the user entered as its login hint', async () => {
+    const { buttons, elements, fetchSpy } = runPage(() =>
+      jsonResponse(200, { url: PROVIDER_URLS.google }),
+    )
+    elements.emailInput.value = ' alice@gmail.com '
+
+    await buttons.google.click()
+
+    expect(JSON.parse(fetchSpy.mock.calls[0][1].body as string)).toMatchObject({
+      provider: 'google',
+      loginHint: 'alice@gmail.com',
+    })
+  })
+
+  it.each([
+    ['an incomplete address', 'google', 'alice@'],
+    ['an empty field', 'google', ''],
+    ['GitHub, which takes no email hint', 'github', 'alice@gmail.com'],
+  ] as const)('sends no login hint for %s', async (_label, provider, typed) => {
+    const { buttons, elements, fetchSpy } = runPage(() =>
+      jsonResponse(200, { url: PROVIDER_URLS[provider] }),
+    )
+    elements.emailInput.value = typed
+
+    await buttons[provider].click()
+
+    expect(
+      JSON.parse(fetchSpy.mock.calls[0][1].body as string),
+    ).not.toHaveProperty('loginHint')
+  })
+
+  it('sends no login hint while the field holds an ATProto handle', async () => {
+    const { buttons, elements, fetchSpy } = runPage(
+      () => jsonResponse(200, { url: PROVIDER_URLS.google }),
+      render({ branding: LOGIN_PAGE_BRANDING_WITH_HANDLE_LOGIN }),
+    )
+    await elements.atprotoButton.click()
+    elements.emailInput.value = 'alice@gmail.com'
+
+    await buttons.google.click()
+
+    expect(
+      JSON.parse(fetchSpy.mock.calls[0][1].body as string),
+    ).not.toHaveProperty('loginHint')
+  })
 
   it('ignores a second click while the first POST is in flight', async () => {
     let resolveFetch: (v: unknown) => void = () => undefined
@@ -179,6 +231,35 @@ describe('renderLoginPage social sign-in buttons', () => {
   it('shows nothing on load without an initial error', () => {
     const { flash } = runPage(() => jsonResponse(200, {}))
     expect(flash.text).toBe('')
+  })
+})
+
+describe('renderLoginPage social start', () => {
+  it('presses the requested provider button on load', async () => {
+    const { fetchSpy } = runPage(
+      () => jsonResponse(200, { url: PROVIDER_URLS.github }),
+      render({ startSocialProvider: 'github' }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(fetchSpy.mock.calls[0][1].body as string)).toMatchObject({
+      provider: 'github',
+    })
+  })
+
+  it('starts nothing for a provider the client does not offer', () => {
+    const html = render({
+      branding: { epds_social_providers: ['google'] },
+      startSocialProvider: 'github',
+    })
+    expect(html).toContain('var startSocialProvider = "";')
+    const { fetchSpy } = runPage(() => jsonResponse(200, {}), html)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('starts nothing by default', () => {
+    const { fetchSpy } = runPage(() => jsonResponse(200, {}))
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 })
 
