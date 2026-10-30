@@ -26,6 +26,12 @@ function requestUrl(input: Parameters<typeof fetch>[0]): string {
   return input.url
 }
 
+/** The form fields of a token request body (a URLSearchParams or a string). */
+function requestForm(body: RequestInit['body']): URLSearchParams {
+  if (body instanceof URLSearchParams) return body
+  return new URLSearchParams(typeof body === 'string' ? body : '')
+}
+
 function base64url(value: unknown): string {
   return Buffer.from(JSON.stringify(value)).toString('base64url')
 }
@@ -80,11 +86,7 @@ export function installTestGoogleTokenEndpoint(clientId: string): void {
   globalThis.fetch = (input, init) => {
     if (requestUrl(input) !== GOOGLE_TOKEN_URL) return realFetch(input, init)
     // better-auth posts the code as a URLSearchParams form body.
-    const body = init?.body
-    const form =
-      body instanceof URLSearchParams
-        ? body
-        : new URLSearchParams(typeof body === 'string' ? body : '')
+    const form = requestForm(init?.body)
     return Promise.resolve(
       fakeGoogleTokenResponse(form.get('code') ?? '', clientId),
     )
