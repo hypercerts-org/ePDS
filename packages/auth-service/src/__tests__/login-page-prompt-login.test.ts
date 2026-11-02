@@ -18,6 +18,10 @@
  * this so a future "simplification" that conflates the two signals is
  * caught.
  *
+ * The second describe covers the privacy rule for resolved hints: a
+ * handle/DID `login_hint` resolves to the account's private email, which
+ * must stay on the auth_flow row and never reach the rendered page.
+ *
  * Lives in its own file because the `vi.mock` calls below replace the
  * shared resolver modules wholesale, and we don't want that bleed into
  * the existing unit tests in login-page.test.ts.
@@ -217,5 +221,199 @@ describe('GET /oauth/authorize prompt=login handling (issue #138)', () => {
     )
     // OTP step is the active step (hasLoginHint true).
     expect(html).toMatch(/class="step-otp active"/)
+  })
+})
+
+describe('GET /oauth/authorize never renders an email resolved from a handle/DID hint', () => {
+  const REQUEST_URI = 'urn:ietf:params:oauth:request_uri:private-hint'
+  const CLIENT_ID = 'https://app.example.com'
+  let dbPath: string
+  let ctx: AuthServiceContext
+  let app: { baseUrl: string; close: () => Promise<void> }
+
+  beforeEach(async () => {
+    dbPath = path.join(
+      os.tmpdir(),
+      `private-hint-${Date.now()}-${randomBytes(4).toString('hex')}.db`,
+    )
+    _seedClientMetadataCacheForTest(CLIENT_ID, { client_name: 'Test App' })
+    ctx = new AuthServiceContext(makeConfig(dbPath))
+    app = await startApp(ctx)
+    mocks.fetchParLoginHint.mockReset()
+    mocks.resolveLoginHint.mockReset()
+    mocks.fetchDeviceAccountEmails.mockReset()
+  })
+
+  afterEach(async () => {
+    vi.restoreAllMocks()
+    await app.close()
+    ctx.destroy()
+    for (const suffix of ['', '-wal', '-shm']) {
+      fs.rmSync(dbPath + suffix, { force: true })
+    }
+  })
+
+  function authorize(
+    params: Record<string, string> = {},
+    cookie?: string,
+  ): Promise<Response> {
+    const query = new URLSearchParams({
+      request_uri: REQUEST_URI,
+      client_id: CLIENT_ID,
+      ...params,
+    })
+    return fetch(`${app.baseUrl}/oauth/authorize?${query.toString()}`, {
+      headers: cookie ? { cookie } : {},
+    })
+  }
+
+  /** The `epds_auth_flow=<id>` pair the page set, as a request cookie. */
+  function flowCookie(res: Response): string {
+    const match = /epds_auth_flow=[^;]+/.exec(
+      res.headers.get('set-cookie') ?? '',
+    )
+    if (!match) throw new Error('response set no epds_auth_flow cookie')
+    return match[0]
+  }
+
+  const flowIdOf = (cookie: string): string => cookie.split('=')[1]
+
+  const privateAddresses = [
+    ['alice.private@example.com', 'al***@example.com'],
+    // A short local part is fully hidden: with the domain visible, any
+    // visible prefix would reconstruct the address.
+    ['a@mail.private.test', '***@mail.private.test'],
+  ]
+
+  const hintSources: Array<[string, () => Record<string, string>]> = [
+    ['a handle in the URL', () => ({ login_hint: 'alice.test.local' })],
+    ['a DID in the URL', () => ({ login_hint: 'did:plc:abc123' })],
+    [
+      'a handle only in the stored PAR request',
+      () => {
+        mocks.fetchParLoginHint.mockResolvedValue('alice.test.local')
+        return {}
+      },
+    ],
+  ]
+
+  describe.each(privateAddresses)('account email %s', (email, masked) => {
+    it.each(hintSources)(
+      'is absent from the page for %s, and held on the flow row instead',
+      async (_name, hint) => {
+        mocks.resolveLoginHint.mockResolvedValue(email)
+
+        const res = await authorize(hint())
+        const html = await res.text()
+
+        expect(res.status).toBe(200)
+        expect(html.toLowerCase()).not.toContain(email)
+        // OTP step is shown, driven by the server-held address.
+        expect(html).toMatch(/class="step-otp active"/)
+        expect(html).toContain('var useFlowEmail = true;')
+        expect(html).toMatch(/<input type="email" id="email"[^>]*value=""/)
+        expect(html).toMatch(
+          /<input type="hidden" id="otp-email"[^>]*value="">/,
+        )
+        expect(html).toContain(
+          `var flowEmailMasked = ${JSON.stringify(masked)};`,
+        )
+        expect(
+          ctx.db.getAuthFlowLoginHintEmail(flowIdOf(flowCookie(res))),
+        ).toBe(email)
+      },
+    )
+
+    it('shows only the masked label on a duplicate load of the same flow', async () => {
+      mocks.resolveLoginHint.mockResolvedValue(email)
+      const first = await authorize({ login_hint: 'alice.test.local' })
+
+      const second = await authorize(
+        { login_hint: 'alice.test.local' },
+        flowCookie(first),
+      )
+      const html = await second.text()
+
+      expect(html).toContain(`Code already sent to ${masked}`)
+      expect(html.toLowerCase()).not.toContain(email)
+    })
+  })
+
+  it('still pre-fills an email hint, which the caller already knows', async () => {
+    mocks.resolveLoginHint.mockResolvedValue('bob@example.com')
+
+    const res = await authorize({ login_hint: 'bob@example.com' })
+    const html = await res.text()
+
+    expect(html).toMatch(
+      /<input type="email" id="email"[^>]*value="bob@example\.com">/,
+    )
+    expect(html).toMatch(
+      /<input type="hidden" id="otp-email"[^>]*value="bob@example\.com">/,
+    )
+    expect(html).toContain('var loginHint = "bob@example.com";')
+    expect(html).toContain('var useFlowEmail = false;')
+    expect(
+      ctx.db.getAuthFlowLoginHintEmail(flowIdOf(flowCookie(res))),
+    ).toBeNull()
+  })
+
+  it('uses the URL email hint over a handle in the stored PAR request', async () => {
+    // Each hint resolves to a different account email, so the page and the
+    // flow row show which hint won.
+    mocks.fetchParLoginHint.mockResolvedValue('alice.test.local')
+    mocks.resolveLoginHint.mockImplementation((hint: string) =>
+      Promise.resolve(
+        hint === 'alice.test.local' ? 'alice.private@example.com' : hint,
+      ),
+    )
+
+    const res = await authorize({ login_hint: 'bob@example.com' })
+    const html = await res.text()
+
+    expect(html).toMatch(
+      /<input type="email" id="email"[^>]*value="bob@example\.com">/,
+    )
+    expect(html).toContain('var useFlowEmail = false;')
+    expect(html.toLowerCase()).not.toContain('alice.private@example.com')
+    expect(
+      ctx.db.getAuthFlowLoginHintEmail(flowIdOf(flowCookie(res))),
+    ).toBeNull()
+  })
+
+  it('drops the stored email when the same flow is reopened without a hint', async () => {
+    // "Another account" rebind: the user opted out of the RP's hint.
+    mocks.resolveLoginHint.mockResolvedValue('alice.private@example.com')
+    const first = await authorize({ login_hint: 'alice.test.local' })
+    const cookie = flowCookie(first)
+    expect(ctx.db.getAuthFlowLoginHintEmail(flowIdOf(cookie))).not.toBeNull()
+
+    const second = await authorize(
+      { prompt: 'login', epds_skip_par_hint: '1' },
+      cookie,
+    )
+    const html = await second.text()
+
+    expect(ctx.db.getAuthFlowLoginHintEmail(flowIdOf(cookie))).toBeNull()
+    expect(html).toContain('var useFlowEmail = false;')
+    expect(html).toMatch(/<div id="step-email" class="step-email">/)
+  })
+
+  it('fails closed when the stored email cannot be updated on a reused flow', async () => {
+    mocks.resolveLoginHint.mockResolvedValue('alice.private@example.com')
+    const first = await authorize({ login_hint: 'alice.test.local' })
+    vi.spyOn(ctx.db, 'setAuthFlowLoginHintEmail').mockImplementation(() => {
+      throw new Error('disk full')
+    })
+
+    const second = await authorize(
+      { login_hint: 'alice.test.local' },
+      flowCookie(first),
+    )
+    const html = await second.text()
+
+    expect(second.status).toBe(500)
+    expect(html).not.toContain('useFlowEmail')
+    expect(html.toLowerCase()).not.toContain('alice.private@example.com')
   })
 })

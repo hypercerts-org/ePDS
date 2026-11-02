@@ -200,6 +200,56 @@ control throughout.
 The flash disappears because the correct form is visible on first paint, not
 because the email is sent before the page is served.
 
+**Handle/DID hints keep the email off the page.** When the `login_hint` is a
+handle or DID, the address it resolves to is the account's private email, so
+the page must not carry it (no input value, hidden field, or script string).
+`GET /oauth/authorize` instead stores the resolved address on the `auth_flow`
+row (`login_hint_email`, deleted with the row) and renders only a masked label
+plus a `useFlowEmail` flag. For those hints the inline script posts
+`{ useFlowEmail: true, type: 'sign-in' }` to `send-verification-otp`, and
+`{ useFlowEmail: true, otp }` to `sign-in/email-otp`, with no `email`. A
+better-auth plugin (`lib/flow-email-plugin.ts`, an `onRequest` hook) reads the
+`epds_auth_flow` cookie, looks up the stored address, and rewrites the body to
+carry `email` before better-auth's rate limiter, origin check and endpoint run.
+It never overrides an `email` the browser sent, and only touches those two
+paths. If the flow is missing or expired it answers `400` with code
+`EPDS_FLOW_EMAIL_UNAVAILABLE`, and the page falls back to the email form.
+Email hints are unchanged: the caller already knows the address, so the page
+pre-fills it and posts `email` as before. "Use different email" clears the flag.
+
+The masked label keeps the domain visible, so how much of the local part shows
+scales with its length and never exceeds about half of it (`maskEmail`): one or
+two characters show none (`***@example.com`), three or four show one, five or
+more show two (`al***@example.com`).
+
+Behaviours worth knowing:
+
+- **Rate limiting.** better-auth's limiter still counts every request that
+  reaches it, including rewritten ones (IP + path; on by default only when
+  `NODE_ENV=production`). The hook's own 400/500 answers are returned before
+  that limiter, so it does not count them. The generic `requestRateLimit` does
+  not cover `/api/auth` either: `index.ts` mounts better-auth with
+  `app.all('/api/auth/*', ...)` ahead of that middleware, and the handler
+  ends the request. What is left is cheap: a body read capped at 4 KB and one
+  SQLite point read, logged at debug.
+- **Duplicate flow cookie.** If the request carries `epds_auth_flow` more than
+  once, the hook answers with the same 400 instead of picking one. cookie-parser
+  (used by `/auth/complete`) takes the first value and better-auth's parser the
+  last, and the hook must not act on a different flow than `/auth/complete`.
+- **Known limitation: multiple tabs.** The page does not carry its flow id, so
+  a tab's `useFlowEmail` call acts on whichever flow the shared
+  `epds_auth_flow` cookie names at that moment. If a second sign-in starts in
+  another tab, the first tab's Resend or Verify uses that flow's stored email
+  (or falls back to the email form) while its label still shows the original
+  masked address. The OTP and `/auth/complete` stay consistent because both
+  follow the cookie, and nothing leaks. Binding a page to its flow would need a
+  non-reversible tag, not the HttpOnly `flowId` itself.
+- **Rollback.** Handle/DID-hinted pages rendered by this build post only
+  `useFlowEmail` (email-hint and typed-email pages still post `email`). If the
+  service is rolled back to an older build while one of those pages is open,
+  its code step fails (the old endpoint sees no `email`) until the user
+  reloads. The v10 column is additive, so the old build runs against it.
+
 **Subtitle UX:** The server renders the subtitle as "Sending code to
 ad\*\*\*@example.com…" (present tense). Once the background `POST` succeeds, the
 JS updates it to "We sent an 8-digit code to ad\*\*\*@example.com". This avoids
@@ -290,9 +340,10 @@ server-side:
 - Validate that the `email` in the request body matches the `login_hint` stored
   on the `auth_flow` row, preventing cross-session abuse.
 
-Note: the current JS sends `{ email, type: 'sign-in' }` to the OTP endpoint —
-no `flowId`. For Option B to work, the JS would need to include `flowId` in the
-request body, and a wrapper endpoint or middleware would need to intercept the
+Note: the current JS sends `{ email, type: 'sign-in' }` to the OTP endpoint
+(`{ useFlowEmail: true, type: 'sign-in' }` for handle/DID hints) — no `flowId`.
+For Option B to work, the JS would need to include `flowId` in the request
+body, and a wrapper endpoint or middleware would need to intercept the
 call before forwarding to better-auth. This is not free: it requires a schema
 change, a new route, and a client-side change to pass `flowId`.
 
