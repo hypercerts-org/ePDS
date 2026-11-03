@@ -187,6 +187,14 @@ export class EpdsDb {
       // changed to a no-op since the table is harmless to keep and dropping
       // it prevents rollback. The table is no longer used by current code.
       () => {},
+
+      // v10: Server-held account email for handle/DID login_hints. The login
+      // page must not render an address the caller did not supply, so the
+      // resolved email lives on the flow row (deleted with it) and the
+      // better-auth OTP endpoints read it back via `useFlowEmail`.
+      () => {
+        this.db.exec(`ALTER TABLE auth_flow ADD COLUMN login_hint_email TEXT;`)
+      },
     ]
 
     for (let i = currentVersion; i < migrations.length; i++) {
@@ -415,21 +423,50 @@ export class EpdsDb {
     requestUri: string
     clientId: string | null
     handleMode?: HandleMode | null
+    /** See {@link EpdsDb.setAuthFlowLoginHintEmail}. */
+    loginHintEmail?: string | null
     expiresAt: number
   }): void {
     this.db
       .prepare(
-        `INSERT INTO auth_flow (flow_id, request_uri, client_id, handle_mode, created_at, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO auth_flow (flow_id, request_uri, client_id, handle_mode, login_hint_email, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         data.flowId,
         data.requestUri,
         data.clientId,
         data.handleMode ?? null,
+        data.loginHintEmail ?? null,
         Date.now(),
         data.expiresAt,
       )
+  }
+
+  /**
+   * Store (or clear, with `null`) the account email that a handle/DID
+   * `login_hint` resolved to. The browser never receives this address; the
+   * OTP endpoints substitute it server-side from the flow cookie.
+   *
+   * Deliberately not part of {@link AuthFlowRow}: keeping it out of the
+   * general row means code that logs or forwards a flow cannot leak it.
+   * It lives and dies with the row, so flow deletion and expiry cleanup
+   * remove it.
+   */
+  setAuthFlowLoginHintEmail(flowId: string, email: string | null): void {
+    this.db
+      .prepare(`UPDATE auth_flow SET login_hint_email = ? WHERE flow_id = ?`)
+      .run(email, flowId)
+  }
+
+  /** The email stored by {@link setAuthFlowLoginHintEmail}; null for unknown, expired, or email-less flows. */
+  getAuthFlowLoginHintEmail(flowId: string): string | null {
+    const row = this.db
+      .prepare(
+        `SELECT login_hint_email as email FROM auth_flow WHERE flow_id = ? AND expires_at > ?`,
+      )
+      .get(flowId, Date.now()) as { email: string | null } | undefined
+    return row?.email ?? null
   }
 
   getAuthFlow(flowId: string): AuthFlowRow | undefined {
