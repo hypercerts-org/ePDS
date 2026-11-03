@@ -409,6 +409,36 @@ similarly. Silent regression risk: a new upstream route that shows the
 welcome page without being `/oauth/authorize` or `/account*` is not
 caught by the guard and the stock page reappears.
 
+### 20. better-auth `onRequest` hook ahead of the rate limiter (flow-email)
+
+**File:** `packages/auth-service/src/lib/flow-email-plugin.ts`
+(registered in `packages/auth-service/src/better-auth.ts`)
+
+Not an `@atproto` dependency, but the same kind of coupling to a wrapped
+upstream: the login page for handle/DID `login_hint`s sends `useFlowEmail`
+instead of the account's private email, and this hook swaps the address stored
+on the `auth_flow` row into the request body.
+
+It relies on better-auth 1.4.18 behaviour (`dist/api/index.mjs`, router
+`onRequest`):
+
+- every plugin's `onRequest` runs before the rate limiter, origin check and
+  endpoint, and the `{ request }` it returns is what those stages receive;
+- `toNodeHandler` builds the `Request` from the Node request with a
+  streaming body and the original `content-length` header (the hook reads
+  a bounded clone, passes the original through unread, and drops
+  `content-length` from the request it rewrites);
+- better-auth's own cookie parsing (last duplicate wins) differs from
+  cookie-parser's (first wins), which the rest of auth-service uses. The hook
+  therefore parses the `epds_auth_flow` cookie itself and refuses a duplicated
+  cookie rather than depend on either library's tie-break.
+
+**Breakage scenario:** a better-auth release stops forwarding the returned
+request, or changes the OTP endpoint paths or body shape. Handle/DID-hinted
+sign-ins then fail at the code step (the page sends no `email`).
+`flow-email-router.test.ts` drives the real router, session cookie and rate
+limiter, and is the canary on a better-auth bump.
+
 ## Moderate Risk (public APIs, less likely to break)
 
 ### 11. `@atproto/syntax` exports

@@ -159,7 +159,7 @@ Feature: Welcome-page guard suppresses upstream's authentication UI
     Given another user has a separate PDS account
     When the demo client starts a new OAuth flow with the other user's handle as login_hint
     Then the login page renders directly at the OTP verification step
-    And the OTP form will submit the other user's email
+    And the OTP is sent to the other user's email without the page exposing it
 
   # ---------------------------------------------------------------------------
   # Sign-in-view leaks. Distinct from the welcome-page leaks above: here

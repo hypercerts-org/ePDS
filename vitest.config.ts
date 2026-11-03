@@ -18,10 +18,10 @@ export default defineConfig({
       // Ratchet thresholds — update these whenever coverage increases.
       // See AGENTS.md for the ratcheting policy.
       thresholds: {
-        statements: 61,
-        branches: 60,
-        functions: 74,
-        lines: 60,
+        statements: 63,
+        branches: 63,
+        functions: 76,
+        lines: 62,
       },
     },
   },
