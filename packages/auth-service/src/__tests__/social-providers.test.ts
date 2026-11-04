@@ -1,11 +1,10 @@
 /**
  * Tests for social provider configuration and login page integration.
  *
- * Social providers (Google, GitHub) are enabled by setting env vars:
- * - GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET
- * - GITHUB_CLIENT_ID + GITHUB_CLIENT_SECRET
+ * Google, the only social provider, is enabled by setting
+ * GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET.
  *
- * When configured, the login page renders social login buttons whose click
+ * When configured, the login page renders a Google button whose click
  * handler POSTs { provider, callbackURL } to better-auth's
  * /api/auth/sign-in/social (POST-only) and follows the provider URL it
  * returns (see login-page-social-buttons.test.ts). After the OAuth exchange,
@@ -31,24 +30,15 @@ describe('Social provider detection', () => {
     expect(providers.google?.clientSecret).toBe('google-client-secret')
   })
 
-  it('enables GitHub when both GITHUB env vars set', () => {
-    const providers = buildSocialProviders({
-      GITHUB_CLIENT_ID: 'github-client-id',
-      GITHUB_CLIENT_SECRET: 'github-client-secret',
-    })
-    expect('github' in providers).toBe(true)
-    expect(providers.github?.clientId).toBe('github-client-id')
-  })
-
-  it('enables both Google and GitHub simultaneously', () => {
+  it('enables nothing but Google, whatever else is in the environment', () => {
+    // GitHub sign-in was removed; its old env vars must not bring it back.
     const providers = buildSocialProviders({
       GOOGLE_CLIENT_ID: 'gid',
       GOOGLE_CLIENT_SECRET: 'gsecret',
       GITHUB_CLIENT_ID: 'ghid',
       GITHUB_CLIENT_SECRET: 'ghsecret',
     })
-    expect('google' in providers).toBe(true)
-    expect('github' in providers).toBe(true)
+    expect(Object.keys(providers)).toEqual(['google'])
   })
 
   it('excludes Google when only client_id set (no secret)', () => {
@@ -57,14 +47,6 @@ describe('Social provider detection', () => {
       // GOOGLE_CLIENT_SECRET intentionally missing
     })
     expect('google' in providers).toBe(false)
-  })
-
-  it('excludes GitHub when only client_secret set (no id)', () => {
-    const providers = buildSocialProviders({
-      // GITHUB_CLIENT_ID intentionally missing
-      GITHUB_CLIENT_SECRET: 'github-secret',
-    })
-    expect('github' in providers).toBe(false)
   })
 
   it('excludes provider when env vars are empty strings', () => {
@@ -83,13 +65,10 @@ describe('Social login flow (unit)', () => {
     // POST-only). better-auth answers with the provider URL to follow.
     const endpoint = '/api/auth/sign-in/social'
     const googleBody = { provider: 'google', callbackURL: '/auth/complete' }
-    const githubBody = { provider: 'github', callbackURL: '/auth/complete' }
 
     expect(endpoint).not.toContain('?')
     expect(googleBody.provider).toBe('google')
-    expect(githubBody.provider).toBe('github')
     expect(googleBody.callbackURL).toBe('/auth/complete')
-    expect(githubBody.callbackURL).toBe('/auth/complete')
   })
 
   it('bridge route /auth/complete is the callback for all auth methods', () => {

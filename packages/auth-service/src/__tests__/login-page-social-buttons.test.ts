@@ -1,10 +1,9 @@
 /**
- * The social sign-in buttons must POST to better-auth's /sign-in/social.
+ * The Google sign-in button must POST to better-auth's /sign-in/social.
  *
  * better-auth registers that endpoint as POST-only, so the plain
  * `<a href=".../sign-in/social?provider=google...">` link the page used to
- * render sent a GET and got a 404: the Google and GitHub buttons could never
- * start a sign-in.
+ * render sent a GET and got a 404: the button could never start a sign-in.
  *
  * The behavioural tests run the page's real inline script (see
  * __helpers__/login-page-script) and click a button.
@@ -19,7 +18,6 @@ import {
 vi.mock('../better-auth.js', () => ({
   socialProviders: {
     google: { clientId: 'google-id', clientSecret: 'google-secret' },
-    github: { clientId: 'github-id', clientSecret: 'github-secret' },
   },
 }))
 
@@ -39,57 +37,49 @@ function runPage(
   return runPageScript(html, fetchImpl)
 }
 
-/** Both social buttons plus the ATProto/Bluesky hand-off button. */
+/** The Google button plus the ATProto/Bluesky hand-off button. */
 const LOGIN_PAGE_BRANDING_WITH_HANDLE_LOGIN = {
-  epds_social_providers: ['google', 'github'],
+  epds_social_providers: ['google'],
   epds_handle_login_url: 'https://app.example.com/login',
 }
 
-/** Authorization URLs of the shape better-auth returns for each provider. */
-const PROVIDER_URLS = {
-  google:
-    'https://accounts.google.com/o/oauth2/v2/auth?client_id=google-id&state=s',
-  github:
-    'https://github.com/login/oauth/authorize?client_id=github-id&state=s',
-} as const
+/** An authorization URL of the shape better-auth returns for Google. */
+const GOOGLE_URL =
+  'https://accounts.google.com/o/oauth2/v2/auth?client_id=google-id&state=s'
 
 describe('renderLoginPage social sign-in buttons', () => {
   it('never links to /sign-in/social with a GET', () => {
     expect(render()).not.toContain('/sign-in/social?provider=')
   })
 
-  it.each(['google', 'github'])('renders %s as a button, not a link', (p) => {
+  it('renders Google as a button, not a link', () => {
     expect(render()).toContain(
-      `<button type="button" class="btn-social btn-${p}" data-social-provider="${p}">`,
+      '<button type="button" class="btn-social btn-google" data-social-provider="google">',
     )
   })
 
-  it.each(['google', 'github'] as const)(
-    'clicking %s POSTs the provider and follows the returned URL',
-    async (provider) => {
-      const providerUrl = PROVIDER_URLS[provider]
-      const { buttons, assign, fetchSpy } = runPage(() =>
-        jsonResponse(200, { url: providerUrl, redirect: true }),
-      )
+  it('clicking Google POSTs the provider and follows the returned URL', async () => {
+    const { buttons, assign, fetchSpy } = runPage(() =>
+      jsonResponse(200, { url: GOOGLE_URL, redirect: true }),
+    )
 
-      await buttons[provider].click()
+    await buttons.google.click()
 
-      expect(fetchSpy).toHaveBeenCalledTimes(1)
-      const [url, init] = fetchSpy.mock.calls[0]
-      expect(url).toBe('/api/auth/sign-in/social')
-      expect(init.method).toBe('POST')
-      expect(JSON.parse(init.body as string)).toEqual({
-        provider,
-        callbackURL: '/auth/complete',
-        errorCallbackURL: `/auth/complete?epds_social_provider=${provider}`,
-      })
-      expect(assign).toHaveBeenCalledWith(providerUrl)
-    },
-  )
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchSpy.mock.calls[0]
+    expect(url).toBe('/api/auth/sign-in/social')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({
+      provider: 'google',
+      callbackURL: '/auth/complete',
+      errorCallbackURL: '/auth/complete?epds_social_provider=google',
+    })
+    expect(assign).toHaveBeenCalledWith(GOOGLE_URL)
+  })
 
   it('sends Google the email address the user entered as its login hint', async () => {
     const { buttons, elements, fetchSpy } = runPage(() =>
-      jsonResponse(200, { url: PROVIDER_URLS.google }),
+      jsonResponse(200, { url: GOOGLE_URL }),
     )
     elements.emailInput.value = ' alice@gmail.com '
 
@@ -102,16 +92,15 @@ describe('renderLoginPage social sign-in buttons', () => {
   })
 
   it.each([
-    ['an incomplete address', 'google', 'alice@'],
-    ['an empty field', 'google', ''],
-    ['GitHub, which takes no email hint', 'github', 'alice@gmail.com'],
-  ] as const)('sends no login hint for %s', async (_label, provider, typed) => {
+    ['an incomplete address', 'alice@'],
+    ['an empty field', ''],
+  ])('sends no login hint for %s', async (_label, typed) => {
     const { buttons, elements, fetchSpy } = runPage(() =>
-      jsonResponse(200, { url: PROVIDER_URLS[provider] }),
+      jsonResponse(200, { url: GOOGLE_URL }),
     )
     elements.emailInput.value = typed
 
-    await buttons[provider].click()
+    await buttons.google.click()
 
     expect(
       JSON.parse(fetchSpy.mock.calls[0][1].body as string),
@@ -120,7 +109,7 @@ describe('renderLoginPage social sign-in buttons', () => {
 
   it('sends no login hint while the field holds an ATProto handle', async () => {
     const { buttons, elements, fetchSpy } = runPage(
-      () => jsonResponse(200, { url: PROVIDER_URLS.google }),
+      () => jsonResponse(200, { url: GOOGLE_URL }),
       render({ branding: LOGIN_PAGE_BRANDING_WITH_HANDLE_LOGIN }),
     )
     await elements.atprotoButton.click()
@@ -146,7 +135,7 @@ describe('renderLoginPage social sign-in buttons', () => {
     await buttons.google.click()
     expect(fetchSpy).toHaveBeenCalledTimes(1)
 
-    resolveFetch(await jsonResponse(200, { url: PROVIDER_URLS.google }))
+    resolveFetch(await jsonResponse(200, { url: GOOGLE_URL }))
     await first
   })
 
@@ -159,42 +148,39 @@ describe('renderLoginPage social sign-in buttons', () => {
     async (_label, impl) => {
       const { buttons, assign, fetchSpy, flash } = runPage(impl)
 
-      await buttons.github.click()
+      await buttons.google.click()
 
       expect(fetchSpy).toHaveBeenCalledTimes(1)
       expect(assign).not.toHaveBeenCalled()
       expect(flash.text).toBe('Could not start sign-in. Please try again.')
-      expect(buttons.github.disabled).toBe(false)
+      expect(buttons.google.disabled).toBe(false)
     },
   )
 
   it.each([
-    ['an http URL', 'google', 'http://accounts.google.com/o/oauth2/v2/auth'],
-    ['another host', 'google', 'https://evil.example/o/oauth2/v2/auth'],
+    ['an http URL', 'http://accounts.google.com/o/oauth2/v2/auth'],
+    ['another host', 'https://evil.example/o/oauth2/v2/auth'],
     [
       'a look-alike host',
-      'google',
       'https://accounts.google.com.evil.example/o/oauth2/v2/auth',
     ],
-    ['a Google URL for GitHub', 'github', PROVIDER_URLS.google],
-    ['a GitHub URL for Google', 'google', PROVIDER_URLS.github],
-    ['an explicit port', 'github', 'https://github.com:8443/login/oauth'],
-    ['a javascript: URL', 'google', 'javascript:alert(1)'],
-    ['a relative URL', 'github', '/login/oauth/authorize'],
-    ['a protocol-relative URL', 'github', '//github.com/login/oauth/authorize'],
-    ['a non-string URL', 'google', { href: PROVIDER_URLS.google }],
+    ['an explicit port', 'https://accounts.google.com:8443/o/oauth2/v2/auth'],
+    ['a javascript: URL', 'javascript:alert(1)'],
+    ['a relative URL', '/o/oauth2/v2/auth'],
+    ['a protocol-relative URL', '//accounts.google.com/o/oauth2/v2/auth'],
+    ['a non-string URL', { href: GOOGLE_URL }],
   ] as const)(
     'refuses to follow %s and shows the error',
-    async (_label, provider, url) => {
+    async (_label, url) => {
       const { buttons, assign, flash } = runPage(() =>
         jsonResponse(200, { url, redirect: true }),
       )
 
-      await buttons[provider].click()
+      await buttons.google.click()
 
       expect(assign).not.toHaveBeenCalled()
       expect(flash.text).toBe('Could not start sign-in. Please try again.')
-      expect(buttons[provider].disabled).toBe(false)
+      expect(buttons.google.disabled).toBe(false)
     },
   )
 
@@ -209,7 +195,7 @@ describe('renderLoginPage social sign-in buttons', () => {
 
   it('re-enables the buttons when the page is restored from the back/forward cache', async () => {
     const { buttons, windowListeners } = runPage(() =>
-      jsonResponse(200, { url: PROVIDER_URLS.google }),
+      jsonResponse(200, { url: GOOGLE_URL }),
     )
     await buttons.google.click()
     expect(buttons.google.disabled).toBe(true)
@@ -237,20 +223,20 @@ describe('renderLoginPage social sign-in buttons', () => {
 describe('renderLoginPage social start', () => {
   it('presses the requested provider button on load', async () => {
     const { fetchSpy } = runPage(
-      () => jsonResponse(200, { url: PROVIDER_URLS.github }),
-      render({ startSocialProvider: 'github' }),
+      () => jsonResponse(200, { url: GOOGLE_URL }),
+      render({ startSocialProvider: 'google' }),
     )
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(fetchSpy).toHaveBeenCalledTimes(1)
     expect(JSON.parse(fetchSpy.mock.calls[0][1].body as string)).toMatchObject({
-      provider: 'github',
+      provider: 'google',
     })
   })
 
   it('starts nothing for a provider the client does not offer', () => {
     const html = render({
-      branding: { epds_social_providers: ['google'] },
-      startSocialProvider: 'github',
+      branding: { epds_social_providers: [] },
+      startSocialProvider: 'google',
     })
     expect(html).toContain('var startSocialProvider = "";')
     const { fetchSpy } = runPage(() => jsonResponse(200, {}), html)
@@ -270,15 +256,14 @@ describe('renderLoginPage social sign-in opt-in', () => {
     expect(html).not.toContain('or continue with')
   })
 
-  it('renders only the providers the client lists', () => {
+  it('renders the Google button when the client lists it', () => {
     const html = render({ branding: { epds_social_providers: ['google'] } })
     expect(html).toContain('data-social-provider="google"')
-    expect(html).not.toContain('data-social-provider="github"')
   })
 
-  it('ignores unknown providers and a non-array value', () => {
+  it('ignores unknown and removed providers and a non-array value', () => {
     expect(
-      render({ branding: { epds_social_providers: ['facebook'] } }),
+      render({ branding: { epds_social_providers: ['github', 'facebook'] } }),
     ).not.toContain('data-social-provider="')
     expect(
       render({

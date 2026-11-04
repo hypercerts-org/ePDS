@@ -238,9 +238,7 @@ describe('Social providers detection', () => {
   it('empty socialProviders when no env vars set', () => {
     // Preserve original env
     const origGoogle = process.env.GOOGLE_CLIENT_ID
-    const origGithub = process.env.GITHUB_CLIENT_ID
     delete process.env.GOOGLE_CLIENT_ID
-    delete process.env.GITHUB_CLIENT_ID
 
     // Re-import to get fresh state (simulate no social providers)
     // We can't easily re-run buildSocialProviders() in isolation,
@@ -253,11 +251,9 @@ describe('Social providers detection', () => {
       providers.google = { clientId: googleId, clientSecret: googleSecret }
 
     expect('google' in providers).toBe(false)
-    expect('github' in providers).toBe(false)
 
     // Restore
     if (origGoogle) process.env.GOOGLE_CLIENT_ID = origGoogle
-    if (origGithub) process.env.GITHUB_CLIENT_ID = origGithub
   })
 
   it('includes google provider when env vars set', () => {

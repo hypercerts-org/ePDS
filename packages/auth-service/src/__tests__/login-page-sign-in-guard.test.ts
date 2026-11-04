@@ -20,7 +20,6 @@ import {
 vi.mock('../better-auth.js', () => ({
   socialProviders: {
     google: { clientId: 'google-id', clientSecret: 'google-secret' },
-    github: { clientId: 'github-id', clientSecret: 'github-secret' },
   },
 }))
 
@@ -64,7 +63,7 @@ function runPage(overrides: Record<string, Answer> = {}) {
   const html = renderLoginPage({
     ...LOGIN_PAGE_OPTIONS,
     branding: {
-      epds_social_providers: ['google', 'github'],
+      epds_social_providers: ['google'],
       epds_handle_login_url: HANDLE_LOGIN_URL,
     },
   })
@@ -107,10 +106,6 @@ async function handOffHandle(page: PageScriptHandles) {
 const methods = {
   'the Google button': {
     start: (page: PageScriptHandles) => page.buttons.google.click(),
-    endpoint: SOCIAL,
-  },
-  'the GitHub button': {
-    start: (page: PageScriptHandles) => page.buttons.github.click(),
     endpoint: SOCIAL,
   },
   'sending an email code': { start: sendCode, endpoint: SEND },
@@ -156,18 +151,16 @@ describe('login page sign-in guard', () => {
     await inFlight
   })
 
-  it('disables every social button while any sign-in is in flight', async () => {
+  it('disables the Google button while any sign-in is in flight', async () => {
     const held = deferred()
     const page = runPage({ [SEND]: held.answer })
 
     const inFlight = sendCode(page)
     expect(page.buttons.google.disabled).toBe(true)
-    expect(page.buttons.github.disabled).toBe(true)
 
     held.resolve(200, { success: true })
     await inFlight
     expect(page.buttons.google.disabled).toBe(false)
-    expect(page.buttons.github.disabled).toBe(false)
   })
 
   it('disables the email-code button while a social sign-in is in flight', async () => {
@@ -209,7 +202,7 @@ describe('login page sign-in guard', () => {
     const navigated = page.navigations.length
     expect(navigated).toBe(1)
 
-    await page.buttons.github.click()
+    await page.buttons.google.click()
     await sendCode(page)
     await verifyCode(page)
 
@@ -224,7 +217,7 @@ describe('login page sign-in guard', () => {
     const page = runPage({ [endpoint]: () => jsonResponse(500, body()) })
 
     await (endpoint === SOCIAL ? page.buttons.google.click() : sendCode(page))
-    await page.buttons.github.click()
+    await page.buttons.google.click()
 
     expect(requests(page)).toEqual([endpoint, SOCIAL])
   })

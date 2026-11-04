@@ -381,9 +381,9 @@ Constraints:
 - If `epds_handle_login_url` is unset or invalid, the button is not
   rendered. Existing clients see no behaviour change.
 
-#### Optional: offer Google or GitHub sign-in
+#### Optional: offer Google sign-in
 
-If the PDS operator has configured a social provider (see
+If the PDS operator has configured Google (see
 [Social providers](./configuration.md#social-providers-optional)), opt in
 by listing it in your client metadata:
 
@@ -393,11 +393,12 @@ by listing it in your client metadata:
 }
 ```
 
-The login page then renders that provider's button above the email form.
-A button appears only when both the operator configured the provider and
-your client lists it, so a provider enabled for one app does not appear on
-other apps' login pages. Accepted values: `"google"`, `"github"`. Unknown
-values are ignored; if the field is unset, no social buttons are rendered.
+The login page then renders a "Sign in with Google" button above the
+email form. The button appears only when both the operator configured
+Google and your client lists it, so enabling Google for one app does not
+change other apps' login pages. `"google"` is the only accepted value;
+other values are ignored, and if the field is unset no social button is
+rendered.
 
 To put a "Sign in with Google" button on your own page instead, start the
 OAuth flow as usual and add `epds_social_provider=google` to the

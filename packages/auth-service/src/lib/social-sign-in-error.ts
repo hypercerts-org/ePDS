@@ -27,7 +27,6 @@ export const SOCIAL_PROVIDER_PARAM = 'epds_social_provider'
 /** Display names for the social providers the login page can offer. */
 const PROVIDER_NAMES: Record<string, string> = {
   google: 'Google',
-  github: 'GitHub',
 }
 
 function providerName(provider: unknown): string | null {

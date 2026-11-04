@@ -169,17 +169,16 @@ card when both `PDS_TERMS_OF_SERVICE_URL` and `PDS_PRIVACY_POLICY_URL`
 
 ### Social providers (optional)
 
-Both ID and SECRET must be set to enable a provider. A provider's button
-appears on the login page only for OAuth clients that also list it in their
-client metadata (`"epds_social_providers": ["google"]`), so enabling a
-provider does not change the login page of clients that did not ask for it.
+Google is the only social provider. Both ID and SECRET must be set to
+enable it. Its button appears on the login page only for OAuth clients
+that also list it in their client metadata
+(`"epds_social_providers": ["google"]`), so enabling Google does not change
+the login page of clients that did not ask for it.
 
-| Variable               | Description                                                                                  |
-| ---------------------- | -------------------------------------------------------------------------------------------- |
-| `GOOGLE_CLIENT_ID`     | Google OAuth client ID — [Google Cloud Console](https://console.cloud.google.com/)           |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret                                                                   |
-| `GITHUB_CLIENT_ID`     | GitHub OAuth client ID — [GitHub Developer Settings](https://github.com/settings/developers) |
-| `GITHUB_CLIENT_SECRET` | GitHub OAuth client secret                                                                   |
+| Variable               | Description                                                                        |
+| ---------------------- | ---------------------------------------------------------------------------------- |
+| `GOOGLE_CLIENT_ID`     | Google OAuth client ID — [Google Cloud Console](https://console.cloud.google.com/) |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret                                                         |
 
 #### Redirect URIs
 

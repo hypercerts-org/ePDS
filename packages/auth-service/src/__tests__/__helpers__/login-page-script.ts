@@ -15,14 +15,14 @@ import type { renderLoginPage } from '../../routes/login-page.js'
 export type LoginPageOptions = Parameters<typeof renderLoginPage>[0]
 
 /**
- * renderLoginPage options for a plain email-step page with both social
- * buttons requested; tests override what they need.
+ * renderLoginPage options for a plain email-step page with the Google
+ * button requested; tests override what they need.
  */
 export const LOGIN_PAGE_OPTIONS: LoginPageOptions = {
   flowId: 'flow-1',
   clientId: 'https://app.example.com/client-metadata.json',
   clientName: 'Example',
-  branding: { epds_social_providers: ['google', 'github'] },
+  branding: { epds_social_providers: ['google'] },
   customCss: null,
   customFaviconUrl: null,
   customFaviconUrlDark: null,
@@ -141,7 +141,7 @@ export interface PageElements {
 
 /** What a test drives and observes on a page script run by runPageScript. */
 export interface PageScriptHandles {
-  buttons: { google: FakeButton; github: FakeButton }
+  buttons: { google: FakeButton }
   elements: PageElements
   /** `window.location.assign`. */
   assign: Mock<(url: string) => void>
@@ -157,7 +157,7 @@ export interface PageScriptHandles {
 export type FakeButton = FakeElement
 
 /**
- * Run the main script of `html` with fake Google/GitHub buttons, fake
+ * Run the main script of `html` with a fake Google button, fake
  * email/OTP forms and a stubbed `fetch`, and return the handles a test
  * needs to drive and observe it.
  */
@@ -167,7 +167,6 @@ export function runPageScript(
 ): PageScriptHandles {
   const buttons = {
     google: fakeElement({ 'data-social-provider': 'google' }),
-    github: fakeElement({ 'data-social-provider': 'github' }),
   }
   const sendOtpButton = fakeElement()
   const verifyButton = fakeElement()
@@ -219,9 +218,7 @@ export function runPageScript(
   }
   const fakeDocument: Record<string, unknown> = {
     querySelectorAll: (selector: string) =>
-      selector === '[data-social-provider]'
-        ? [buttons.google, buttons.github]
-        : [],
+      selector === '[data-social-provider]' ? [buttons.google] : [],
     querySelector: (selector: string) =>
       selector in bySelector ? bySelector[selector] : absorbing(),
     getElementById: (id: string) => (id in byId ? byId[id] : absorbing()),

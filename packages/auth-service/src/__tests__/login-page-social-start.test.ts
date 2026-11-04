@@ -154,7 +154,7 @@ describe('GET /oauth/authorize with epds_social_provider', () => {
   })
 
   it.each([
-    ['a provider this client does not offer', 'github'],
+    ['a removed provider', 'github'],
     ['an unknown provider', 'facebook'],
     ['an empty value', ''],
   ])('ignores %s and sends the code as usual', async (_label, provider) => {
@@ -202,7 +202,7 @@ describe('GET /oauth/authorize with epds_social_provider', () => {
     })
 
     it.each([
-      ['a provider this client does not offer', 'github'],
+      ['a removed provider', 'github'],
       ['an unknown provider', 'facebook'],
     ])('is still handed to pds-core for %s', async (_label, provider) => {
       const res = await authorize(

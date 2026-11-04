@@ -3,7 +3,7 @@
  *
  * This module creates and exports a better-auth instance configured with:
  * - Email OTP plugin (for future migration from custom OTP implementation)
- * - Social providers (Google, GitHub — only when env vars are set)
+ * - Google sign-in (only when its env vars are set)
  * - Session lifetime from env vars
  * - An `after` hook that surfaces OTP verification failures in our logs,
  *   with the user's email attached (see logOtpVerificationFailure below)
@@ -17,7 +17,7 @@ import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { generateRandomString } from 'better-auth/crypto'
 import { getMigrations } from 'better-auth/db'
 import { emailOTP } from 'better-auth/plugins'
-import type { GithubOptions, GoogleOptions } from 'better-auth/social-providers'
+import type { GoogleOptions } from 'better-auth/social-providers'
 import Database from 'better-sqlite3'
 import type { EmailSender } from './email/sender.js'
 import { flowEmailPlugin } from './lib/flow-email-plugin.js'
@@ -145,7 +145,6 @@ const AUTH_FLOW_COOKIE = 'epds_auth_flow'
 /** The social providers passed to better-auth, keyed by provider id. */
 export interface SocialProvidersConfig {
   google?: GoogleOptions
-  github?: GithubOptions
 }
 
 /**
@@ -173,12 +172,6 @@ export function buildSocialProviders(
       prompt: 'select_account',
       mapProfileToUser: mapGoogleProfileToUser,
     }
-  }
-
-  const githubId = env.GITHUB_CLIENT_ID
-  const githubSecret = env.GITHUB_CLIENT_SECRET
-  if (githubId && githubSecret) {
-    providers.github = { clientId: githubId, clientSecret: githubSecret }
   }
 
   return providers
@@ -311,7 +304,6 @@ export function createBetterAuth(
   )
 
   delete socialProviders.google
-  delete socialProviders.github
   Object.assign(socialProviders, buildSocialProviders())
 
   const betterAuthDb = new Database(dbLocation)
