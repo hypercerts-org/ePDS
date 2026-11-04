@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import Database from 'better-sqlite3'
 import { EpdsDb } from '../db.js'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -211,6 +212,123 @@ describe('Auth Flow Operations', () => {
     const cleaned = db.cleanupExpiredAuthFlows()
     expect(cleaned).toBeGreaterThanOrEqual(1)
     expect(db.getAuthFlow('flow-cleanup')).toBeUndefined()
+  })
+})
+
+describe('Auth flow login_hint email', () => {
+  const email = 'alice.private@example.com'
+
+  function createFlow(
+    flowId: string,
+    extra: { expiresAt?: number; loginHintEmail?: string | null } = {},
+  ): void {
+    db.createAuthFlow({
+      flowId,
+      requestUri: `urn:ietf:params:oauth:request_uri:${flowId}`,
+      clientId: null,
+      expiresAt: extra.expiresAt ?? Date.now() + 600_000,
+      loginHintEmail: extra.loginHintEmail,
+    })
+  }
+
+  function storedEmailColumn(
+    flowId: string,
+  ): { login_hint_email: string | null } | undefined {
+    return db['db']
+      .prepare('SELECT login_hint_email FROM auth_flow WHERE flow_id = ?')
+      .get(flowId) as { login_hint_email: string | null } | undefined
+  }
+
+  it('stores the email given at creation', () => {
+    createFlow('lh-create', { loginHintEmail: email })
+    expect(db.getAuthFlowLoginHintEmail('lh-create')).toBe(email)
+  })
+
+  it('returns null for a flow created without one, and for an unknown flow', () => {
+    createFlow('lh-none')
+    expect(db.getAuthFlowLoginHintEmail('lh-none')).toBeNull()
+    expect(db.getAuthFlowLoginHintEmail('lh-unknown')).toBeNull()
+  })
+
+  it('replaces and clears the stored email', () => {
+    createFlow('lh-update', { loginHintEmail: email })
+
+    db.setAuthFlowLoginHintEmail('lh-update', 'other@example.com')
+    expect(db.getAuthFlowLoginHintEmail('lh-update')).toBe('other@example.com')
+
+    db.setAuthFlowLoginHintEmail('lh-update', null)
+    expect(db.getAuthFlowLoginHintEmail('lh-update')).toBeNull()
+  })
+
+  it('does not return the email once the flow has expired', () => {
+    createFlow('lh-expired', {
+      loginHintEmail: email,
+      expiresAt: Date.now() - 1000,
+    })
+    expect(db.getAuthFlowLoginHintEmail('lh-expired')).toBeNull()
+  })
+
+  it('keeps the email out of the general AuthFlowRow', () => {
+    // Anything that logs or forwards a flow row must not be able to leak it.
+    createFlow('lh-row', { loginHintEmail: email })
+    expect(JSON.stringify(db.getAuthFlow('lh-row'))).not.toContain(email)
+    expect(
+      JSON.stringify(
+        db.getAuthFlowByRequestUri('urn:ietf:params:oauth:request_uri:lh-row'),
+      ),
+    ).not.toContain(email)
+  })
+
+  it('removes the email with the flow row on delete and expiry cleanup', () => {
+    createFlow('lh-delete', { loginHintEmail: email })
+    createFlow('lh-cleanup', {
+      loginHintEmail: email,
+      expiresAt: Date.now() - 1000,
+    })
+    expect(storedEmailColumn('lh-cleanup')?.login_hint_email).toBe(email)
+
+    db.deleteAuthFlow('lh-delete')
+    db.cleanupExpiredAuthFlows()
+
+    expect(storedEmailColumn('lh-delete')).toBeUndefined()
+    expect(storedEmailColumn('lh-cleanup')).toBeUndefined()
+  })
+})
+
+describe('Migration: v10 adds auth_flow.login_hint_email', () => {
+  it('upgrades a v9 database in place and keeps existing flows', () => {
+    const legacyPath = path.join(
+      os.tmpdir(),
+      `epds-legacy-${Date.now()}-${Math.random().toString(36).slice(2)}.sqlite`,
+    )
+    const legacy = new Database(legacyPath)
+    legacy.exec(`
+      CREATE TABLE schema_version (version INTEGER NOT NULL);
+      INSERT INTO schema_version (version) VALUES (9);
+      CREATE TABLE auth_flow (
+        flow_id TEXT PRIMARY KEY, request_uri TEXT NOT NULL, client_id TEXT,
+        email TEXT, handle_mode TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL
+      );
+      INSERT INTO auth_flow (flow_id, request_uri, created_at, expires_at)
+        VALUES ('legacy-flow', 'urn:legacy', 1, ${Date.now() + 600_000});
+    `)
+    legacy.close()
+
+    const upgraded = new EpdsDb(legacyPath)
+    try {
+      expect(upgraded.getAuthFlow('legacy-flow')?.requestUri).toBe('urn:legacy')
+      expect(upgraded.getAuthFlowLoginHintEmail('legacy-flow')).toBeNull()
+
+      upgraded.setAuthFlowLoginHintEmail('legacy-flow', 'a@example.com')
+      expect(upgraded.getAuthFlowLoginHintEmail('legacy-flow')).toBe(
+        'a@example.com',
+      )
+    } finally {
+      upgraded.close()
+      for (const suffix of ['', '-wal', '-shm']) {
+        fs.rmSync(legacyPath + suffix, { force: true })
+      }
+    }
   })
 })
 

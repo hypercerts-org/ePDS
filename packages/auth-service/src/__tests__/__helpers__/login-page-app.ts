@@ -40,6 +40,8 @@ function makeConfig(dbPath: string): AuthServiceConfig {
 
 export interface LoginPageApp {
   baseUrl: string
+  /** The router's context, for assertions against its database. */
+  ctx: AuthServiceContext
   /** Stop the server, close the database and delete its files. */
   close: () => Promise<void>
 }
@@ -75,6 +77,7 @@ export async function startLoginPageApp(
   server.unref()
   return {
     baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    ctx,
     close: async () => {
       await new Promise<void>((resolve) => {
         server.close(() => {

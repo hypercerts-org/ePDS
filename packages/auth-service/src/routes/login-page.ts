@@ -17,6 +17,12 @@
  *        hide via --recovery-link-display: none in branding.css)
  *      - Client branding from OAuth metadata
  *
+ * Handle/DID login_hints: the resolved account email is held on the
+ * auth_flow row and never rendered. The page shows a masked label and sends
+ * `useFlowEmail` to the OTP endpoints; lib/flow-email-plugin.ts substitutes
+ * the stored address server-side. Email hints pre-fill as before, since the
+ * caller already knows them.
+ *
  * The better-auth flow after login:
  *   - Email OTP: user submits code to /api/auth/sign-in/email-otp/verify
  *   - Social: user clicks button → page script POSTs /api/auth/sign-in/social
@@ -50,6 +56,9 @@ import {
   resolveLoginHint,
   fetchParLoginHint,
 } from '../lib/resolve-login-hint.js'
+import { splitResolvedHint } from '../lib/login-hint.js'
+import { maskEmail } from '../lib/mask-email.js'
+import { FLOW_EMAIL_UNAVAILABLE_CODE } from '../lib/flow-email-plugin.js'
 import { ensurePdsUrl } from '../lib/pds-url.js'
 import {
   renderOptionalStyleTag,
@@ -127,6 +136,19 @@ function toScriptJson(value: string | boolean | null): string {
     (ch) =>
       String.raw`\u${(ch.codePointAt(0) ?? 0).toString(16).padStart(4, '0')}`,
   )
+}
+
+/**
+ * Address shown in the "Code already sent to …" subtitle. A flow email is
+ * already masked server-side; a caller-supplied hint keeps its first two
+ * characters and domain. Uses indexOf rather than a regex to avoid
+ * backtracking on long input.
+ */
+function otpSubtitleEmail(loginHint: string, flowEmailMasked: string): string {
+  if (flowEmailMasked) return flowEmailMasked
+  const at = loginHint.indexOf('@', 2)
+  if (at < 0) return loginHint
+  return `${loginHint.slice(0, 2)}***${loginHint.slice(at)}`
 }
 
 export async function safeResolveClientMetadata(
@@ -336,6 +358,10 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
           internalSecret,
         )
       : null
+    const { prefillEmail, flowEmail } = splitResolvedHint(
+      effectiveLoginHint,
+      resolvedEmail,
+    )
 
     // Only fetch device-bound emails when we actually need them: the
     // cookie pair is present AND a hint resolved. Otherwise the existing
@@ -448,10 +474,29 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
           requestUri,
           clientId: clientId ?? null,
           handleMode,
+          loginHintEmail: flowEmail,
           expiresAt: Date.now() + AUTH_FLOW_TTL_MS,
         })
       } catch (err) {
         logger.error({ err }, 'Failed to create auth_flow')
+        res
+          .status(500)
+          .type('html')
+          .send(renderError('Internal server error. Please try again.'))
+        return
+      }
+    }
+
+    // A reused flow may carry a stale address (e.g. the "Another account"
+    // rebind dropped the hint), so always bring it in line with this
+    // request. The page below only sends `useFlowEmail` when the row holds
+    // the address, so a failed write must not fall through to a page that
+    // would then have nothing to substitute.
+    if (existingFlow) {
+      try {
+        ctx.db.setAuthFlowLoginHintEmail(flowId, flowEmail)
+      } catch (err) {
+        logger.error({ err, flowId }, 'Failed to update auth_flow login email')
         res
           .status(500)
           .type('html')
@@ -540,10 +585,6 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
       'Serving login page for auth_flow',
     )
 
-    // Use the resolved email (not the raw loginHint) for pre-filling forms.
-    // This ensures handle-based hints get resolved to the correct email.
-    const emailHint = resolvedEmail ?? ''
-
     res.type('html').send(
       renderLoginPage({
         flowId,
@@ -553,7 +594,8 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
         customCss,
         customFaviconUrl,
         customFaviconUrlDark,
-        loginHint: emailHint,
+        loginHint: prefillEmail,
+        flowEmailMasked: flowEmail ? maskEmail(flowEmail) : null,
         initialStep,
         otpAlreadySent,
         csrfToken: res.locals.csrfToken,
@@ -577,81 +619,24 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
   return router
 }
 
-export function renderLoginPage(opts: {
-  flowId: string
-  clientId: string
-  clientName: string
-  branding: ClientMetadata
-  customCss: string | null
-  customFaviconUrl: string | null
-  customFaviconUrlDark: string | null
-  loginHint: string
+const DEFAULT_BRAND_COLOR = '#1A130F'
+
+function resolveBrandColor(brandColor = DEFAULT_BRAND_COLOR): string {
+  // brand_color is interpolated into the page <style>. escapeHtml() doesn't
+  // make a value safe in CSS context — a `;` or `}` would break out of the
+  // declaration — so restrict to a hex literal before use. An empty string
+  // fails this check and falls back to the default too.
+  return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(brandColor)
+    ? brandColor
+    : DEFAULT_BRAND_COLOR
+}
+
+function renderTermsHtml(opts: {
   initialStep: 'email' | 'otp'
-  otpAlreadySent: boolean
-  csrfToken: string
-  authBasePath: string
-  pdsPublicUrl: string
   termsOfServiceUrl?: string
   privacyPolicyUrl?: string
   legalEntityName?: string
-  otpLength: number
-  otpCharset: 'numeric' | 'alphanumeric'
-  /**
-   * When true, the rendered page starts a 3-min `setInterval` that
-   * GETs /auth/ping while the user is on the OTP step, sliding the
-   * upstream PAR's inactivity timer so the user can read their email
-   * without losing the OAuth flow. Disabled only by the
-   * `?no_heartbeat=1` test toggle (see `heartbeatEnabledFor`).
-   */
-  heartbeatEnabled: boolean
-  /**
-   * A social provider to start on load, as if its button were pressed.
-   * Only ever one this client's page offers (see clientSocialProviders).
-   */
-  startSocialProvider?: SocialProviderId | null
-  /**
-   * Error shown in the flash region on load. Only ever one of the fixed
-   * messages from socialSignInErrorMessage(), never request text.
-   */
-  initialError?: string | null
 }): string {
-  const b = opts.branding
-  const appName = b.client_name || opts.clientName || 'Certified'
-  // brand_color is interpolated into <style> below. escapeHtml() doesn't
-  // make a value safe in CSS context — a `;` or `}` would break out of the
-  // declaration — so restrict to a hex literal before use.
-  const rawBrandColor = b.brand_color || '#1A130F'
-  const brandColor = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(
-    rawBrandColor,
-  )
-    ? rawBrandColor
-    : '#1A130F'
-  const logoHtml = b.logo_uri
-    ? `<img src="${escapeHtml(b.logo_uri)}" alt="${escapeHtml(appName)}" class="client-logo">`
-    : `<img src="/static/certified-brandmark.svg" alt="Certified" class="client-logo">`
-
-  const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
-  const inputFilter = buildOtpInputFilter(opts.otpCharset)
-
-  // ATProto/Bluesky handle login button.
-  //
-  // Only rendered when the OAuth client declares `epds_handle_login_url` in
-  // its client metadata. The button toggles the email form into handle-entry
-  // mode; submitting a handle navigates the browser to that URL with
-  // `?handle=<value>` appended. The client owns handle-to-PDS resolution
-  // and starts a fresh OAuth flow against whichever PDS the handle resolves
-  // to — auth-service is bound to one PDS and cannot PAR on the client's
-  // behalf, so off-PDS handles only work via this hand-off.
-  //
-  // The URL is validated to be http(s) to prevent a malformed metadata
-  // value from injecting a `javascript:` redirect target into the page.
-  const handleLoginUrl = isSafeHttpUrl(b.epds_handle_login_url)
-    ? (b.epds_handle_login_url as string)
-    : ''
-  const handleLoginButtonHtml = handleLoginUrl
-    ? `<button type="button" class="btn-social btn-atproto">Or sign in with ATProto/Bluesky</button>`
-    : ''
-
   // Terms-of-use / privacy-policy line. Only rendered when both URLs are
   // configured (`PDS_TERMS_OF_SERVICE_URL` + `PDS_PRIVACY_POLICY_URL`);
   // a partial config would surface a broken link, so skip the line
@@ -663,39 +648,28 @@ export function renderLoginPage(opts: {
   const termsLead = opts.legalEntityName
     ? `${escapeHtml(opts.legalEntityName)}'s`
     : 'the'
-  const termsHtml = showTerms
-    ? `<div class="terms" id="terms" style="display:${
-        opts.initialStep === 'otp' ? 'none' : 'block'
-      };">By signing in, you agree to ${termsLead} <a href="${escapeHtml(
-        opts.termsOfServiceUrl as string,
-      )}" class="terms-link" target="_blank" rel="noopener noreferrer">Terms of Use</a> and <a href="${escapeHtml(
-        opts.privacyPolicyUrl as string,
-      )}" class="terms-link" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</div>`
-    : ''
+  if (!showTerms) return ''
+  return `<div class="terms" id="terms" style="display:${
+    opts.initialStep === 'otp' ? 'none' : 'block'
+  };">By signing in, you agree to ${termsLead} <a href="${escapeHtml(
+    opts.termsOfServiceUrl as string,
+  )}" class="terms-link" target="_blank" rel="noopener noreferrer">Terms of Use</a> and <a href="${escapeHtml(
+    opts.privacyPolicyUrl as string,
+  )}" class="terms-link" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</div>`
+}
 
-  // Social buttons are opt-in per client (see clientSocialProviders).
-  const offeredSocial = clientSocialProviders(b)
+/**
+ * Social sign-in buttons for the providers this client's page offers.
+ * better-auth's /sign-in/social is POST-only, so these are buttons handled
+ * by the page script, not links (a link's GET is a 404).
+ */
+function renderSocialButtonsHtml(
+  offeredSocial: readonly SocialProviderId[],
+): string {
+  if (offeredSocial.length === 0) return ''
   const hasGoogle = offeredSocial.includes('google')
   const hasGithub = offeredSocial.includes('github')
-  const hasSocialProviders = offeredSocial.length > 0
-  const startSocialProvider =
-    opts.startSocialProvider && offeredSocial.includes(opts.startSocialProvider)
-      ? opts.startSocialProvider
-      : ''
-
-  // The flash region is a single element shared by both steps, so there
-  // is only ever one live region for assistive tech to track. It is
-  // server-rendered into whichever step is initially visible and moved
-  // between the two slots on step transitions; both transitions call
-  // clearError() first, so it is always empty when it moves.
-  const flashRegionHtml =
-    '<div id="error-msg" class="flash-msg hidden" role="status" aria-live="polite"></div>'
-
-  // Social login buttons. better-auth's /sign-in/social is POST-only, so
-  // these are buttons handled by the page script, not links (a link's GET
-  // is a 404).
-  const socialButtonsHtml = hasSocialProviders
-    ? `
+  return `
     <div class="divider"><span>or continue with</span></div>
     <div class="social-buttons">
       ${
@@ -726,7 +700,117 @@ export function renderLoginPage(opts: {
     </div>
     <div class="divider"><span>or use email</span></div>
   `
+}
+
+export function renderLoginPage(input: {
+  flowId: string
+  clientId: string
+  clientName: string
+  branding: ClientMetadata
+  customCss: string | null
+  customFaviconUrl: string | null
+  customFaviconUrlDark: string | null
+  /**
+   * Email to pre-fill, for hints the caller supplied as an email. Never put
+   * an address resolved from a handle/DID here — use `flowEmailMasked`.
+   */
+  loginHint: string
+  /**
+   * Masked label (`al***@example.com`) for an email the server resolved from
+   * a handle/DID hint and holds on the auth_flow row. When set, the page
+   * renders only this label: no address in any input, script, or attribute.
+   * The OTP calls send `useFlowEmail` instead and the auth service
+   * substitutes the stored address. Takes precedence over `loginHint`.
+   */
+  flowEmailMasked?: string | null
+  initialStep: 'email' | 'otp'
+  otpAlreadySent: boolean
+  csrfToken: string
+  authBasePath: string
+  pdsPublicUrl: string
+  termsOfServiceUrl?: string
+  privacyPolicyUrl?: string
+  legalEntityName?: string
+  otpLength: number
+  otpCharset: 'numeric' | 'alphanumeric'
+  /**
+   * When true, the rendered page starts a 3-min `setInterval` that
+   * GETs /auth/ping while the user is on the OTP step, sliding the
+   * upstream PAR's inactivity timer so the user can read their email
+   * without losing the OAuth flow. Disabled only by the
+   * `?no_heartbeat=1` test toggle (see `heartbeatEnabledFor`).
+   */
+  heartbeatEnabled: boolean
+  /**
+   * A social provider to start on load, as if its button were pressed.
+   * Only ever one this client's page offers (see clientSocialProviders).
+   */
+  startSocialProvider?: SocialProviderId | null
+  /**
+   * Error shown in the flash region on load. Only ever one of the fixed
+   * messages from socialSignInErrorMessage(), never request text.
+   */
+  initialError?: string | null
+}): string {
+  // Flow-email mode (handle/DID hint, see `flowEmailMasked`): the full
+  // address must not appear anywhere in the page. Blank `loginHint` here, so
+  // every use of it below (inputs, subtitle, script) is empty by
+  // construction, whatever the caller passed.
+  const opts = input.flowEmailMasked ? { ...input, loginHint: '' } : input
+  const b = opts.branding
+  const appName = b.client_name || opts.clientName || 'Certified'
+  const brandColor = resolveBrandColor(b.brand_color)
+  const logoHtml = b.logo_uri
+    ? `<img src="${escapeHtml(b.logo_uri)}" alt="${escapeHtml(appName)}" class="client-logo">`
+    : `<img src="/static/certified-brandmark.svg" alt="Certified" class="client-logo">`
+
+  const inputProps = buildOtpInputProps(opts.otpLength, opts.otpCharset)
+  const inputFilter = buildOtpInputFilter(opts.otpCharset)
+
+  const flowEmailMasked = opts.flowEmailMasked || ''
+  const useFlowEmail = flowEmailMasked !== ''
+  const otpSubtitle =
+    opts.initialStep === 'otp' && opts.otpAlreadySent
+      ? `Code already sent to ${escapeHtml(otpSubtitleEmail(opts.loginHint, flowEmailMasked))}`
+      : ''
+
+  // ATProto/Bluesky handle login button.
+  //
+  // Only rendered when the OAuth client declares `epds_handle_login_url` in
+  // its client metadata. The button toggles the email form into handle-entry
+  // mode; submitting a handle navigates the browser to that URL with
+  // `?handle=<value>` appended. The client owns handle-to-PDS resolution
+  // and starts a fresh OAuth flow against whichever PDS the handle resolves
+  // to — auth-service is bound to one PDS and cannot PAR on the client's
+  // behalf, so off-PDS handles only work via this hand-off.
+  //
+  // The URL is validated to be http(s) to prevent a malformed metadata
+  // value from injecting a `javascript:` redirect target into the page.
+  const handleLoginUrl = isSafeHttpUrl(b.epds_handle_login_url)
+    ? (b.epds_handle_login_url as string)
     : ''
+  const handleLoginButtonHtml = handleLoginUrl
+    ? `<button type="button" class="btn-social btn-atproto">Or sign in with ATProto/Bluesky</button>`
+    : ''
+
+  const termsHtml = renderTermsHtml(opts)
+
+  // Social buttons are opt-in per client (see clientSocialProviders).
+  const offeredSocial = clientSocialProviders(b)
+  const startSocialProvider =
+    opts.startSocialProvider && offeredSocial.includes(opts.startSocialProvider)
+      ? opts.startSocialProvider
+      : ''
+
+  // The flash region is a single element shared by both steps, so there
+  // is only ever one live region for assistive tech to track. It is
+  // server-rendered into whichever step is initially visible and moved
+  // between the two slots on step transitions; both transitions call
+  // clearError() first, so it is always empty when it moves.
+  const flashRegionHtml =
+    '<div id="error-msg" class="flash-msg hidden" role="status" aria-live="polite"></div>'
+
+  const socialButtonsHtml = renderSocialButtonsHtml(offeredSocial)
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -842,11 +926,7 @@ export function renderLoginPage(opts: {
 
     <!-- Step 2: OTP entry (calls better-auth verifyOtp) -->
     <div id="step-otp" class="step-otp${opts.initialStep === 'otp' ? ' active' : ''}">
-      <p class="subtitle" id="otp-subtitle">${
-        opts.initialStep === 'otp' && opts.otpAlreadySent
-          ? `Code already sent to ${escapeHtml(opts.loginHint.replace(/(.{2})[^@]*(@.*)/, '$1***$2'))}`
-          : ''
-      }</p>
+      <p class="subtitle" id="otp-subtitle">${otpSubtitle}</p>
       <form id="form-verify-otp">
         <input type="hidden" id="otp-email" name="email" value="${escapeHtml(opts.loginHint)}">
         <input type="hidden" id="code" name="code">
@@ -894,6 +974,13 @@ export function renderLoginPage(opts: {
       var handleLoginUrl = ${toScriptJson(handleLoginUrl)};
       var requestUri = ${toScriptJson('')};  // not needed client-side; flow_id is in cookie
       var currentEmail = '';
+      // True while the server holds this flow's email (handle/DID login_hint)
+      // and the page does not. sendOtp/verifyOtp then send useFlowEmail
+      // instead of an address, and the auth service substitutes the stored
+      // one. Cleared the moment the user supplies an email themselves.
+      var useFlowEmail = ${toScriptJson(useFlowEmail)};
+      var flowEmailMasked = ${toScriptJson(flowEmailMasked)};
+      var FLOW_EMAIL_UNAVAILABLE = ${toScriptJson(FLOW_EMAIL_UNAVAILABLE_CODE)};
       var loginMode = 'email'; // 'email' | 'handle'
       var errorEl = document.getElementById('error-msg');
       var stepEmail = document.getElementById('step-email');
@@ -1465,6 +1552,9 @@ export function renderLoginPage(opts: {
 
       function showOtpStep(email) {
         currentEmail = email;
+        // The user supplied this address themselves, so it, not the
+        // server-held one, is what later resend/verify calls must use.
+        useFlowEmail = false;
         otpEmailInput.value = email;
         var masked = email.replace(/(.{2})[^@]*(@.*)/, '$1***$2');
         otpSubtitle.textContent = 'We sent a ' + otpLength + (otpCharset === 'alphanumeric' ? '-character' : '-digit') + ' code to ' + masked;
@@ -1496,7 +1586,30 @@ export function renderLoginPage(opts: {
         // immediately.
         emailInput.value = '';
         currentEmail = '';
+        // Whatever they type next is theirs; never fall back to the
+        // address the server resolved from the hint.
+        useFlowEmail = false;
         emailInput.focus();
+      }
+
+      /**
+       * The server no longer holds an email for this sign-in (the flow
+       * expired or its cookie is gone), so there is nothing to
+       * substitute. Hand the user the email form with the server's
+       * explanation instead of leaving them on a code step that cannot
+       * work.
+       */
+      function fallBackToEmailStep(message) {
+        showEmailStep();
+        clearOtpBoxes();
+        showError(message);
+      }
+
+      /** Identify the account for an OTP call: an address, or the server-held one. */
+      function identityFields(email) {
+        if (email) return { email: email };
+        if (useFlowEmail) return { useFlowEmail: true };
+        return { email: email };
       }
 
       // Send OTP via better-auth
@@ -1505,11 +1618,14 @@ export function renderLoginPage(opts: {
           var res = await fetch(authBasePath + '/email-otp/send-verification-otp', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: email, type: 'sign-in' }),
+            body: JSON.stringify(Object.assign({ type: 'sign-in' }, identityFields(email))),
           });
           if (!res.ok) {
             var data = await res.json().catch(function() { return {}; });
-            return { error: data.message || data.error || 'Failed to send code' };
+            return {
+              error: data.message || data.error || 'Failed to send code',
+              flowEmailUnavailable: data.code === FLOW_EMAIL_UNAVAILABLE,
+            };
           }
           return { ok: true };
         } catch (err) {
@@ -1523,7 +1639,7 @@ export function renderLoginPage(opts: {
           var res = await fetch(authBasePath + '/sign-in/email-otp', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: email, otp: otp }),
+            body: JSON.stringify(Object.assign({ otp: otp }, identityFields(email))),
           });
           if (!res.ok) {
             var data = await res.json().catch(function() { return {}; });
@@ -1532,7 +1648,11 @@ export function renderLoginPage(opts: {
             // branch on it (see isExpired below), and branching on the
             // rewritten copy would couple control flow to wording, so
             // an innocuous copy edit could silently change behaviour.
-            return { error: otpErrorText(raw), rawError: raw };
+            return {
+              error: otpErrorText(raw),
+              rawError: raw,
+              flowEmailUnavailable: data.code === FLOW_EMAIL_UNAVAILABLE,
+            };
           }
           // Success: redirect to /auth/complete to complete the AT Protocol flow
           window.location.href = '/auth/complete';
@@ -1566,6 +1686,10 @@ export function renderLoginPage(opts: {
         }
 
         var email = raw.toLowerCase();
+        // Same reactive gate as Resend and Verify: a code sent for a dead
+        // flow can never be redeemed, and this form is reachable after the
+        // flow-email fallback, long after the page loaded.
+        if (await abortIfFlowDead()) return;
         var result = await sendOtp(email);
         releaseSignIn();
         btn.disabled = false;
@@ -1606,7 +1730,9 @@ export function renderLoginPage(opts: {
 
         try {
           var result = await verifyOtp(currentEmail, otp);
-          if (result && result.error) {
+          if (result && result.flowEmailUnavailable) {
+            fallBackToEmailStep(result.error);
+          } else if (result && result.error) {
             // Inline a "Send a new code" action when the error
             // indicates the OTP has aged out — too easy to miss the
             // separate Resend button below the form. The substring
@@ -1687,8 +1813,10 @@ export function renderLoginPage(opts: {
             btn.disabled = false;
             btn.textContent = 'Verify';
             // Verify failed (typo, expired OTP, etc.) — the form is
-            // still live, so resume keeping the PAR alive.
-            startHeartbeat();
+            // still live, so resume keeping the PAR alive. After a
+            // fall-back to the email step there is no code form to
+            // keep alive.
+            if (stepOtp.classList.contains('active')) startHeartbeat();
           }
         }
       });
@@ -1708,7 +1836,9 @@ export function renderLoginPage(opts: {
         releaseSignIn();
         this.disabled = false;
         this.textContent = 'Send a new code';
-        if (result.error) {
+        if (result.flowEmailUnavailable) {
+          fallBackToEmailStep(result.error);
+        } else if (result.error) {
           showError(result.error);
         } else {
           // Clear any characters typed for the old code so the new code
@@ -1744,16 +1874,22 @@ export function renderLoginPage(opts: {
       var initialStep = ${toScriptJson(opts.initialStep)};
       var otpAlreadySent = ${toScriptJson(opts.otpAlreadySent)};
 
-      if (initialStep === 'otp' && loginHint) {
+      if (initialStep === 'otp' && (loginHint || useFlowEmail)) {
+        // loginHint is empty in flow-email mode; currentEmail stays empty
+        // and identityFields() sends useFlowEmail instead.
         currentEmail = loginHint;
-        var masked = loginHint.replace(/(.{2})[^@]*(@.*)/, '$1***$2');
+        var masked = useFlowEmail
+          ? flowEmailMasked
+          : loginHint.replace(/(.{2})[^@]*(@.*)/, '$1***$2');
         if (otpBoxes.length) otpBoxes[0].focus();
         if (!otpAlreadySent) {
           // First load — fire the OTP send in the background.
           claimSignIn();
-          sendOtp(loginHint).then(function(result) {
+          sendOtp(currentEmail).then(function(result) {
             releaseSignIn();
-            if (result.error) {
+            if (result.flowEmailUnavailable) {
+              fallBackToEmailStep(result.error);
+            } else if (result.error) {
               showError(result.error);
             } else {
               otpSubtitle.textContent = 'We sent a ' + otpLength + (otpCharset === 'alphanumeric' ? '-character' : '-digit') + ' code to ' + masked;
@@ -1777,11 +1913,13 @@ export function renderLoginPage(opts: {
       // button. No email code was sent; if the hand-off fails, the page
       // stays usable and shows why.
       var startSocialProvider = ${toScriptJson(startSocialProvider)};
-      socialButtons.forEach(function(btn) {
-        if (btn.getAttribute('data-social-provider') === startSocialProvider) {
-          btn.click();
-        }
-      });
+      if (startSocialProvider) {
+        socialButtons.forEach(function(btn) {
+          if (btn.getAttribute('data-social-provider') === startSocialProvider) {
+            btn.click();
+          }
+        });
+      }
     })();
   </script>
 </body>
