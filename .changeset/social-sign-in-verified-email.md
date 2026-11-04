@@ -6,7 +6,7 @@ Signing in with Google now only works with an email address Google can vouch for
 
 **Affects:** End users, Operators
 
-**End users:** If Google cannot confirm that the address is yours (anything other than a Gmail or Google Workspace address), the sign-in page asks you to use a code sent to your email instead. Pressing Cancel at Google returns you to the sign-in page instead of an error page.
+**End users:** If Google cannot confirm that the address is yours (anything other than a Gmail address or one on your organisation's main Google Workspace domain), the sign-in page asks you to use a code sent to your email instead. Pressing Cancel at Google returns you to the sign-in page instead of an error page.
 
 **Operators:**
 

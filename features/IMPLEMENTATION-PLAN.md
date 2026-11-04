@@ -285,7 +285,7 @@ email body.
 
 | Feature file           | Scenarios | Notes                                     |
 | ---------------------- | --------- | ----------------------------------------- |
-| `social-login.feature` | 3         | Tagged `@fake-google`; Google only, faked |
+| `social-login.feature` | 4         | Tagged `@fake-google`; Google only, faked |
 
 Google is faked at both ends rather than driven for real: see
 [`e2e/README.md`](../e2e/README.md#google-sign-in).

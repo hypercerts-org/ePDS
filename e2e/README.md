@@ -186,6 +186,13 @@ unsigned ID token for those claims
 (`packages/auth-service/src/lib/test-google-token.ts`). Everything after
 that, including ePDS's Google claim check, runs as in production.
 
+When the auth service itself redirects to Google (an app starting Google
+with `?epds_social_provider=google`), `page.route` never sees the trip:
+Playwright routes only the first request of a redirect chain. The fake then
+routes the first request (the demo's `/api/oauth/login`) and follows the
+redirects itself, standing in for Google when it gets there
+(`fakeGoogleBehindRedirects` in `step-definitions/social-login.steps.ts`).
+
 The private Atmosphere stack sets both flags, placeholder Google
 credentials, and `E2E_FAKE_GOOGLE=1` on the runner. The demo client lists
 `google` in `epds_social_providers`.

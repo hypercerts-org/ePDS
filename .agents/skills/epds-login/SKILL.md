@@ -305,8 +305,10 @@ What to expect:
   email `login_hint` pre-selects that account; a handle or DID hint is not
   passed to Google, so the account's email address stays private.
 - **Only addresses Google can vouch for.** ePDS accepts Gmail addresses and
-  addresses in a Google Workspace domain. For any other address, ePDS returns
-  the user to its login page and asks them to sign in with an email code.
+  addresses on a Google Workspace organisation's primary domain (the ID
+  token's `hd` claim). For any other address, including one on a Workspace
+  secondary or alias domain, ePDS returns the user to its login page and asks
+  them to sign in with an email code.
 - **Cancel or refusal.** The user returns to the ePDS login page with a
   message, not to your callback, and can continue with an email code. ePDS
   does not start Google again on its own.
@@ -373,7 +375,7 @@ while debugging.
 | New account has no profile              | Profile record has not been created                                          | Use DID as display fallback; resolve handle separately when needed     |
 | OTP never arrives                       | Unknown email, delivery delay, or ePDS mail configuration                    | Verify address and inspect ePDS operator logs without exposing secrets |
 | Google button shows ePDS login page     | `google` missing from `epds_social_providers`, or not configured by operator | Add it to client metadata; ask the operator whether Google is enabled  |
-| Google returns user to email-code page  | Address is not Gmail or in a Google Workspace domain                         | Expected: ePDS only trusts addresses Google is authoritative for       |
+| Google returns user to email-code page  | Address is not Gmail or on the Workspace organisation's primary domain       | Expected: ePDS only trusts addresses Google is authoritative for       |
 
 ## Handles
 
