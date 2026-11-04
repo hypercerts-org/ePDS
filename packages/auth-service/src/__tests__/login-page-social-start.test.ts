@@ -14,6 +14,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { _seedClientMetadataCacheForTest } from '@certified-app/shared'
+import { socialProviders } from '../better-auth.js'
 import {
   startLoginPageApp,
   type LoginPageApp,
@@ -238,6 +239,57 @@ describe('GET /oauth/authorize with epds_social_provider', () => {
       '/api/auth/email-otp/send-verification-otp',
     ])
     expect(mocks.signInSocial).not.toHaveBeenCalled()
+  })
+
+  it('ignores Google when the operator has not configured it', async () => {
+    const configured = { ...socialProviders }
+    delete (socialProviders as Record<string, unknown>).google
+    try {
+      const html = await loginPage(
+        `${withHint('alice@gmail.com')}&epds_social_provider=google`,
+      )
+      expect(html).toContain('var initialStep = "otp";')
+      expect(mocks.signInSocial).not.toHaveBeenCalled()
+    } finally {
+      Object.assign(socialProviders, configured)
+    }
+  })
+
+  it('starts only on the first GET for a flow; a duplicate gets the login page', async () => {
+    const url =
+      `${app.baseUrl}/oauth/authorize?request_uri=urn:ietf:params:oauth:request_uri:dup` +
+      `&client_id=${encodeURIComponent(CLIENT_ID)}` +
+      `&login_hint=alice%40gmail.com&epds_social_provider=google`
+    mocks.resolveLoginHint.mockResolvedValue('alice@gmail.com')
+
+    const first = await fetch(url, { redirect: 'manual' })
+    expect(first.status).toBe(302)
+    const second = await fetch(url, { redirect: 'manual' })
+
+    // A second start would replace the state cookie of the first one,
+    // which is already at Google.
+    expect(second.status).toBe(200)
+    expect(mocks.signInSocial).toHaveBeenCalledTimes(1)
+    expect(second.headers.getSetCookie()).not.toContain(STATE_COOKIE)
+    const html = await second.text()
+    expect(html).toContain('var initialStep = "email";')
+    expect(html).toContain('var initialError = "";')
+    expect(await requestsOnLoad(html)).toEqual([])
+  })
+
+  it.each([
+    ['repeated', 'request_uri=a&request_uri=b'],
+    ['an object', 'request_uri[x]=a'],
+  ])('answers 400 for a request_uri that is %s', async (_label, query) => {
+    const res = await fetch(
+      `${app.baseUrl}/oauth/authorize?${query}` +
+        `&client_id=${encodeURIComponent(CLIENT_ID)}&epds_social_provider=google`,
+      { redirect: 'manual' },
+    )
+    expect(res.status).toBe(400)
+    expect(mocks.signInSocial).not.toHaveBeenCalled()
+    // The service is still up.
+    expect((await authorize('&epds_social_provider=google')).status).toBe(302)
   })
 
   it('ignores Google when the client does not list it', async () => {

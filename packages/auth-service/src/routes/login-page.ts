@@ -249,10 +249,14 @@ export function createLoginPageRouter(
   const router = Router()
 
   router.get('/oauth/authorize', async (req: Request, res: Response) => {
-    const requestUri = req.query.request_uri as string | undefined
+    // Express's qs parser turns a repeated `?request_uri=a&request_uri=b` into
+    // an array and `?login_hint[a]=b` into an object, so a plain `as string`
+    // cast would let non-strings reach the database and `.replace` below.
+    const requestUri =
+      typeof req.query.request_uri === 'string'
+        ? req.query.request_uri
+        : undefined
     const clientId = req.query.client_id as string | undefined
-    // Express's qs parser turns `?login_hint[a]=b` into an object, so a
-    // plain `as string` cast would let non-strings reach `.replace` below.
     const loginHint =
       typeof req.query.login_hint === 'string'
         ? req.query.login_hint
@@ -531,8 +535,14 @@ export function createLoginPageRouter(
     // redirect. The cookies are appended, not set, to keep the auth_flow
     // cookie and any orphan device-cookie clears above. If the start
     // fails, the login page renders below with the reason.
+    //
+    // Only the first GET for a flow starts the sign-in. better-auth keeps
+    // one OAuth state cookie per browser, so a duplicate GET (see the
+    // idempotency note above) starting again would replace the state of the
+    // sign-in already at the provider, and that one would then fail. A
+    // duplicate gets the login page instead, which starts nothing on load.
     let socialStartFailed = false
-    if (startSocialProvider) {
+    if (startSocialProvider && !existingFlow) {
       const start = await startSocialSignIn(
         auth,
         startSocialProvider,
