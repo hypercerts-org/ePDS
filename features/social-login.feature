@@ -38,6 +38,7 @@ Feature: Google sign-in
     And Google's ID token has the "hd" claim "example.com"
     When the user enters their email on the demo client and chooses Google
     Then the demo client is signed in to the same PDS account
+    And the auth service sent the browser straight to Google
     And Google is asked to show its account chooser for that address
     And no email code was sent to that address
 

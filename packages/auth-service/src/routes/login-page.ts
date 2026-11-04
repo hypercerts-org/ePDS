@@ -8,7 +8,9 @@
  *      (?request_uri=...&client_id=...&prompt=...&login_hint=...)
  *   2. Create an auth_flow row (flow_id, request_uri, client_id)
  *   3. Set epds_auth_flow cookie (10 min, httpOnly)
- *   4. Render login page with:
+ *   4. If the client asked to start with a social provider
+ *      (?epds_social_provider=google), redirect straight to it
+ *   5. Otherwise render login page with:
  *      - Email OTP form (submits to better-auth /api/auth/* endpoints)
  *      - Social login buttons (only for configured providers)
  *      - A fixed error message when a social sign-in came back with
@@ -36,6 +38,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { AuthServiceContext } from '../context.js'
+import type { BetterAuthInstance } from '../better-auth.js'
 import {
   resolveClientMetadata,
   resolveClientName,
@@ -51,6 +54,7 @@ import {
   type HandleMode,
 } from '@certified-app/shared'
 import { socialProviders } from '../better-auth.js'
+import { startSocialSignIn } from '../lib/start-social-sign-in.js'
 import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
 import {
   resolveLoginHint,
@@ -235,7 +239,13 @@ function socialProviderId(value: unknown): SocialProviderId | null {
   return SOCIAL_PROVIDER_IDS.find((id) => id === value) ?? null
 }
 
-export function createLoginPageRouter(ctx: AuthServiceContext): Router {
+/** Shown when a social sign-in could not be started. */
+const SOCIAL_START_FAILED = 'Could not start sign-in. Please try again.'
+
+export function createLoginPageRouter(
+  ctx: AuthServiceContext,
+  auth: Pick<BetterAuthInstance, 'api'>,
+): Router {
   const router = Router()
 
   router.get('/oauth/authorize', async (req: Request, res: Response) => {
@@ -313,8 +323,9 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
 
     // A client can start a social sign-in straight away by naming the
     // provider in ?epds_social_provider= (for example from a "Sign in with
-    // Google" button on its own page): the page then hands off to the
-    // provider without sending an email code. It only counts for a
+    // Google" button on its own page): the browser is then redirected to
+    // the provider without seeing this page or being sent an email code
+    // (see below, after the auth_flow is set up). It only counts for a
     // provider this client's page offers (see clientSocialProviders);
     // any other value is ignored. An error return carries the same
     // parameter to name the provider that failed, so it never starts one,
@@ -513,6 +524,32 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
       maxAge: AUTH_FLOW_TTL_MS,
     })
 
+    // A requested social start goes straight to the provider, so nothing
+    // shows before the provider's own page and Back returns to the app.
+    // Only an email the caller supplied goes to Google as its hint: an
+    // address resolved from a handle/DID would be readable in the
+    // redirect. The cookies are appended, not set, to keep the auth_flow
+    // cookie and any orphan device-cookie clears above. If the start
+    // fails, the login page renders below with the reason.
+    let socialStartFailed = false
+    if (startSocialProvider) {
+      const start = await startSocialSignIn(
+        auth,
+        startSocialProvider,
+        prefillEmail,
+      )
+      if (start) {
+        res.append('Set-Cookie', start.cookies)
+        logger.info(
+          { flowId, clientId, provider: startSocialProvider },
+          'Starting social sign-in: redirecting to the provider',
+        )
+        res.redirect(302, start.url)
+        return
+      }
+      socialStartFailed = true
+    }
+
     const clientName =
       clientMeta.client_name ??
       (effectiveClientId
@@ -561,9 +598,8 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     // and the email step falls out without a special case here. A social
     // sign-in error return skips the PAR hint the same way (see above).
     //
-    // A social start (see startSocialProvider) renders the email step and
-    // sends no code; a hinted email address goes to the provider as its
-    // login hint instead.
+    // A social start that failed renders the email step with the reason
+    // and sends no code: the user asked for the provider, not a code.
     const hasLoginHint = !!resolvedEmail
     const initialStep = hasLoginHint && !startSocialProvider ? 'otp' : 'email'
 
@@ -580,7 +616,7 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
         reused: !!existingFlow,
         initialStep,
         otpAlreadySent,
-        startSocialProvider,
+        socialStartFailed,
       },
       'Serving login page for auth_flow',
     )
@@ -607,11 +643,12 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
         otpLength: ctx.config.otpLength,
         otpCharset: ctx.config.otpCharset,
         heartbeatEnabled: heartbeatEnabledFor(req),
-        startSocialProvider,
-        initialError: socialSignInErrorMessage(
-          req.query[SOCIAL_ERROR_PARAM],
-          req.query[SOCIAL_PROVIDER_PARAM],
-        ),
+        initialError: socialStartFailed
+          ? SOCIAL_START_FAILED
+          : socialSignInErrorMessage(
+              req.query[SOCIAL_ERROR_PARAM],
+              req.query[SOCIAL_PROVIDER_PARAM],
+            ),
       }),
     )
   })
@@ -724,13 +761,9 @@ export function renderLoginPage(input: {
    */
   heartbeatEnabled: boolean
   /**
-   * A social provider to start on load, as if its button were pressed.
-   * Only ever one this client's page offers (see clientSocialProviders).
-   */
-  startSocialProvider?: SocialProviderId | null
-  /**
-   * Error shown in the flash region on load. Only ever one of the fixed
-   * messages from socialSignInErrorMessage(), never request text.
+   * Error shown in the flash region on load. Only ever a fixed message
+   * (socialSignInErrorMessage() or SOCIAL_START_FAILED), never request
+   * text.
    */
   initialError?: string | null
 }): string {
@@ -779,10 +812,6 @@ export function renderLoginPage(input: {
 
   // Social buttons are opt-in per client (see clientSocialProviders).
   const offeredSocial = clientSocialProviders(b)
-  const startSocialProvider =
-    opts.startSocialProvider && offeredSocial.includes(opts.startSocialProvider)
-      ? opts.startSocialProvider
-      : ''
 
   // The flash region is a single element shared by both steps, so there
   // is only ever one live region for assistive tech to track. It is
@@ -1527,7 +1556,7 @@ export function renderLoginPage(input: {
             console.debug('Social sign-in could not start', err);
           }
           releaseSignIn();
-          showError('Could not start sign-in. Please try again.');
+          showError(${toScriptJson(SOCIAL_START_FAILED)});
         });
       });
 
@@ -1888,19 +1917,6 @@ export function renderLoginPage(input: {
       // a fixed message chosen server-side (see /auth/complete).
       var initialError = ${toScriptJson(opts.initialError ?? '')};
       if (initialError) showError(initialError);
-
-      // The client asked to start with a social provider (see
-      // ?epds_social_provider=): hand off as if the user had pressed its
-      // button. No email code was sent; if the hand-off fails, the page
-      // stays usable and shows why.
-      var startSocialProvider = ${toScriptJson(startSocialProvider)};
-      if (startSocialProvider) {
-        socialButtons.forEach(function(btn) {
-          if (btn.getAttribute('data-social-provider') === startSocialProvider) {
-            btn.click();
-          }
-        });
-      }
     })();
   </script>
 </body>

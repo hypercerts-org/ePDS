@@ -120,7 +120,7 @@ export function createAuthService(config: AuthServiceConfig): {
 
   // Routes
   app.use(createRootRouter())
-  app.use(createLoginPageRouter(ctx))
+  app.use(createLoginPageRouter(ctx, betterAuthInstance))
   app.use(createRecoveryRouter(ctx, betterAuthInstance))
   app.use(createAccountLoginRouter(betterAuthInstance, ctx))
   app.use(createAccountSettingsRouter(ctx, betterAuthInstance))

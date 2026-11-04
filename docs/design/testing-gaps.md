@@ -16,7 +16,7 @@ pds-core callback, full OAuth flow).
 | `auth-service/middleware/`    | ~91%     | `rate-limit.ts` timer cleanup at 82%                                   |
 | `auth-service/email/`         | ~71%     | Template conditional branches partially covered                        |
 | `auth-service/routes/`        | ~35%     | Resend webhook is HTTP-tested; browser/OAuth routes remain gaps        |
-| `auth-service/better-auth.ts` | ~85%     | `createBetterAuth` wiring covered through the HTTP router — see below  |
+| `auth-service/better-auth.ts` | ~88%     | `createBetterAuth` wiring covered through the HTTP router — see below  |
 | `auth-service/context.ts`     | 0%       | Minimal glue class                                                     |
 | `auth-service/index.ts`       | 0%       | Express app assembly + `main()`                                        |
 | `demo/lib/auth.ts`            | ~51%     | Network-dependent resolution functions                                 |
@@ -107,7 +107,7 @@ this area's main gap: `login-page.ts`, `consent.ts`, `recovery.ts`, `account-log
 - Alternatively, cover them via e2e tests (Playwright or similar) that
   exercise the full stack.
 
-### 3. `auth-service/src/better-auth.ts` (~85%)
+### 3. `auth-service/src/better-auth.ts` (~88%)
 
 **Why it's hard:**
 
@@ -135,6 +135,9 @@ this area's main gap: `login-page.ts`, `consent.ts`, `recovery.ts`, `account-log
   captured from a stub `EmailSender`. It drives both the Google redirect
   flow and a real email-code sign-in, so dropping the user-creation guard
   or the Google claim mapper from the production instance fails it.
+  It also starts a Google sign-in the way `GET /oauth/authorize` does for
+  `?epds_social_provider=google` (`lib/start-social-sign-in.ts`), and
+  checks the state cookie it returns completes the callback.
 - `createBetterAuth()` can also be driven through `toNodeHandler` on an
   ephemeral Express server against a temp SQLite file migrated with
   `runBetterAuthMigrations()`, with a fake `EmailSender` and a mocked

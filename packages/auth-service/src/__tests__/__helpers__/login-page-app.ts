@@ -2,7 +2,8 @@
  * The login page router (GET /oauth/authorize) on an ephemeral 127.0.0.1
  * port, backed by a temporary SQLite file, for route-level tests. The
  * client metadata for https://app.example.com is seeded so rendering makes
- * no outbound fetch.
+ * no outbound fetch. better-auth is a stand-in: tests that start a social
+ * sign-in pass their own.
  */
 import { randomBytes } from 'node:crypto'
 import * as fs from 'node:fs'
@@ -12,6 +13,7 @@ import * as path from 'node:path'
 import cookieParser from 'cookie-parser'
 import express from 'express'
 import { _seedClientMetadataCacheForTest } from '@certified-app/shared'
+import type { BetterAuthInstance } from '../../better-auth.js'
 import { AuthServiceContext, type AuthServiceConfig } from '../../context.js'
 import { csrfProtection } from '../../middleware/csrf.js'
 import { createLoginPageRouter } from '../../routes/login-page.js'
@@ -46,8 +48,21 @@ export interface LoginPageApp {
   close: () => Promise<void>
 }
 
+/** The part of better-auth the login page router uses. */
+export type LoginPageAuth = Pick<BetterAuthInstance, 'api'>
+
+/** A better-auth stand-in for tests that never start a social sign-in. */
+const NO_SOCIAL_START = {
+  api: {
+    signInSocial: () => {
+      throw new Error('unexpected social sign-in start')
+    },
+  },
+} as unknown as LoginPageAuth
+
 export async function startLoginPageApp(
   dbPrefix: string,
+  auth: LoginPageAuth = NO_SOCIAL_START,
 ): Promise<LoginPageApp> {
   const dbPath = path.join(
     os.tmpdir(),
@@ -66,7 +81,7 @@ export async function startLoginPageApp(
   app.disable('x-powered-by')
   app.use(cookieParser())
   app.use(csrfProtection())
-  app.use(createLoginPageRouter(ctx))
+  app.use(createLoginPageRouter(ctx, auth))
   const server = app.listen(0)
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)

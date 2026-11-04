@@ -220,35 +220,6 @@ describe('renderLoginPage social sign-in buttons', () => {
   })
 })
 
-describe('renderLoginPage social start', () => {
-  it('presses the requested provider button on load', async () => {
-    const { fetchSpy } = runPage(
-      () => jsonResponse(200, { url: GOOGLE_URL }),
-      render({ startSocialProvider: 'google' }),
-    )
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(fetchSpy).toHaveBeenCalledTimes(1)
-    expect(JSON.parse(fetchSpy.mock.calls[0][1].body as string)).toMatchObject({
-      provider: 'google',
-    })
-  })
-
-  it('starts nothing for a provider the client does not offer', () => {
-    const html = render({
-      branding: { epds_social_providers: [] },
-      startSocialProvider: 'google',
-    })
-    expect(html).toContain('var startSocialProvider = "";')
-    const { fetchSpy } = runPage(() => jsonResponse(200, {}), html)
-    expect(fetchSpy).not.toHaveBeenCalled()
-  })
-
-  it('starts nothing by default', () => {
-    const { fetchSpy } = runPage(() => jsonResponse(200, {}))
-    expect(fetchSpy).not.toHaveBeenCalled()
-  })
-})
-
 describe('renderLoginPage social sign-in opt-in', () => {
   it('renders no social buttons when the client does not ask for any', () => {
     const html = render({ branding: {} })

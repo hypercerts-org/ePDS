@@ -4,7 +4,9 @@
  * Google is faked at both ends. The browser's navigation to
  * accounts.google.com is intercepted and redirected straight back to the
  * auth service's /api/auth/callback/google, carrying the scenario's chosen
- * ID token claims as the authorization code (or a cancel). The auth
+ * ID token claims as the authorization code (or a cancel). When the auth
+ * service itself redirects to Google, the trip is intercepted at the start
+ * of the redirect chain instead (see fakeGoogleBehindRedirects). The auth
  * service, started with EPDS_TEST_FAKE_GOOGLE=1, answers its token request
  * with an ID token for those claims (packages/auth-service/src/lib/
  * test-google-token.ts). Everything between the two runs as in production.
@@ -43,31 +45,82 @@ function verifiedGoogleAccount(email: string): Record<string, unknown> {
   return { sub: uniqueId('google'), email, email_verified: true }
 }
 
+type GoogleOutcome = { claims: Record<string, unknown> } | 'cancel'
+
 /**
- * Answer the browser's trip to Google: send it back to the redirect_uri
- * Google was given, with the state, and either an authorization code that
- * carries `claims` or the error Google returns when the user cancels. The
- * URL Google was sent is kept on the world.
+ * Google's answer to a request for `googleUrl`: the redirect_uri it was
+ * given, with the state, and either an authorization code that carries
+ * `claims` or the error Google returns when the user cancels. The URL
+ * Google was sent is kept on the world.
  */
+function googleAnswer(
+  world: EpdsWorld,
+  googleUrl: URL,
+  outcome: GoogleOutcome,
+): string {
+  world.googleAuthorizeUrl = googleUrl
+  const back = new URL(googleUrl.searchParams.get('redirect_uri') ?? '')
+  back.searchParams.set('state', googleUrl.searchParams.get('state') ?? '')
+  if (outcome === 'cancel') {
+    back.searchParams.set('error', 'access_denied')
+  } else {
+    back.searchParams.set(
+      'code',
+      Buffer.from(JSON.stringify(outcome.claims)).toString('base64url'),
+    )
+  }
+  return back.href
+}
+
+/** Answer the browser's own navigations to Google (see googleAnswer). */
 async function fakeGoogle(
   world: EpdsWorld,
   page: Page,
-  outcome: { claims: Record<string, unknown> } | 'cancel',
+  outcome: GoogleOutcome,
 ): Promise<void> {
   await page.route('https://accounts.google.com/**', async (route) => {
-    const request = new URL(route.request().url())
-    world.googleAuthorizeUrl = request
-    const back = new URL(request.searchParams.get('redirect_uri') ?? '')
-    back.searchParams.set('state', request.searchParams.get('state') ?? '')
-    if (outcome === 'cancel') {
-      back.searchParams.set('error', 'access_denied')
-    } else {
-      back.searchParams.set(
-        'code',
-        Buffer.from(JSON.stringify(outcome.claims)).toString('base64url'),
-      )
+    const location = googleAnswer(
+      world,
+      new URL(route.request().url()),
+      outcome,
+    )
+    await route.fulfill({ status: 302, headers: { location } })
+  })
+}
+
+/**
+ * Answer a trip to Google that the browser makes only by following
+ * redirects from a request to `firstHop`. Playwright routes just the first
+ * request of a redirect chain, so this route follows the chain itself and
+ * stands in for Google when it gets there. page.request shares the
+ * browser's cookies, so each hop's cookies are kept as the browser would
+ * keep them. The URL that redirected to Google is kept on the world.
+ */
+async function fakeGoogleBehindRedirects(
+  world: EpdsWorld,
+  page: Page,
+  firstHop: (url: URL) => boolean,
+  outcome: GoogleOutcome,
+): Promise<void> {
+  await page.route(firstHop, async (route) => {
+    let response = await route.fetch({ maxRedirects: 0 })
+    let at = new URL(route.request().url())
+    for (let hops = 0; hops < 10; hops++) {
+      const location = response.headers()['location']
+      if (!location) break
+      const next = new URL(location, at)
+      if (next.origin === 'https://accounts.google.com') {
+        world.googleRedirectedFrom = at
+        await route.fulfill({
+          status: 302,
+          headers: { location: googleAnswer(world, next, outcome) },
+        })
+        return
+      }
+      response = await page.request.get(next.href, { maxRedirects: 0 })
+      at = next
     }
-    await route.fulfill({ status: 302, headers: { location: back.href } })
+    await route.fulfill({ response })
   })
 }
 
@@ -77,7 +130,7 @@ async function fakeGoogle(
  */
 async function signInWithGoogle(
   world: EpdsWorld,
-  outcome: { claims: Record<string, unknown> } | 'cancel',
+  outcome: GoogleOutcome,
 ): Promise<void> {
   const page = getPage(world)
   await fakeGoogle(world, page, outcome)
@@ -166,7 +219,14 @@ When(
     const email = testEmail(this)
     await clearMailpit(email)
     const page = getPage(this)
-    await fakeGoogle(this, page, { claims: this.googleClaims })
+    await fakeGoogleBehindRedirects(
+      this,
+      page,
+      (url) =>
+        url.origin === new URL(demoBaseUrl).origin &&
+        url.pathname === '/api/oauth/login',
+      { claims: this.googleClaims },
+    )
     await page.goto(testEnv.demoUrl)
     await page.fill('#email', email)
     await page.getByRole('button', { name: 'Sign in with Google' }).click()
@@ -201,6 +261,17 @@ Then(
     if (!url) throw new Error('The browser was never sent to Google')
     expect(url.searchParams.get('prompt')).toBe('select_account')
     expect(url.searchParams.get('login_hint')).toBe(testEmail(this))
+  },
+)
+
+Then(
+  'the auth service sent the browser straight to Google',
+  function (this: EpdsWorld) {
+    const from = this.googleRedirectedFrom
+    if (!from) throw new Error('No redirect to Google was seen')
+    expect(from.origin).toBe(new URL(testEnv.authUrl).origin)
+    expect(from.pathname).toBe('/oauth/authorize')
+    expect(from.searchParams.get('epds_social_provider')).toBe('google')
   },
 )
 

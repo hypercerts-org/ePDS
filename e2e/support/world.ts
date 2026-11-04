@@ -93,6 +93,8 @@ export class EpdsWorld extends World {
   googleClaims?: Record<string, unknown>
   /** The authorization URL the browser was sent to Google with. */
   googleAuthorizeUrl?: URL
+  /** The URL that redirected the browser to Google, when the server did. */
+  googleRedirectedFrom?: URL
 
   /** Console-capture stream for the current scenario. Set by hooks on
    *  scenario start, re-attached after resetBrowserContext. */

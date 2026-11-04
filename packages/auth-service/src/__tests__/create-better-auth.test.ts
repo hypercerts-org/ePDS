@@ -14,7 +14,12 @@ import type { EpdsDb } from '@certified-app/shared'
 import { createBetterAuth, refuseUnverifiedUser } from '../better-auth.js'
 import type { EmailSender } from '../email/sender.js'
 import { mapGoogleProfileToUser } from '../lib/google-email-verified.js'
-import { signInWithGoogleRedirect } from './__helpers__/google-sign-in.js'
+import { startSocialSignIn } from '../lib/start-social-sign-in.js'
+import {
+  googleCallback,
+  signInWithGoogleRedirect,
+  stubGoogleToken,
+} from './__helpers__/google-sign-in.js'
 
 vi.mock('../lib/get-did-by-email.js', () => ({
   getDidByEmail: vi.fn(() => Promise.resolve(null)),
@@ -143,5 +148,59 @@ describe('a Google user who also uses email codes (createBetterAuth)', () => {
     ).toEqual([session.token])
     const user = await storedUser(auth, 'alice@gmail.com')
     expect(user?.accounts.map((a) => a.providerId)).toEqual(['google'])
+  })
+})
+
+describe('a Google sign-in started on the server (createBetterAuth)', () => {
+  // GET /oauth/authorize?epds_social_provider=google redirects with what
+  // startSocialSignIn returns; the browser then carries the state cookie
+  // to Google's callback. This is the better-auth upgrade canary for that
+  // server-side call.
+  async function start(auth: Auth, loginHint = '') {
+    const started = await startSocialSignIn(auth, 'google', loginHint)
+    if (!started) throw new Error('the sign-in did not start')
+    const url = new URL(started.url)
+    const cookie = started.cookies.map((c) => c.split(';')[0]).join('; ')
+    return { url, cookie, state: url.searchParams.get('state') ?? '' }
+  }
+
+  it('returns Google’s URL with the account chooser and login hint', async () => {
+    const { url, cookie, state } = await start(
+      await makeAuth(),
+      'alice@gmail.com',
+    )
+    expect(url.origin).toBe('https://accounts.google.com')
+    expect(url.searchParams.get('prompt')).toBe('select_account')
+    expect(url.searchParams.get('login_hint')).toBe('alice@gmail.com')
+    expect(state).not.toBe('')
+    expect(cookie).toMatch(/better-auth\.state=/)
+  })
+
+  it('completes at the callback with the state cookie it set', async () => {
+    const auth = await makeAuth()
+    const { cookie, state } = await start(auth)
+    stubGoogleToken({ email: 'alice@gmail.com', email_verified: true })
+    expect(await googleCallback(auth, `code=c&state=${state}`, cookie)).toBe(
+      '/auth/complete',
+    )
+    expect(await storedUser(auth, 'alice@gmail.com')).not.toBeNull()
+  })
+
+  it('is refused at the callback without that cookie', async () => {
+    const auth = await makeAuth()
+    const { state } = await start(auth)
+    stubGoogleToken({ email: 'alice@gmail.com', email_verified: true })
+    expect(await googleCallback(auth, `code=c&state=${state}`, '')).toMatch(
+      /error=state_mismatch/,
+    )
+    expect(await storedUser(auth, 'alice@gmail.com')).toBeNull()
+  })
+
+  it('sends a cancel back to the login page naming Google', async () => {
+    const auth = await makeAuth()
+    const { cookie, state } = await start(auth)
+    expect(
+      await googleCallback(auth, `error=access_denied&state=${state}`, cookie),
+    ).toBe('/auth/complete?epds_social_provider=google&error=access_denied')
   })
 })

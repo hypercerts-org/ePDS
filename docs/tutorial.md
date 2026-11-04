@@ -402,12 +402,15 @@ rendered.
 
 To put a "Sign in with Google" button on your own page instead, start the
 OAuth flow as usual and add `epds_social_provider=google` to the
-`/oauth/authorize` URL you redirect to. The login page then goes straight
-to Google without sending an email code; a `login_hint` email address on
-the same request becomes Google's login hint. The parameter is ignored for
-a provider your client does not list in `epds_social_providers`, and a
-cancelled or refused Google sign-in returns to the login page without
-starting Google again. The demo app's "Sign in with Google" button
+`/oauth/authorize` URL you redirect to. ePDS then redirects the browser
+straight to Google, without showing its login page or sending an email
+code. A `login_hint` email address on the same request becomes Google's
+login hint; a handle or DID hint does not, so the account's email address
+stays private. The parameter is ignored unless your client lists `google`
+in `epds_social_providers`. A cancelled or refused Google sign-in returns
+to the login page with a message and does not start Google again, and if
+Google sign-in cannot be started the login page shows an error instead.
+The demo app's "Sign in with Google" button
 (`packages/demo/src/app/components/LoginForm.tsx`) does this.
 
 #### Optional: custom CSS and favicon for ePDS pages (trusted clients)
