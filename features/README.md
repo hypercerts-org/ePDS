@@ -73,7 +73,7 @@ Each `.feature` file covers one major feature area:
 | ------------------------------------- | ---------------------------------------- |
 | `passwordless-authentication.feature` | Email OTP login flows                    |
 | `automatic-account-creation.feature`  | Auto-provisioning on first login         |
-| `social-login.feature`                | Google / GitHub OAuth login              |
+| `social-login.feature`                | Google sign-in                           |
 | `consent-screen.feature`              | First-time client consent                |
 | `account-recovery.feature`            | Recovery via backup emails               |
 | `account-settings.feature`            | Self-service account management          |

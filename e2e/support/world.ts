@@ -88,6 +88,14 @@ export class EpdsWorld extends World {
    *  Used by atproto-login-button scenarios. */
   handleLoginRedirectUrl?: string
 
+  /** ID token claims the faked Google returns for the next Google sign-in.
+   *  Set by social-login steps. */
+  googleClaims?: Record<string, unknown>
+  /** The authorization URL the browser was sent to Google with. */
+  googleAuthorizeUrl?: URL
+  /** The URL that redirected the browser to Google, when the server did. */
+  googleRedirectedFrom?: URL
+
   /** Console-capture stream for the current scenario. Set by hooks on
    *  scenario start, re-attached after resetBrowserContext. */
   consoleCapture?: NodeJS.WritableStream

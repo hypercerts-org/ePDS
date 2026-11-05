@@ -33,4 +33,17 @@ url.searchParams.set('prompt', 'login')
 Email `login_hint` belongs only on the returned browser authorization URL,
 never in the PAR body.
 
+For a "Sign in with Google" button on your own page, when your client metadata
+lists `"epds_social_providers": ["google"]` and the operator has configured
+Google:
+
+```typescript
+const url = await client.authorize(epdsUrl)
+url.searchParams.set('epds_social_provider', 'google')
+url.searchParams.set('login_hint', email) // optional: pre-selects the account
+```
+
+ePDS redirects straight to Google and sends no email code. The user comes back
+through the same callback as every other flow.
+
 See [`../SKILL.md`](../SKILL.md) for maintained flow and callback guidance.

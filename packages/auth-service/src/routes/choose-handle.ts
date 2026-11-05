@@ -37,6 +37,7 @@ import {
   POWERED_BY_CSS,
   POWERED_BY_HTML,
 } from '../lib/page-helpers.js'
+import { hasVerifiedEmail } from '../lib/verified-email.js'
 
 const logger = createLogger('auth:choose-handle')
 
@@ -147,6 +148,19 @@ export function createChooseHandleRouter(
       return null
     }
 
+    // Guard 4: verified email. /auth/complete refuses an unverified
+    // session before it ever sends a new user here; this keeps a direct
+    // request from creating an account with it. Bounce to /auth/complete
+    // so the refusal and its message live in one place.
+    if (!hasVerifiedEmail(session.user)) {
+      logger.warn(
+        { flowId },
+        'Unverified session on choose-handle — redirecting to /auth/complete',
+      )
+      res.redirect(303, '/auth/complete')
+      return null
+    }
+
     // Carried alongside the email so the signed callback can state
     // whether this sign-in actually proved control of that address.
     // better-auth sets emailVerified when the emailed one-time code is
@@ -155,7 +169,7 @@ export function createChooseHandleRouter(
       flowId,
       flow,
       email: session.user.email.toLowerCase(),
-      emailVerified: session.user.emailVerified === true,
+      emailVerified: hasVerifiedEmail(session.user),
     }
   }
 
