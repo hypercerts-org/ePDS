@@ -329,3 +329,63 @@ Then(
     await assertNoEmailFor(this.backupEmail)
   },
 )
+
+Then(
+  "the recovery link points at the active OAuth flow's request_uri",
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    const flowUrl = new URL(page.url())
+    const expectedRequestUri = flowUrl.searchParams.get('request_uri')
+    if (!expectedRequestUri) {
+      throw new Error(`Current page has no request_uri: ${page.url()}`)
+    }
+    const recoveryHref = await page
+      .locator('#recovery-link')
+      .getAttribute('href')
+    if (!recoveryHref) throw new Error('Recovery link not found on page')
+    const linkRequestUri = new URL(
+      recoveryHref,
+      flowUrl.origin,
+    ).searchParams.get('request_uri')
+    if (linkRequestUri !== expectedRequestUri) {
+      throw new Error(
+        `Recovery link request_uri mismatch:\n  expected: ${expectedRequestUri}\n  got:      ${linkRequestUri}`,
+      )
+    }
+    this.lastRequestUri = expectedRequestUri
+  },
+)
+
+When(
+  'the user follows the recovery link and then returns to sign in',
+  async function (this: EpdsWorld) {
+    const page = getPage(this)
+    await page.locator('#recovery-link').click()
+    await expect(page).toHaveURL(/\/auth\/recover\?request_uri=/)
+    await expect(
+      page.getByRole('link', { name: 'Back to sign in' }),
+    ).toBeVisible()
+    await page.getByRole('link', { name: 'Back to sign in' }).click()
+  },
+)
+
+Then(
+  "the original OAuth flow's sign-in page is restored",
+  async function (this: EpdsWorld) {
+    if (!this.lastRequestUri) {
+      throw new Error('No original request_uri was captured')
+    }
+    const page = getPage(this)
+    await expect(page).toHaveURL(/\/oauth\/authorize\?/)
+    const returnedRequestUri = new URL(page.url()).searchParams.get(
+      'request_uri',
+    )
+    expect(returnedRequestUri).toBe(this.lastRequestUri)
+    // PAR hint lookup is not guaranteed to be repeatable, so the returning
+    // page may show either the email or OTP step. The round-trip contract is
+    // that the original live request is restored instead of an OAuth error.
+    await expect(
+      page.locator('#form-send-otp:visible, #form-verify-otp:visible'),
+    ).toHaveCount(1)
+  },
+)

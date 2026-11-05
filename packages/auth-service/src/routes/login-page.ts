@@ -648,6 +648,7 @@ export function createLoginPageRouter(
         flowEmailMasked: flowEmail ? maskEmail(flowEmail) : null,
         initialStep,
         otpAlreadySent,
+        requestUri,
         csrfToken: res.locals.csrfToken,
         authBasePath: '/api/auth',
         pdsPublicUrl: ctx.config.pdsPublicUrl,
@@ -758,6 +759,14 @@ export function renderLoginPage(input: {
   flowEmailMasked?: string | null
   initialStep: 'email' | 'otp'
   otpAlreadySent: boolean
+  /**
+   * The actual PAR request_uri that started this flow. Forwarded to
+   * the recovery link's query string so the recovery page can
+   * round-trip the user back to their original /oauth/authorize on
+   * "Back to sign in". Previously the link used a placeholder URL,
+   * which silently broke the back-to-sign-in path after recovery.
+   */
+  requestUri: string
   csrfToken: string
   authBasePath: string
   pdsPublicUrl: string
@@ -979,7 +988,7 @@ export function renderLoginPage(input: {
         <button type="button" class="btn-secondary" id="btn-resend">Send a new code</button>
         <button type="button" class="btn-secondary" id="btn-back">Use different email</button>
       </div>
-      <a href="/auth/recover?request_uri=${encodeURIComponent(opts.pdsPublicUrl + '/placeholder')}"
+      <a href="/auth/recover?request_uri=${encodeURIComponent(opts.requestUri)}"
          class="recovery-link" id="recovery-link">Recover with backup email</a>
     </div>
     </div>
