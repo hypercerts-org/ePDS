@@ -386,6 +386,7 @@ Feature: Passwordless authentication via email OTP
   # programmatically clearing the demo's `oauth_state` cookie just
   # before the OTP submission, which is equivalent to the cookie
   # having lapsed by wall-clock.
+
   # The "Use different email" button on the OTP step takes the user
   # back to the email-entry form so they can sign in with a different
   # address. The form must be EMPTY when they get there — leaving the
@@ -402,6 +403,38 @@ Feature: Passwordless authentication via email OTP
     Then the login page shows an OTP verification form
     When the user clicks "Use different email"
     Then the email input is empty and focused
+
+  # better-auth allows five wrong attempts on one code. The sixth
+  # submit returns "Too many attempts" and deletes the verification
+  # row, so the only useful next action is requesting a fresh code.
+  # The banner asserts the rewritten end-user copy from otpErrorText(),
+  # not better-auth's raw developer string, because that mapped wording
+  # is what the user actually reads.
+  @email @too-many-attempts
+  Scenario: "Too many attempts" surfaces a Send-a-new-code action
+    When the demo client initiates an OAuth login
+    Then the browser is redirected to the auth service login page
+    And the login page displays an email input form
+    When the user enters a unique test email and submits
+    Then the login page shows an OTP verification form
+    When the user submits enough wrong OTPs to trigger the lockout
+    Then the verification form shows a "Too many tries — that code is no longer usable." error
+    And a "Send a new code" inline action is offered
+
+  # Once lockout deletes the verification row, later submissions return
+  # the generic "Invalid OTP" response. Retyping cannot recover that
+  # state, so the inline action must still be offered on the follow-up
+  # submit rather than stranding the user on a bare error.
+  @email @too-many-attempts
+  Scenario: After the lockout, further submits still surface a Send-a-new-code action
+    When the demo client initiates an OAuth login
+    Then the browser is redirected to the auth service login page
+    And the login page displays an email input form
+    When the user enters a unique test email and submits
+    Then the login page shows an OTP verification form
+    When the user submits enough wrong OTPs to trigger the lockout
+    And the user submits one more wrong OTP after the lockout
+    Then a "Send a new code" inline action is offered
 
   @email @demo-cookie-expiry @bug-report
   Scenario: Demo client's OAuth cookie has expired by the time of callback — useful error, not generic auth_failed
