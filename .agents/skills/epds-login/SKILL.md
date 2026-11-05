@@ -174,7 +174,9 @@ export async function beginLogin(input?: {
 
   // "Sign in with Google" on your own page: ePDS redirects straight to
   // Google, with the email (if any) as Google's login hint. See Google
-  // Sign-In below for what the client metadata must declare.
+  // Sign-In below for what the client metadata must declare. Only an ePDS
+  // with Google enabled acts on this; if `identifier` resolves to any other
+  // PDS, Google is not started there.
   if (input?.google) {
     authorizationUrl.searchParams.set('epds_social_provider', 'google')
   }

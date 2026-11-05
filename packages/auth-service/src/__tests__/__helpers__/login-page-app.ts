@@ -82,7 +82,7 @@ export async function startLoginPageApp(
   app.use(cookieParser())
   app.use(csrfProtection())
   app.use(createLoginPageRouter(ctx, auth))
-  const server = app.listen(0)
+  const server = app.listen(0, '127.0.0.1')
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     server.once('listening', () => {

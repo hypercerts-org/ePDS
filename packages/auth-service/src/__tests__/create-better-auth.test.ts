@@ -186,12 +186,12 @@ describe('a Google sign-in started on the server (createBetterAuth)', () => {
     expect(await storedUser(auth, 'alice@gmail.com')).not.toBeNull()
   })
 
-  it('is refused at the callback without that cookie', async () => {
+  it('is refused at the callback without that cookie, back to /auth/complete', async () => {
     const auth = await makeAuth()
     const { state } = await start(auth)
     stubGoogleToken({ email: 'alice@gmail.com', email_verified: true })
-    expect(await googleCallback(auth, `code=c&state=${state}`, '')).toMatch(
-      /error=state_mismatch/,
+    expect(await googleCallback(auth, `code=c&state=${state}`, '')).toBe(
+      '/auth/complete?error=state_mismatch',
     )
     expect(await storedUser(auth, 'alice@gmail.com')).toBeNull()
   })

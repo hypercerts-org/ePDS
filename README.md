@@ -24,7 +24,7 @@ provisioned for them.
 
 1. Click "Login" (or enter their email) in your app
 2. Receive a one-time code by email (or sign in with Google)
-3. Enter the code — done. They're logged in.
+3. Enter the code (Google users skip this step) — done. They're logged in.
 
 No passwords. No invite codes to distribute. No AT Protocol knowledge required.
 New users get an account created automatically on their first login.

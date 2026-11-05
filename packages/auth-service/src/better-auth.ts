@@ -320,6 +320,13 @@ export function createBetterAuth(
     baseURL: `https://${authHostname}`,
     basePath: '/api/auth',
 
+    // A social callback whose state cookie is missing or mismatched cannot
+    // read the errorCallbackURL stored in that state, so better-auth falls
+    // back to this URL (with ?error=state_mismatch). Without it the browser
+    // lands on better-auth's bare /api/auth/error page; /auth/complete
+    // instead returns it to the login page with a message.
+    onAPIError: { errorURL: '/auth/complete' },
+
     // Surface OTP verification failures ("OTP expired" vs "Invalid OTP" vs
     // "Too many attempts") in our pino logs, with the user's email attached.
     //
