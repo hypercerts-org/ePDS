@@ -79,6 +79,11 @@ services:
       EMAIL_PROVIDER: smtp
       EPDS_DISABLE_RATE_LIMIT: 'true'
       EPDS_TEST_HOOKS: '1'
+      # Google sign-in with a faked Google (lib/test-google-token.ts); the
+      # client ID and secret are placeholders Google never sees.
+      EPDS_TEST_FAKE_GOOGLE: '1'
+      GOOGLE_CLIENT_ID: e2e-google-client
+      GOOGLE_CLIENT_SECRET: e2e-google-secret
       AUTH_PREVIEW_ROUTES: '1'
       EPDS_ALLOW_PRIVATE_IPS: 'true'
       NODE_ENV: development
@@ -186,6 +191,8 @@ services:
       E2E_MAILPIT_USER: e2e
       E2E_MAILPIT_PASS: e2e
       E2E_PLC_URL: https://plc.${SANDBOX_DOMAIN}
+      # epds-auth fakes Google, so the @fake-google scenarios can run.
+      E2E_FAKE_GOOGLE: '1'
       E2E_HEADLESS: 'true'
       NODE_EXTRA_CA_CERTS: /ca/root.crt
       NODE_ENV: development

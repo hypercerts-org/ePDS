@@ -26,6 +26,10 @@
 // environments that provide a second demo — reflect that in the tag
 // expression by excluding the tag when E2E_DEMO_UNTRUSTED_URL is unset.
 //
+// Scenarios tagged @fake-google sign in with a faked Google, which needs an
+// auth service started with EPDS_TEST_FAKE_GOOGLE=1 (lib/test-google-token.ts)
+// and Google configured; set E2E_FAKE_GOOGLE=1 where that is the case.
+//
 // Scenarios tagged @otp-expiry or @par-callback-error call /_internal/test/*
 // hooks, which require EPDS_TEST_HOOKS=1 and E2E_INTERNAL_SECRET.
 const hookTagExclusions = process.env.E2E_INTERNAL_SECRET
@@ -40,6 +44,7 @@ const defaultTagExclusions = [
   'not @session-reuse',
   'not @otp-expiry',
   ...(process.env.E2E_DEMO_UNTRUSTED_URL ? [] : ['not @untrusted-client']),
+  ...(process.env.E2E_FAKE_GOOGLE === '1' ? [] : ['not @fake-google']),
   ...hookTagExclusions,
 ]
 

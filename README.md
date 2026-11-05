@@ -1,8 +1,7 @@
 # ePDS — extended Personal Data Server
 
 ePDS lets your users sign in to [AT Protocol](https://atproto.com/) apps — like
-[Bluesky](https://bsky.app/) — using familiar login methods: **email OTP**, **Google**,
-**GitHub**, or any other provider [Better Auth](https://www.better-auth.com/) supports.
+[Bluesky](https://bsky.app/) — using familiar login methods: **email OTP** or **Google**.
 
 Under the hood, ePDS is a standard AT Protocol
 [Personal Data Server (PDS)](https://atproto.com/guides/self-hosting) wrapped with a
@@ -15,7 +14,7 @@ provisioned for them.
   Your app             ePDS                               AT Protocol universe
   ────────             ──────────────────────────         ────────────────────
   [ Login ]  ───────►  [ Email OTP login        ]
-             ◄───────  [ Google / GitHub        ]  ────►  Bluesky
+             ◄───────  [ Google sign-in         ]  ────►  Bluesky
   [ use app ]          [ Auto-creates account   ]         Other AT apps
                        [ Issues AT Protocol     ]         plc.directory
                        [   access tokens        ]
@@ -24,7 +23,7 @@ provisioned for them.
 ## What your users experience
 
 1. Click "Login" (or enter their email) in your app
-2. Receive a one-time code by email (or sign in with Google/GitHub)
+2. Receive a one-time code by email (or sign in with Google)
 3. Enter the code — done. They're logged in.
 
 No passwords. No invite codes to distribute. No AT Protocol knowledge required.
@@ -36,7 +35,7 @@ New users get an account created automatically on their first login.
 - Standard AT Protocol OAuth from your app's perspective — use any AT Protocol
   OAuth client library
 - Two integration patterns depending on your UI needs — see [Login Flows](#login-flows)
-- Social login support (Google, GitHub) — configured per deployment
+- Google sign-in — configured per deployment, opt-in per app
 
 ## Login Flows
 

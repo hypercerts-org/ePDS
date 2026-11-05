@@ -57,6 +57,7 @@ export function LoginForm() {
       )}
 
       <form
+        id="login-form"
         action="/api/oauth/login"
         method="GET"
         style={{ margin: '0 auto', maxWidth: '290px' }}
@@ -191,6 +192,37 @@ export function LoginForm() {
           ? 'Sign in with ATProto/Bluesky'
           : 'Sign in with Certified'}
       </button>
+
+      {mode === 'email' && (
+        // Submits the email form with social_provider=google, skipping its
+        // required-email check: the auth server starts Google straight
+        // away (no email code), using the email as Google's login hint
+        // when one was entered.
+        <button
+          type="submit"
+          form="login-form"
+          name="social_provider"
+          value="google"
+          formNoValidate
+          disabled={submitting}
+          style={{
+            display: 'block',
+            width: '100%',
+            maxWidth: '290px',
+            margin: '16px auto 0',
+            padding: '12px 28px',
+            fontSize: '15px',
+            fontWeight: 500,
+            color: 'var(--theme-text, #1a1a2e)',
+            background: 'var(--theme-input-bg, #fff)',
+            border: '1px solid var(--theme-input-border, #e5e7eb)',
+            borderRadius: '8px',
+            cursor: submitting ? 'default' : 'pointer',
+          }}
+        >
+          Sign in with Google
+        </button>
+      )}
     </>
   )
 }

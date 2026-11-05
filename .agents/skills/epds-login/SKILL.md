@@ -1,12 +1,13 @@
 ---
 name: epds-login
-description: Implement AT Protocol OAuth login against an ePDS instance with @atproto/oauth-client-node. Covers email-first OTP, hosted email entry, handle/DID login, client metadata, callbacks, and debugging. Use when building passwordless login against ePDS, configuring confidential/public OAuth clients, or integrating NodeOAuthClient.
+description: Implement AT Protocol OAuth login against an ePDS instance with @atproto/oauth-client-node. Covers email-first OTP, hosted email entry, Google sign-in, handle/DID login, client metadata, callbacks, and debugging. Use when building passwordless login against ePDS, adding a "Sign in with Google" button, configuring confidential/public OAuth clients, or integrating NodeOAuthClient.
 ---
 
 # Implementing ePDS Login
 
-ePDS lets users sign in to AT Protocol apps using email OTP. New users receive
-a DID, handle, and data repository automatically.
+ePDS lets users sign in to AT Protocol apps with an emailed one-time code or,
+where the operator has enabled it, with Google. New users receive a DID,
+handle, and data repository automatically.
 
 Earlier versions of this skill recommended a hand-rolled OAuth flow. That
 guidance is deprecated in favor of `@atproto/oauth-client-node`, which handles
@@ -23,12 +24,13 @@ race handling—read the `atproto-oauth` skill.
 All variants use one `NodeOAuthClient` and converge on the same callback and
 `session.did`.
 
-| App provides | Call                                               | User experience                         |
-| ------------ | -------------------------------------------------- | --------------------------------------- |
-| Email        | `authorize(epdsUrl)`, then append URL `login_hint` | OTP step immediately                    |
-| Nothing      | `authorize(epdsUrl)`                               | Hosted ePDS login form                  |
-| Handle       | `authorize(handle)`                                | SDK resolves account; ePDS starts login |
-| DID          | `authorize(did)`                                   | SDK resolves account; ePDS starts login |
+| App provides  | Call                                                                | User experience                         |
+| ------------- | ------------------------------------------------------------------- | --------------------------------------- |
+| Email         | `authorize(epdsUrl)`, then append URL `login_hint`                  | OTP step immediately                    |
+| Nothing       | `authorize(epdsUrl)`                                                | Hosted ePDS login form                  |
+| Google button | `authorize(epdsUrl)`, then append URL `epds_social_provider=google` | Straight to Google; no email code       |
+| Handle        | `authorize(handle)`                                                 | SDK resolves account; ePDS starts login |
+| DID           | `authorize(did)`                                                    | SDK resolves account; ePDS starts login |
 
 `NodeOAuthClient.authorize()` deliberately does not accept `login_hint` in its
 options. For email-first login, call `authorize(epdsUrl)` first, then append the
@@ -149,6 +151,7 @@ export async function beginLogin(input?: {
   email?: string
   identifier?: string
   forceLogin?: boolean
+  google?: boolean
 }): Promise<URL> {
   // identifier may be a handle or DID. Without one, use the configured ePDS.
   // Keep prompt in PAR for pds-core, then duplicate it on the returned URL for
@@ -167,6 +170,13 @@ export async function beginLogin(input?: {
   // session. A prompt stored only in PAR does not engage that behavior.
   if (input?.forceLogin) {
     authorizationUrl.searchParams.set('prompt', 'login')
+  }
+
+  // "Sign in with Google" on your own page: ePDS redirects straight to
+  // Google, with the email (if any) as Google's login hint. See Google
+  // Sign-In below for what the client metadata must declare.
+  if (input?.google) {
+    authorizationUrl.searchParams.set('epds_social_provider', 'google')
   }
 
   return authorizationUrl
@@ -260,6 +270,54 @@ The PAR value informs pds-core's authentication guard. ePDS auth-service also
 inspects the browser authorization URL when deciding whether to reuse a browser
 session, so the URL value is required too.
 
+## Google Sign-In
+
+Google sign-in is available only when the ePDS operator has configured it
+(`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`), and only for clients that opt
+in through their metadata:
+
+```json
+{
+  "epds_social_providers": ["google"]
+}
+```
+
+With that, the hosted login page shows a "Sign in with Google" button. To put
+the button on your own page instead, add `epds_social_provider=google` to the
+returned authorization URL, next to any email `login_hint`:
+
+```typescript
+const url = await client.authorize(EPDS_URL)
+url.searchParams.set('epds_social_provider', 'google')
+if (email) url.searchParams.set('login_hint', email) // optional
+```
+
+ePDS then redirects the browser straight to Google, without showing its own
+login page or sending an email code. Like `login_hint`, the parameter goes on
+the returned URL only, never in PAR.
+
+What to expect:
+
+- **Same account as email codes.** A Google sign-in lands on the ePDS account
+  for that email address, creating it on first use, and the callback is the
+  usual one: `client.callback()` and `session.did`, no Google-specific code.
+- **Account chooser.** Google always asks which Google account to use. An
+  email `login_hint` pre-selects that account; a handle or DID hint is not
+  passed to Google, so the account's email address stays private.
+- **Only addresses Google can vouch for.** ePDS accepts Gmail addresses and
+  addresses on a Google Workspace organisation's primary domain (the ID
+  token's `hd` claim). For any other address, including one on a Workspace
+  secondary or alias domain, ePDS returns the user to its login page and asks
+  them to sign in with an email code.
+- **Cancel or refusal.** The user returns to the ePDS login page with a
+  message, not to your callback, and can continue with an email code. ePDS
+  does not start Google again on its own.
+- **Ignored when unavailable.** If your metadata does not list `google`, or
+  the operator has not configured it, the parameter is ignored and the hosted
+  login page appears as usual.
+- **Fresh sign-in.** Choosing Google skips reuse of an existing ePDS browser
+  session, as `prompt=login` does, because the user asked for Google.
+
 ## Verification
 
 Check authorization-server discovery:
@@ -296,21 +354,28 @@ curl -sS -o /dev/null -D - \
 ```
 
 For email-first login, confirm `Location` also contains encoded `login_hint`.
-Never print OAuth tokens, private JWKs, cookies, or store contents while
-debugging.
+For a Google button, confirm it contains `epds_social_provider=google`; then
+request that `Location` without following redirects and expect a `302` to
+`https://accounts.google.com/`. A `200` is the login page instead: either ePDS
+ignored the parameter (check `epds_social_providers` in your metadata and ask
+whether the operator enabled Google), or it could not start Google and the page
+says so. Never print OAuth tokens, private JWKs, cookies, or store contents
+while debugging.
 
 ## Common Failures
 
-| Failure                                 | Likely cause                                              | Fix                                                                    |
-| --------------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `Invalid login_hint` during PAR         | Email included in PAR body                                | Append email only after `authorize()` returns                          |
-| Fresh-login request still shows chooser | `prompt=login` exists only in PAR                         | Append it to returned authorization URL                                |
-| `Invalid redirect_uri`                  | Callback missing from metadata, or wrong URI selected     | Register exact URI; pass `redirect_uri` when not using first entry     |
-| `client_id not found`                   | ePDS cannot fetch metadata URL                            | Use reachable HTTPS metadata URL or supported loopback client metadata |
-| Callback returns 401 or loses state     | In-memory store lost or request reached another instance  | Use shared persistent state and session stores                         |
-| Consent appears every login             | Public untrusted client                                   | Use `private_key_jwt` or operator trust configuration                  |
-| New account has no profile              | Profile record has not been created                       | Use DID as display fallback; resolve handle separately when needed     |
-| OTP never arrives                       | Unknown email, delivery delay, or ePDS mail configuration | Verify address and inspect ePDS operator logs without exposing secrets |
+| Failure                                 | Likely cause                                                                 | Fix                                                                    |
+| --------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `Invalid login_hint` during PAR         | Email included in PAR body                                                   | Append email only after `authorize()` returns                          |
+| Fresh-login request still shows chooser | `prompt=login` exists only in PAR                                            | Append it to returned authorization URL                                |
+| `Invalid redirect_uri`                  | Callback missing from metadata, or wrong URI selected                        | Register exact URI; pass `redirect_uri` when not using first entry     |
+| `client_id not found`                   | ePDS cannot fetch metadata URL                                               | Use reachable HTTPS metadata URL or supported loopback client metadata |
+| Callback returns 401 or loses state     | In-memory store lost or request reached another instance                     | Use shared persistent state and session stores                         |
+| Consent appears every login             | Public untrusted client                                                      | Use `private_key_jwt` or operator trust configuration                  |
+| New account has no profile              | Profile record has not been created                                          | Use DID as display fallback; resolve handle separately when needed     |
+| OTP never arrives                       | Unknown email, delivery delay, or ePDS mail configuration                    | Verify address and inspect ePDS operator logs without exposing secrets |
+| Google button shows ePDS login page     | `google` missing from `epds_social_providers`, or not configured by operator | Add it to client metadata; ask the operator whether Google is enabled  |
+| Google returns user to email-code page  | Address is not Gmail or on the Workspace organisation's primary domain       | Expected: ePDS only trusts addresses Google is authoritative for       |
 
 ## Handles
 
@@ -332,5 +397,5 @@ separate PDS and auth-service hostnames; that is normal.
 ## Reference Files
 
 - [Client metadata](references/client-metadata.md): confidential/public clients, JWKS, branding, email templates
-- [Flow walkthrough](references/flows.md): hosted-form and email-first login examples
+- [Flow walkthrough](references/flows.md): hosted-form, email-first, and Google login examples
 - [PKCE and DPoP](references/dpop-pkce.md): responsibilities handled by `NodeOAuthClient`
