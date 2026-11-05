@@ -323,7 +323,11 @@ export function createLoginPageRouter(
     // just chosen "Another account". That redirect cannot carry prompt=login
     // or epds_skip_par_hint back, so the PAR hint is ignored as well and
     // the email step renders, which is what the message asks for.
-    const socialErrorReturn = req.query[SOCIAL_ERROR_PARAM] !== undefined
+    // Only a code /auth/complete actually sends counts: an unknown or empty
+    // value would otherwise skip session reuse and the PAR hint while the
+    // page shows no message explaining why.
+    const socialErrorReturn =
+      socialSignInErrorMessage(req.query[SOCIAL_ERROR_PARAM]) !== null
 
     // A client can start a social sign-in straight away by naming the
     // provider in ?epds_social_provider= (for example from a "Sign in with

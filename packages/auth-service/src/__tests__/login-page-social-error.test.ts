@@ -115,6 +115,13 @@ describe('GET /oauth/authorize with epds_social_error', () => {
       expect(flashOnLoad(html)).toBe(socialSignInErrorMessage('cancelled'))
     })
 
+    it.each(['', 'bogus'])(
+      'treats an unknown code (%j) as no return and hands it to pds-core',
+      async (code) => {
+        expect((await authorize(code, deviceSession)).status).toBe(302)
+      },
+    )
+
     it('ignores the PAR login_hint and shows the email step', async () => {
       // The RP's hint is bound to this device: without the error, this
       // is the auto-select case (flow 1).

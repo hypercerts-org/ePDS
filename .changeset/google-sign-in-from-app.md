@@ -6,7 +6,7 @@ Signing in with Google always lets you pick your Google account, and an app can 
 
 **Affects:** End users, Client app developers
 
-**End users:** Google now always asks which Google account to use, so a browser that is already signed in to a different Google account no longer signs you in with that one. If you entered your email address first, Google suggests the matching account. When an app has its own "Sign in with Google" button, pressing it takes you straight to Google instead of first sending a code to your email.
+**End users:** A browser that is already signed in to a different Google account no longer signs you in with that one. If you entered your email address first, Google suggests the matching account.
 
 **Client app developers:**
 

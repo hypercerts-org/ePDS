@@ -11,6 +11,8 @@
  * Optional ?social_provider=google is forwarded as epds_social_provider:
  * the auth server starts that sign-in straight away instead of sending an
  * email code, with the email, if one was entered, as Google's login hint.
+ * An explicit ?login_hint= replaces the email; it reaches Google only if it
+ * is itself an email address.
  *
  * Flow:
  * 1. Generate PKCE code verifier/challenge + DPoP key pair + state
