@@ -1,5 +1,85 @@
 # ePDS
 
+## 0.11.0
+
+### Summary
+
+Google sign-in now works end to end, and the GitHub sign-in that never worked is gone.
+
+- **Google button works.** Apps choose whether to show it.
+- **Apps can send users straight to Google**, skipping the email code.
+- **Safer Google sign-in.** Only addresses Google can vouch for are accepted, and a cancelled or failed sign-in returns to the login page with a message.
+- **GitHub sign-in removed.**
+
+**Action needed**
+
+- Client app developers: add `"epds_social_providers": ["google"]` to your client metadata to show the Google button.
+- Operators enabling Google: register `https://<AUTH_HOSTNAME>/api/auth/callback/google` with Google (see `docs/configuration.md`). `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` can be removed.
+
+### Who should read this release
+
+- **End users:**
+  - [Signing in with Google always lets you pick your Google account, and an app can take you straight to Google without emailing you a code first.](#v0.11.0-signing-in-with-google-always-lets-you-pick-your-google)
+  - [If a Google sign-in can't be finished, you now go back to the login page with a message instead of a bare error page.](#v0.11.0-if-a-google-sign-in-can-t-be-finished-you-now-go-back-to)
+  - [The "Sign in with Google" button now works, and each client app chooses whether to show it.](#v0.11.0-the-sign-in-with-google-button-now-works-and-each-client)
+  - [Signing in with Google now only works with an email address Google can vouch for, and cancelling brings you back to the sign-in page.](#v0.11.0-signing-in-with-google-now-only-works-with-an-email-address)
+- **Client app developers:**
+  - [Signing in with Google always lets you pick your Google account, and an app can take you straight to Google without emailing you a code first.](#v0.11.0-signing-in-with-google-always-lets-you-pick-your-google)
+  - [The "Sign in with Google" button now works, and each client app chooses whether to show it.](#v0.11.0-the-sign-in-with-google-button-now-works-and-each-client)
+- **Operators:**
+  - [Sign-in with GitHub, which never worked, is removed.](#v0.11.0-sign-in-with-github-which-never-worked-is-removed)
+  - [The "Sign in with Google" button now works, and each client app chooses whether to show it.](#v0.11.0-the-sign-in-with-google-button-now-works-and-each-client)
+  - [Signing in with Google now only works with an email address Google can vouch for, and cancelling brings you back to the sign-in page.](#v0.11.0-signing-in-with-google-now-only-works-with-an-email-address)
+
+### Minor Changes
+
+- <a id="v0.11.0-signing-in-with-google-always-lets-you-pick-your-google"></a> [#260](https://github.com/hypercerts-org/ePDS/pull/260) [`30c614f`](https://github.com/hypercerts-org/ePDS/commit/30c614f6fffdcf0f9c1fe00e8d95d991cac8d13a) Thanks [@DjimoSerodio](https://github.com/DjimoSerodio)! - Signing in with Google always lets you pick your Google account, and an app can take you straight to Google without emailing you a code first.
+
+  **Affects:** End users, Client app developers
+
+  **End users:** A browser that is already signed in to a different Google account no longer signs you in with that one. If you entered your email address first, Google suggests the matching account.
+
+  **Client app developers:**
+  - To start Google sign-in from your own page, add `epds_social_provider=google` to the `/oauth/authorize` URL you redirect to, for example `https://<AUTH_HOSTNAME>/oauth/authorize?client_id=…&request_uri=…&epds_social_provider=google`. ePDS then redirects straight to Google, without showing its login page or sending an email code. A `login_hint` email address on the same request is passed to Google as its login hint; a handle or DID hint is not, so the account's email address stays private. If Google sign-in cannot be started, the login page shows an error instead.
+  - The parameter only works for Google, and only when your client lists it in `epds_social_providers` and the operator has configured it; otherwise it is ignored and the login page behaves as before. Like `prompt=login`, it skips the "continue as" account chooser for an existing session in the browser, because the user asked for that provider.
+  - If the user cancels at Google or Google is refused, the login page shows the usual message and does not start Google again on its own.
+  - The login page's own Google button also passes an email address typed into the field as Google's login hint.
+
+### Patch Changes
+
+- <a id="v0.11.0-if-a-google-sign-in-can-t-be-finished-you-now-go-back-to"></a> [#279](https://github.com/hypercerts-org/ePDS/pull/279) [`f61f511`](https://github.com/hypercerts-org/ePDS/commit/f61f511494cea343f5fe5e99b8374ea81a97306b) Thanks [@Kzoeps](https://github.com/Kzoeps)! - If a Google sign-in can't be finished, you now go back to the login page with a message instead of a bare error page.
+
+  **Affects:** End users
+
+  **End users:** This happens, for example, when Google sends you back after the short-lived Google sign-in check in your browser has expired, while the login itself is still open. The login page then shows "Could not sign in with that account" and you can try again or sign in with an email code.
+
+- <a id="v0.11.0-sign-in-with-github-which-never-worked-is-removed"></a> [#260](https://github.com/hypercerts-org/ePDS/pull/260) [`bcd9b2a`](https://github.com/hypercerts-org/ePDS/commit/bcd9b2a2d1be6e398fc1058126d55053a2dc5632) Thanks [@DjimoSerodio](https://github.com/DjimoSerodio)! - Sign-in with GitHub, which never worked, is removed.
+
+  **Affects:** Operators
+
+  **Operators:** `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` are no longer read and can be removed from your environment. The GitHub button never worked (every click returned 404), so no sign-in is lost.
+
+- <a id="v0.11.0-the-sign-in-with-google-button-now-works-and-each-client"></a> [#260](https://github.com/hypercerts-org/ePDS/pull/260) [`4db809b`](https://github.com/hypercerts-org/ePDS/commit/4db809bd2001b999ef799516c42c90732d88b07a) Thanks [@DjimoSerodio](https://github.com/DjimoSerodio)! - The "Sign in with Google" button now works, and each client app chooses whether to show it.
+
+  **Affects:** End users, Client app developers, Operators
+
+  **End users:** Clicking the button used to end on a "not found" page. If a sign-in cannot be started, the page now says so and the button can be pressed again. Only one sign-in can be in progress at a time, so pressing a second option while the first is starting no longer breaks the first.
+
+  **Client app developers:** The Google button is now opt-in per client, like the ATProto/Bluesky button. Add `"epds_social_providers": ["google"]` to your client metadata to show it. Clients that do not list it see no Google button, even when the operator has configured Google.
+
+  **Operators:** The button now POSTs `{ provider, callbackURL: '/auth/complete' }` to `/api/auth/sign-in/social` instead of linking to it with a GET, which better-auth answers with 404. The page then follows the returned URL only when it is an https URL on `accounts.google.com`; any other response shows the sign-in error instead. Configuring Google no longer adds its button to every client's login page; only clients that list it in `epds_social_providers` get it. Because the button never worked before this change (every click returned 404), no client loses a working sign-in. Branding CSS that targeted `a.btn-google` should target `.btn-google` instead.
+
+- <a id="v0.11.0-signing-in-with-google-now-only-works-with-an-email-address"></a> [#260](https://github.com/hypercerts-org/ePDS/pull/260) [`61722be`](https://github.com/hypercerts-org/ePDS/commit/61722beae6d663adbde00b562319c6c3212d0809) Thanks [@DjimoSerodio](https://github.com/DjimoSerodio)! - Signing in with Google now only works with an email address Google can vouch for, and cancelling brings you back to the sign-in page.
+
+  **Affects:** End users, Operators
+
+  **End users:** If Google cannot confirm that the address is yours (anything other than a Gmail address or one on your organisation's main Google Workspace domain), the sign-in page asks you to use a code sent to your email instead. Pressing Cancel at Google returns you to the sign-in page instead of an error page.
+
+  **Operators:**
+  - A Google sign-in counts as email-verified only when the ID token's `email_verified` is `true` (boolean or the exact string `"true"`) and the address is `@gmail.com` / `@googlemail.com` or its domain equals the token's `hd` claim (ignoring case); an `hd` naming any other domain does not count.
+  - A social sign-in whose provider does not vouch for the email no longer creates a better-auth user, a PDS account, or a session that `/auth/complete`, `/auth/choose-handle` or `/account` accept. A cancelled or refused sign-in returns to the login page with a fixed message.
+  - The redirect URI to register with Google is `https://<AUTH_HOSTNAME>/api/auth/callback/google`; the consent screen needs only `openid`, `email` and `profile` and must be published "In production". See the social providers section of `docs/configuration.md`.
+
 ## 0.10.1
 
 ### Who should read this release
