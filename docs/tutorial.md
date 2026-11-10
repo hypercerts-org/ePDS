@@ -381,6 +381,38 @@ Constraints:
 - If `epds_handle_login_url` is unset or invalid, the button is not
   rendered. Existing clients see no behaviour change.
 
+#### Optional: offer Google sign-in
+
+If the PDS operator has configured Google (see
+[Social providers](./configuration.md#social-providers-optional)), opt in
+by listing it in your client metadata:
+
+```json
+{
+  "epds_social_providers": ["google"]
+}
+```
+
+The login page then renders a "Sign in with Google" button above the
+email form. The button appears only when both the operator configured
+Google and your client lists it, so enabling Google for one app does not
+change other apps' login pages. `"google"` is the only accepted value;
+other values are ignored, and if the field is unset no social button is
+rendered.
+
+To put a "Sign in with Google" button on your own page instead, start the
+OAuth flow as usual and add `epds_social_provider=google` to the
+`/oauth/authorize` URL you redirect to. ePDS then redirects the browser
+straight to Google, without showing its login page or sending an email
+code. A `login_hint` email address on the same request becomes Google's
+login hint; a handle or DID hint does not, so the account's email address
+stays private. The parameter is ignored unless your client lists `google`
+in `epds_social_providers`. A cancelled or refused Google sign-in returns
+to the login page with a message and does not start Google again, and if
+Google sign-in cannot be started the login page shows an error instead.
+The demo app's "Sign in with Google" button
+(`packages/demo/src/app/components/LoginForm.tsx`) does this.
+
 #### Optional: custom CSS and favicon for ePDS pages (trusted clients)
 
 If your app is in the PDS operator's `PDS_OAUTH_TRUSTED_CLIENTS`, you can

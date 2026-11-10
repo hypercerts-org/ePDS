@@ -8,9 +8,13 @@
  *      (?request_uri=...&client_id=...&prompt=...&login_hint=...)
  *   2. Create an auth_flow row (flow_id, request_uri, client_id)
  *   3. Set epds_auth_flow cookie (10 min, httpOnly)
- *   4. Render login page with:
+ *   4. If the client asked to start with a social provider
+ *      (?epds_social_provider=google), redirect straight to it
+ *   5. Otherwise render login page with:
  *      - Email OTP form (submits to better-auth /api/auth/* endpoints)
  *      - Social login buttons (only for configured providers)
+ *      - A fixed error message when a social sign-in came back with
+ *        ?epds_social_error= (see lib/social-sign-in-error.ts)
  *      - "Recover with backup email" link (shown by default; clients
  *        hide via --recovery-link-display: none in branding.css)
  *      - Client branding from OAuth metadata
@@ -23,7 +27,8 @@
  *
  * The better-auth flow after login:
  *   - Email OTP: user submits code to /api/auth/sign-in/email-otp/verify
- *   - Social: user clicks button → /api/auth/sign-in/{provider} → OAuth exchange
+ *   - Social: user clicks button → page script POSTs /api/auth/sign-in/social
+ *     → browser follows the returned provider URL → OAuth exchange
  *   - On success, better-auth redirects to /auth/complete (the bridge route)
  *   - Bridge reads epds_auth_flow cookie → auth_flow → HMAC-signed redirect
  */
@@ -33,6 +38,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { AuthServiceContext } from '../context.js'
+import type { BetterAuthInstance } from '../better-auth.js'
 import {
   resolveClientMetadata,
   resolveClientName,
@@ -48,6 +54,7 @@ import {
   type HandleMode,
 } from '@certified-app/shared'
 import { socialProviders } from '../better-auth.js'
+import { startSocialSignIn } from '../lib/start-social-sign-in.js'
 import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
 import {
   resolveLoginHint,
@@ -77,6 +84,11 @@ import {
 } from '../lib/session-reuse.js'
 import { fetchDeviceAccountEmails } from '../lib/fetch-device-accounts.js'
 import { AUTH_FLOW_COOKIE, AUTH_FLOW_TTL_MS } from '../lib/auth-flow.js'
+import {
+  SOCIAL_ERROR_PARAM,
+  SOCIAL_PROVIDER_PARAM,
+  socialSignInErrorMessage,
+} from '../lib/social-sign-in-error.js'
 
 const logger = createLogger('auth:login-page')
 
@@ -200,14 +212,51 @@ export function heartbeatEnabledFor(req: Request): boolean {
   return true
 }
 
-export function createLoginPageRouter(ctx: AuthServiceContext): Router {
+/** The social providers the login page knows how to offer. */
+type SocialProviderId = 'google'
+const SOCIAL_PROVIDER_IDS: readonly SocialProviderId[] = ['google']
+
+/**
+ * The social providers a client's login page offers: configured on this
+ * auth service AND listed in the client's `epds_social_providers`, the same
+ * way `epds_handle_login_url` gates the ATProto/Bluesky button. Configuring
+ * Google on a shared PDS therefore leaves the login page of every other
+ * client unchanged.
+ */
+export function clientSocialProviders(
+  branding: ClientMetadata,
+): SocialProviderId[] {
+  const requested: unknown[] = Array.isArray(branding.epds_social_providers)
+    ? branding.epds_social_providers
+    : []
+  return SOCIAL_PROVIDER_IDS.filter(
+    (id) => id in socialProviders && requested.includes(id),
+  )
+}
+
+/** A known social provider id from a query value, or null. */
+function socialProviderId(value: unknown): SocialProviderId | null {
+  return SOCIAL_PROVIDER_IDS.find((id) => id === value) ?? null
+}
+
+/** Shown when a social sign-in could not be started. */
+const SOCIAL_START_FAILED = 'Could not start sign-in. Please try again.'
+
+export function createLoginPageRouter(
+  ctx: AuthServiceContext,
+  auth: Pick<BetterAuthInstance, 'api'>,
+): Router {
   const router = Router()
 
   router.get('/oauth/authorize', async (req: Request, res: Response) => {
-    const requestUri = req.query.request_uri as string | undefined
+    // Express's qs parser turns a repeated `?request_uri=a&request_uri=b` into
+    // an array and `?login_hint[a]=b` into an object, so a plain `as string`
+    // cast would let non-strings reach the database and `.replace` below.
+    const requestUri =
+      typeof req.query.request_uri === 'string'
+        ? req.query.request_uri
+        : undefined
     const clientId = req.query.client_id as string | undefined
-    // Express's qs parser turns `?login_hint[a]=b` into an object, so a
-    // plain `as string` cast would let non-strings reach `.replace` below.
     const loginHint =
       typeof req.query.login_hint === 'string'
         ? req.query.login_hint
@@ -265,7 +314,48 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     // form. This skip flag does NOT affect prompt=login alone: pds-core's
     // sign-in-view bounce also sets prompt=login (without the skip flag)
     // and expects the hint to resolve normally so the OTP step renders.
-    const skipParHint = req.query.epds_skip_par_hint === '1'
+    //
+    // A social sign-in that was cancelled or refused comes back from
+    // /auth/complete with ?epds_social_error= (lib/social-sign-in-error.ts).
+    // It was started from this page, so render this page again with the
+    // message: never hand it to pds-core's chooser, which would drop the
+    // message and could auto-select the hinted account for someone who had
+    // just chosen "Another account". That redirect cannot carry prompt=login
+    // or epds_skip_par_hint back, so the PAR hint is ignored as well and
+    // the email step renders, which is what the message asks for.
+    // Only a code /auth/complete actually sends counts: an unknown or empty
+    // value would otherwise skip session reuse and the PAR hint while the
+    // page shows no message explaining why.
+    const socialErrorReturn =
+      socialSignInErrorMessage(req.query[SOCIAL_ERROR_PARAM]) !== null
+
+    // A client can start a social sign-in straight away by naming the
+    // provider in ?epds_social_provider= (for example from a "Sign in with
+    // Google" button on its own page): the browser is then redirected to
+    // the provider without seeing this page or being sent an email code
+    // (see below, after the auth_flow is set up). It only counts for a
+    // provider this client's page offers (see clientSocialProviders);
+    // any other value is ignored. An error return carries the same
+    // parameter to name the provider that failed, so it never starts one,
+    // and a refused sign-in cannot restart itself. Choosing a provider is
+    // a fresh sign-in with it, so like prompt=login it also skips
+    // device-session reuse below.
+    const requestedSocialStart = socialErrorReturn
+      ? null
+      : socialProviderId(req.query[SOCIAL_PROVIDER_PARAM])
+    const startSocialProvider =
+      requestedSocialStart &&
+      clientSocialProviders(
+        await safeResolveClientMetadata(
+          ctx.db.getAuthFlowByRequestUri(requestUri)?.clientId ??
+            clientId ??
+            undefined,
+        ),
+      ).includes(requestedSocialStart)
+        ? requestedSocialStart
+        : null
+    const skipParHint =
+      req.query.epds_skip_par_hint === '1' || socialErrorReturn
     const pdsInternalUrl = ensurePdsUrl(
       process.env.PDS_INTERNAL_URL,
       ctx.config.pdsPublicUrl,
@@ -308,6 +398,8 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     }
 
     if (
+      !socialErrorReturn &&
+      !startSocialProvider &&
       shouldReuseSession(sessionReuseReq, {
         resolvedEmail,
         deviceBoundEmails,
@@ -440,6 +532,38 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
       maxAge: AUTH_FLOW_TTL_MS,
     })
 
+    // A requested social start goes straight to the provider, so nothing
+    // shows before the provider's own page and Back returns to the app.
+    // Only an email the caller supplied goes to Google as its hint: an
+    // address resolved from a handle/DID would be readable in the
+    // redirect. The cookies are appended, not set, to keep the auth_flow
+    // cookie and any orphan device-cookie clears above. If the start
+    // fails, the login page renders below with the reason.
+    //
+    // Only the first GET for a flow starts the sign-in. better-auth keeps
+    // one OAuth state cookie per browser, so a duplicate GET (see the
+    // idempotency note above) starting again would replace the state of the
+    // sign-in already at the provider, and that one would then fail. A
+    // duplicate gets the login page instead, which starts nothing on load.
+    let socialStartFailed = false
+    if (startSocialProvider && !existingFlow) {
+      const start = await startSocialSignIn(
+        auth,
+        startSocialProvider,
+        prefillEmail,
+      )
+      if (start) {
+        res.append('Set-Cookie', start.cookies)
+        logger.info(
+          { flowId, clientId, provider: startSocialProvider },
+          'Starting social sign-in: redirecting to the provider',
+        )
+        res.redirect(302, start.url)
+        return
+      }
+      socialStartFailed = true
+    }
+
     const clientName =
       clientMeta.client_name ??
       (effectiveClientId
@@ -485,14 +609,18 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
     // reuse `resolvedEmail` here rather than re-fetching. On the "Another
     // account" rebind path (issue #138) `epds_skip_par_hint=1` upstream
     // suppresses both URL and PAR hint resolution, so resolvedEmail is null
-    // and the email step falls out without a special case here.
+    // and the email step falls out without a special case here. A social
+    // sign-in error return skips the PAR hint the same way (see above).
+    //
+    // A social start that failed renders the email step with the reason
+    // and sends no code: the user asked for the provider, not a code.
     const hasLoginHint = !!resolvedEmail
-    const initialStep = hasLoginHint ? 'otp' : 'email'
+    const initialStep = hasLoginHint && !startSocialProvider ? 'otp' : 'email'
 
     // Pillar 3 — Idempotency (Option A): when this is a duplicate GET for an
     // existing flow (e.g. browser extension, StayFocusd), tell the client-side
     // script that OTP was already sent so it skips the auto-send.
-    const otpAlreadySent = hasLoginHint && !!existingFlow
+    const otpAlreadySent = initialStep === 'otp' && !!existingFlow
 
     logger.info(
       {
@@ -502,6 +630,7 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
         reused: !!existingFlow,
         initialStep,
         otpAlreadySent,
+        socialStartFailed,
       },
       'Serving login page for auth_flow',
     )
@@ -528,6 +657,12 @@ export function createLoginPageRouter(ctx: AuthServiceContext): Router {
         otpLength: ctx.config.otpLength,
         otpCharset: ctx.config.otpCharset,
         heartbeatEnabled: heartbeatEnabledFor(req),
+        initialError: socialStartFailed
+          ? SOCIAL_START_FAILED
+          : socialSignInErrorMessage(
+              req.query[SOCIAL_ERROR_PARAM],
+              req.query[SOCIAL_PROVIDER_PARAM],
+            ),
       }),
     )
   })
@@ -574,20 +709,19 @@ function renderTermsHtml(opts: {
   )}" class="terms-link" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</div>`
 }
 
-function renderSocialButtonsHtml(authBasePath: string): string {
-  const hasGoogle = 'google' in socialProviders
-  const hasGithub = 'github' in socialProviders
-  const hasSocialProviders = hasGoogle || hasGithub
-
-  // Social login buttons — redirect to better-auth provider endpoints
-  if (!hasSocialProviders) return ''
+/**
+ * Social sign-in buttons for the providers this client's page offers.
+ * better-auth's /sign-in/social is POST-only, so these are buttons handled
+ * by the page script, not links (a link's GET is a 404).
+ */
+function renderSocialButtonsHtml(
+  offeredSocial: readonly SocialProviderId[],
+): string {
+  if (!offeredSocial.includes('google')) return ''
   return `
     <div class="divider"><span>or continue with</span></div>
     <div class="social-buttons">
-      ${
-        hasGoogle
-          ? `
-      <a href="${authBasePath}/sign-in/social?provider=google&callbackURL=/auth/complete" class="btn-social btn-google">
+      <button type="button" class="btn-social btn-google" data-social-provider="google">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
           <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
           <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
@@ -595,20 +729,7 @@ function renderSocialButtonsHtml(authBasePath: string): string {
           <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
         </svg>
         Sign in with Google
-      </a>`
-          : ''
-      }
-      ${
-        hasGithub
-          ? `
-      <a href="${authBasePath}/sign-in/social?provider=github&callbackURL=/auth/complete" class="btn-social btn-github">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-          <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
-        </svg>
-        Sign in with GitHub
-      </a>`
-          : ''
-      }
+      </button>
     </div>
     <div class="divider"><span>or use email</span></div>
   `
@@ -653,6 +774,12 @@ export function renderLoginPage(input: {
    * `?no_heartbeat=1` test toggle (see `heartbeatEnabledFor`).
    */
   heartbeatEnabled: boolean
+  /**
+   * Error shown in the flash region on load. Only ever a fixed message
+   * (socialSignInErrorMessage() or SOCIAL_START_FAILED), never request
+   * text.
+   */
+  initialError?: string | null
 }): string {
   // Flow-email mode (handle/DID hint, see `flowEmailMasked`): the full
   // address must not appear anywhere in the page. Blank `loginHint` here, so
@@ -697,6 +824,9 @@ export function renderLoginPage(input: {
 
   const termsHtml = renderTermsHtml(opts)
 
+  // Social buttons are opt-in per client (see clientSocialProviders).
+  const offeredSocial = clientSocialProviders(b)
+
   // The flash region is a single element shared by both steps, so there
   // is only ever one live region for assistive tech to track. It is
   // server-rendered into whichever step is initially visible and moved
@@ -705,7 +835,7 @@ export function renderLoginPage(input: {
   const flashRegionHtml =
     '<div id="error-msg" class="flash-msg hidden" role="status" aria-live="polite"></div>'
 
-  const socialButtonsHtml = renderSocialButtonsHtml(opts.authBasePath)
+  const socialButtonsHtml = renderSocialButtonsHtml(offeredSocial)
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -747,7 +877,7 @@ export function renderLoginPage(input: {
     .btn-secondary { display: inline-block; color: var(--muted-foreground); background: none; border: none; font-size: 14px; font-weight: 500; cursor: pointer; padding: 4px 0; border-radius: 4px; text-decoration: none; }
     .btn-secondary:hover { color: #1A130F; }
     .btn-secondary:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; }
-    .btn-social { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 13px 20px; border: 1px solid var(--btn-secondary-border); border-radius: 9999px; font-size: 15px; font-weight: 500; cursor: pointer; text-decoration: none; background: white; color: #333; margin-bottom: 8px; transition: background 0.15s; }
+    .btn-social { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 13px 20px; border: 1px solid var(--btn-secondary-border); border-radius: 9999px; font-family: inherit; font-size: 15px; font-weight: 500; cursor: pointer; text-decoration: none; background: white; color: #333; margin-bottom: 8px; transition: background 0.15s; }
     .btn-social:hover { background: #fafafa; }
     .btn-atproto { margin-top: 12px; margin-bottom: 0; color: #1A130F !important; background: var(--input-bg) !important; border-color: var(--input-border) !important; }
     .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: var(--muted-foreground); font-size: 13px; }
@@ -877,7 +1007,6 @@ export function renderLoginPage(input: {
       var flowEmailMasked = ${toScriptJson(flowEmailMasked)};
       var FLOW_EMAIL_UNAVAILABLE = ${toScriptJson(FLOW_EMAIL_UNAVAILABLE_CODE)};
       var loginMode = 'email'; // 'email' | 'handle'
-      var verifying = false;
       var errorEl = document.getElementById('error-msg');
       var stepEmail = document.getElementById('step-email');
       var stepOtp = document.getElementById('step-otp');
@@ -1334,6 +1463,117 @@ export function renderLoginPage(input: {
         });
       }
 
+      // One sign-in attempt at a time, whatever the method: a social
+      // button, sending or verifying an email code, a resend, or a handle
+      // hand-off. Two in flight race each other (a second /sign-in/social
+      // replaces the first one's OAuth state; a verify can land while the
+      // page is already leaving for a provider). Every handler claims the
+      // guard before it starts a request, releases it when the attempt
+      // fails and the page stays usable, and keeps it while the page is
+      // navigating away. Sending a code releases it once the code is sent,
+      // so the verify that follows can claim it.
+      var socialButtons = Array.prototype.slice.call(
+        document.querySelectorAll('[data-social-provider]'),
+      );
+      // The buttons that start a sign-in from the first step, shown as
+      // disabled while any attempt holds the guard.
+      var startButtons = socialButtons.concat(sendOtpBtn ? [sendOtpBtn] : []);
+      var signInBusy = false;
+      function setStartButtonsDisabled(disabled) {
+        startButtons.forEach(function(btn) { btn.disabled = disabled; });
+      }
+      function claimSignIn() {
+        if (signInBusy) return false;
+        signInBusy = true;
+        setStartButtonsDisabled(true);
+        return true;
+      }
+      function releaseSignIn() {
+        signInBusy = false;
+        setStartButtonsDisabled(false);
+      }
+
+      // better-auth's /sign-in/social is POST-only (a GET is a 404), so
+      // the social buttons POST it and follow the provider URL it returns.
+      // Only ever leave this page for the provider's own authorization
+      // server: an https URL on the host better-auth sends that provider
+      // to. Anything else in the response is treated as a failed start.
+      var socialProviderOrigins = {
+        google: 'https://accounts.google.com',
+      };
+      function socialProviderUrl(provider, url) {
+        if (typeof url !== 'string') return null;
+        var expected = Object.prototype.hasOwnProperty.call(
+          socialProviderOrigins,
+          provider,
+        )
+          ? socialProviderOrigins[provider]
+          : null;
+        if (!expected) return null;
+        try {
+          var parsed = new URL(url);
+          if (parsed.protocol !== 'https:' || parsed.origin !== expected) {
+            return null;
+          }
+          return parsed.href;
+        } catch (err) {
+          return null;
+        }
+      }
+      // A page restored from the back/forward cache keeps its script
+      // state, so the guard held on the way out would otherwise still
+      // block every sign-in when the user comes back.
+      window.addEventListener('pageshow', function(e) {
+        if (e.persisted) releaseSignIn();
+      });
+      socialButtons.forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          if (!claimSignIn()) return;
+          clearError();
+          var provider = btn.getAttribute('data-social-provider');
+          var body = {
+            provider: provider,
+            callbackURL: '/auth/complete',
+            // Cancels and refusals come back to /auth/complete with
+            // ?error= too, which returns to this page with a message
+            // naming the provider, rather than ending on better-auth's
+            // bare error page.
+            errorCallbackURL:
+              '/auth/complete?${SOCIAL_PROVIDER_PARAM}=' +
+              encodeURIComponent(provider),
+          };
+          // Google preselects the account for an address the user has
+          // already entered. The field holds a handle in ATProto mode, so
+          // it is only sent while it holds a valid email address.
+          var typedEmail = emailInput.value.trim();
+          if (
+            provider === 'google' &&
+            loginMode === 'email' &&
+            typedEmail &&
+            emailInput.checkValidity()
+          ) {
+            body.loginHint = typedEmail;
+          }
+          try {
+            var res = await fetch(authBasePath + '/sign-in/social', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+            var data = await res.json().catch(function() { return {}; });
+            var target = res.ok && data ? socialProviderUrl(provider, data.url) : null;
+            if (target) {
+              window.location.assign(target);
+              return;
+            }
+          } catch (err) {
+            console.debug('Social sign-in could not start', err);
+          }
+          releaseSignIn();
+          showError(${toScriptJson(SOCIAL_START_FAILED)});
+        });
+      });
+
       function showOtpStep(email) {
         currentEmail = email;
         // The user supplied this address themselves, so it, not the
@@ -1449,9 +1689,9 @@ export function renderLoginPage(input: {
       // Form: send OTP (email mode) or hand off to client (handle mode)
       sendOtpForm.addEventListener('submit', async function(e) {
         e.preventDefault();
-        clearError();
         var raw = emailInput.value.trim();
-        if (!raw) return;
+        if (!raw || !claimSignIn()) return;
+        clearError();
         var btn = this.querySelector('button[type=submit]');
         var defaultLabel = loginMode === 'handle' ? 'Sign in' : 'Continue';
         btn.disabled = true;
@@ -1475,6 +1715,7 @@ export function renderLoginPage(input: {
         // flow-email fallback, long after the page loaded.
         if (await abortIfFlowDead()) return;
         var result = await sendOtp(email);
+        releaseSignIn();
         btn.disabled = false;
         btn.textContent = defaultLabel;
 
@@ -1491,9 +1732,9 @@ export function renderLoginPage(input: {
         // Collapse duplicate submits (auto-submit on 6th digit + Enter, OTP
         // autofill firing input on every box, paste+input pair, etc.). The
         // first call consumes the code; a second one races the redirect and
-        // flashes "Invalid OTP" before the page unloads.
-        if (verifying) return;
-        verifying = true;
+        // flashes "Invalid OTP" before the page unloads. The shared guard
+        // also keeps a verify from starting while another sign-in is.
+        if (!claimSignIn()) return;
         // Stop pinging the moment a verify is in flight — the redirect
         // is imminent and any further heartbeat is wasted.
         stopHeartbeat();
@@ -1589,10 +1830,10 @@ export function renderLoginPage(input: {
             if (otpBoxes.length) otpBoxes[0].focus();
           }
         } finally {
-          // Leave the latch set on success: verifyOtp triggers a redirect,
+          // Keep the guard on success: verifyOtp triggers a redirect,
           // and we don't want late events to re-open the form mid-navigation.
           if (!result || result.error) {
-            verifying = false;
+            releaseSignIn();
             btn.disabled = false;
             btn.textContent = 'Verify';
             // Verify failed (typo, expired OTP, etc.) — the form is
@@ -1606,6 +1847,7 @@ export function renderLoginPage(input: {
 
       // Send a new code (the element id predates the relabel)
       document.getElementById('btn-resend').addEventListener('click', async function() {
+        if (!claimSignIn()) return;
         clearError();
         this.disabled = true;
         this.textContent = 'Sending...';
@@ -1615,6 +1857,7 @@ export function renderLoginPage(input: {
         // submit it. Bounce to /auth/abort instead.
         if (await abortIfFlowDead()) return;
         var result = await sendOtp(currentEmail);
+        releaseSignIn();
         this.disabled = false;
         this.textContent = 'Send a new code';
         if (result.flowEmailUnavailable) {
@@ -1665,7 +1908,9 @@ export function renderLoginPage(input: {
         if (otpBoxes.length) otpBoxes[0].focus();
         if (!otpAlreadySent) {
           // First load — fire the OTP send in the background.
+          claimSignIn();
           sendOtp(currentEmail).then(function(result) {
+            releaseSignIn();
             if (result.flowEmailUnavailable) {
               fallBackToEmailStep(result.error);
             } else if (result.error) {
@@ -1681,6 +1926,11 @@ export function renderLoginPage(input: {
         startHeartbeat();
         refreshResendVisibility();
       }
+
+      // A social sign-in that was cancelled or refused returns here with
+      // a fixed message chosen server-side (see /auth/complete).
+      var initialError = ${toScriptJson(opts.initialError ?? '')};
+      if (initialError) showError(initialError);
     })();
   </script>
 </body>

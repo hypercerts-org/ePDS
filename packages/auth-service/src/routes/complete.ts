@@ -11,7 +11,13 @@
  * Flow:
  *   1. Read epds_auth_flow cookie → get flow_id
  *   2. Look up auth_flow row → get request_uri, client_id
+ *   2b. Social sign-in failed or was cancelled (?error=, this route is also
+ *       the social buttons' errorCallbackURL) → back to the login page for
+ *       this flow with a fixed message (lib/social-sign-in-error.ts)
  *   3. Get better-auth session → extract verified email
+ *   3b. Session email not verified (a social sign-in whose provider did not
+ *       vouch for it) → back to the login page; it neither creates an
+ *       account nor signs into the one that owns the address
  *   4. Check if this is a new user (no PDS account for email)
  *   5a. New user, handle_mode='random' → HMAC-signed redirect to pds-core (random handle generated server-side)
  *   5b. New user, handle_mode=null|'picker'|'picker-with-random' → redirect to /auth/choose-handle
@@ -34,6 +40,12 @@ import { getDidByEmail } from '../lib/get-did-by-email.js'
 import { pingParRequest } from '../lib/ping-par-request.js'
 import { requireInternalEnv } from '../lib/require-internal-env.js'
 import { resolveRecoveryEmail } from '../lib/resolve-recovery-email.js'
+import {
+  SOCIAL_PROVIDER_PARAM,
+  loginPageUrlWithError,
+  socialSignInErrorCode,
+} from '../lib/social-sign-in-error.js'
+import { hasVerifiedEmail } from '../lib/verified-email.js'
 
 const logger = createLogger('auth:complete')
 
@@ -230,6 +242,23 @@ export function createCompleteRouter(
       return
     }
 
+    // Step 2b: a social sign-in that was cancelled or refused comes back
+    // here via errorCallbackURL with ?error=<code>. Return to the login
+    // page for this flow before reading any session: a session left in
+    // this browser by an earlier sign-in must not be used instead.
+    if (req.query.error !== undefined) {
+      const code = socialSignInErrorCode(req.query.error)
+      logger.info(
+        { flowId, error: req.query.error, code },
+        'Social sign-in did not complete: returning to the login page',
+      )
+      res.redirect(
+        303,
+        loginPageUrlWithError(flow, code, req.query[SOCIAL_PROVIDER_PARAM]),
+      )
+      return
+    }
+
     // Step 3: Get better-auth session to extract verified email
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth session type not exported
     let session: any
@@ -265,7 +294,21 @@ export function createCompleteRouter(
     // actually authenticated with. better-auth sets emailVerified when
     // the emailed one-time code is verified, so it is the authoritative
     // answer for `sessionEmail`.
-    const sessionEmailVerified: boolean = session.user.emailVerified === true
+    const sessionEmailVerified = hasVerifiedEmail(session.user)
+
+    // Step 3b: the email is the only key from a sign-in to a PDS account,
+    // so an address nobody proved control of must not create an account or
+    // sign into the one that has it. Email OTP sessions are always
+    // verified, and better-auth.ts refuses to create unverified users;
+    // this keeps the route safe on its own if either ever changes.
+    if (!sessionEmailVerified) {
+      logger.warn(
+        { email: sessionEmail, flowId },
+        'Refusing /auth/complete: session email is not verified',
+      )
+      res.redirect(303, loginPageUrlWithError(flow, 'email_unverified'))
+      return
+    }
 
     // Step 4: Check whether this is a new user (no PDS account for email).
     const { email, did, viaRecovery } = await resolveCompleteIdentity(
@@ -276,11 +319,12 @@ export function createCompleteRouter(
       internalSecret,
     )
 
-    // Recovery rebinds `email` from the proved backup address to the
-    // account's primary. The user proved control of the backup, not the
-    // primary, so recovering access is not evidence about the address
-    // being signed here — withhold the claim.
-    const emailVerified = sessionEmailVerified && !viaRecovery
+    // The session's own address is verified (Step 3b). Recovery rebinds
+    // `email` from the proved backup address to the account's primary.
+    // The user proved control of the backup, not the primary, so
+    // recovering access is not evidence about the address being signed
+    // here — withhold the claim.
+    const emailVerified = !viaRecovery
 
     const isNewAccount = !did
 
