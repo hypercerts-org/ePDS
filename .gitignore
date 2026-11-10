@@ -21,12 +21,11 @@ coverage/
 reports/
 .e2e-dist/
 
-# beads runtime files (Dolt server state, not repo data)
-.beads/dolt-server.*
-.beads/dolt-monitor.pid
-
-# bv (beads viewer) local config and caches
+# Leftover local Beads data from before Beads was removed
+.beads/
 .bv/
+
+# Local scratch files
 tmp/
 
 # Claude Code per-user local permission overrides
