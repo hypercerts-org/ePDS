@@ -37,6 +37,26 @@ function AtmosphereIcon() {
   )
 }
 
+/** Envelope outline on the "Sign in with email" button; matches the button text colour. */
+function EmailIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="m3 7 9 6 9-6" />
+    </svg>
+  )
+}
+
 /** Same paths as the Google icon on the auth-service login page. */
 function GoogleIcon() {
   return (
@@ -251,7 +271,7 @@ export function LoginForm() {
         }}
       >
         <span style={dividerLineStyle} />
-        or
+        <span>or</span>
         <span style={dividerLineStyle} />
       </div>
 
@@ -268,7 +288,10 @@ export function LoginForm() {
             Sign in with Atmosphere
           </>
         ) : (
-          'Sign in with email'
+          <>
+            <EmailIcon />
+            Sign in with email
+          </>
         )}
       </button>
 

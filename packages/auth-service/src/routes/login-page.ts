@@ -725,6 +725,16 @@ const ATMOSPHERE_ICON_SVG = `<svg class="btn-atproto-icon" viewBox="0 0 24 24" w
         </svg>`
 
 /**
+ * Envelope outline on the same button, the reverse of {@link ATMOSPHERE_ICON_SVG}:
+ * hidden by default and shown (via `.handle-mode`) while the button reads
+ * "Sign in with email". Uses currentColor so it matches the button text.
+ */
+const EMAIL_ICON_SVG = `<svg class="btn-atproto-email-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <rect x="3" y="5" width="18" height="14" rx="2"/>
+          <path d="m3 7 9 6 9-6"/>
+        </svg>`
+
+/**
  * Google sign-in button. better-auth's /sign-in/social is POST-only, so
  * this is a button handled by the page script, not a link (a link's GET is
  * a 404).
@@ -755,6 +765,7 @@ function renderAlternativesHtml(
     handleLoginUrl
       ? `<button type="button" class="btn-social btn-atproto">
         ${ATMOSPHERE_ICON_SVG}
+        ${EMAIL_ICON_SVG}
         <span class="btn-atproto-label">${ATMOSPHERE_BUTTON_LABEL}</span>
       </button>`
       : '',
@@ -908,7 +919,9 @@ export function renderLoginPage(input: {
     .btn-secondary:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; }
     .btn-social { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 13px 20px; border: 1px solid var(--btn-secondary-border); border-radius: 9999px; font-family: inherit; font-size: 15px; font-weight: 500; cursor: pointer; text-decoration: none; background: white; color: #333; margin-bottom: 8px; transition: background 0.15s; }
     .btn-social:hover { background: #fafafa; }
+    .btn-atproto-email-icon { display: none; }
     .btn-atproto.handle-mode .btn-atproto-icon { display: none; }
+    .btn-atproto.handle-mode .btn-atproto-email-icon { display: block; }
     .sign-in-alternatives .btn-social:last-child { margin-bottom: 0; }
     .btn-atproto { color: #1A130F !important; background: var(--input-bg) !important; border-color: var(--input-border) !important; }
     .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: var(--muted-foreground); font-size: 13px; }

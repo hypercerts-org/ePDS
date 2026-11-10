@@ -276,6 +276,18 @@ describe('renderLoginPage sign-in option order', () => {
     expect(label).toBeGreaterThan(icon)
   })
 
+  it('ships a currentColor envelope icon that only shows in handle mode', () => {
+    const html = render({ branding: LOGIN_PAGE_BRANDING_WITH_HANDLE_LOGIN })
+
+    expect(html).toMatch(
+      /<svg class="btn-atproto-email-icon"[^>]*stroke="currentColor"[^>]*aria-hidden="true"/,
+    )
+    expect(html).toContain('.btn-atproto-email-icon { display: none; }')
+    expect(html).toContain(
+      '.btn-atproto.handle-mode .btn-atproto-email-icon { display: block; }',
+    )
+  })
+
   it('relabels the Atmosphere button while in handle entry and restores it', async () => {
     const { elements } = runPage(
       () => jsonResponse(200, {}),
