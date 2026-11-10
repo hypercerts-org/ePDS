@@ -3,7 +3,7 @@
   "version": "0.11.0",
   "private": true,
   "description": "ePDS — extended Personal Data Server for AT Protocol with passwordless OTP authentication",
-  "license": "MIT",
+  "license": "MIT OR Apache-2.0",
   "engines": {
     "node": ">=22.19.0"
   },

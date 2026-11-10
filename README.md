@@ -80,4 +80,6 @@ token exchange, client metadata, and both login flows.
 
 ## License
 
-MIT
+Licensed under either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
+
+The licenses cover the code. They don't cover the logos in this repository, which belong to their owners.
