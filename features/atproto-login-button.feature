@@ -1,11 +1,11 @@
-Feature: ATProto/Bluesky handle login button on the auth-service login page
+Feature: Atmosphere handle login button on the auth-service login page
   When the OAuth client declares an `epds_handle_login_url` in its client
-  metadata, the auth-service login page renders an "Or sign in with
-  ATProto/Bluesky" button. The button toggles the email form into
-  handle-entry mode; submitting a handle navigates the browser to the
-  client's declared URL with `?handle=<value>` appended, so the client
-  can resolve the handle to its PDS and start a fresh OAuth flow against
-  that PDS.
+  metadata, the auth-service login page renders a "Sign in with Atmosphere"
+  button below the email form, after an "or" divider. The button toggles
+  the email form into handle-entry mode; submitting a handle navigates the
+  browser to the client's declared URL with `?handle=<value>` appended, so
+  the client can resolve the handle to its PDS and start a fresh OAuth flow
+  against that PDS.
 
   Background:
     Given the ePDS test environment is running
@@ -17,13 +17,13 @@ Feature: ATProto/Bluesky handle login button on the auth-service login page
 
   Scenario: Button is rendered when the client declares epds_handle_login_url
     When the demo client initiates an OAuth login via flow 2
-    Then the login page displays an "Or sign in with ATProto/Bluesky" button
+    Then the login page displays an "Sign in with Atmosphere" button
 
   Scenario: Clicking the button toggles the email form into handle-entry mode
     When the demo client initiates an OAuth login via flow 2
     And the user clicks the ATProto handle login button
     Then the login form input is in handle-entry mode
-    And the button label changes to "Or sign in with email"
+    And the button label changes to "Sign in with email"
 
   Scenario: Clicking the button again returns to email-entry mode
     When the demo client initiates an OAuth login via flow 2

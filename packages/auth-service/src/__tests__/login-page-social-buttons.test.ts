@@ -37,7 +37,7 @@ function runPage(
   return runPageScript(html, fetchImpl)
 }
 
-/** The Google button plus the ATProto/Bluesky hand-off button. */
+/** The Google button plus the Atmosphere hand-off button. */
 const LOGIN_PAGE_BRANDING_WITH_HANDLE_LOGIN = {
   epds_social_providers: ['google'],
   epds_handle_login_url: 'https://app.example.com/login',
@@ -221,10 +221,10 @@ describe('renderLoginPage social sign-in buttons', () => {
 })
 
 describe('renderLoginPage social sign-in opt-in', () => {
-  it('renders no social buttons when the client does not ask for any', () => {
+  it('renders no social buttons or "or" divider when the client offers no alternative', () => {
     const html = render({ branding: {} })
     expect(html).not.toContain('data-social-provider="')
-    expect(html).not.toContain('or continue with')
+    expect(html).not.toContain('class="divider"')
   })
 
   it('renders the Google button when the client lists it', () => {
@@ -241,5 +241,51 @@ describe('renderLoginPage social sign-in opt-in', () => {
         branding: { epds_social_providers: 'google' as unknown as string[] },
       }),
     ).not.toContain('data-social-provider="')
+  })
+})
+
+describe('renderLoginPage sign-in option order', () => {
+  it('stacks the email form, one "or" divider, Atmosphere, then Google', () => {
+    const html = render({ branding: LOGIN_PAGE_BRANDING_WITH_HANDLE_LOGIN })
+
+    const positions = [
+      'id="form-send-otp"',
+      '<div class="divider"><span>or</span></div>',
+      '<span class="btn-atproto-label">Sign in with Atmosphere</span>',
+      'data-social-provider="google"',
+    ].map((marker) => html.indexOf(marker))
+
+    expect(positions.every((p) => p !== -1)).toBe(true)
+    expect(positions).toEqual([...positions].sort((a, b) => a - b))
+    expect(html.match(/class="divider"/g)).toHaveLength(1)
+  })
+
+  it.each([
+    ['Atmosphere only', { epds_handle_login_url: 'https://app.example.com/l' }],
+    ['Google only', { epds_social_providers: ['google'] }],
+  ])('shows a single "or" divider for %s', (_label, branding) => {
+    expect(render({ branding }).match(/class="divider"/g)).toHaveLength(1)
+  })
+
+  it('puts the @ icon before the Atmosphere label', () => {
+    const html = render({ branding: LOGIN_PAGE_BRANDING_WITH_HANDLE_LOGIN })
+    const icon = html.indexOf('class="btn-atproto-icon"')
+    const label = html.indexOf('<span class="btn-atproto-label">')
+
+    expect(icon).toBeGreaterThan(html.indexOf('btn-social btn-atproto"'))
+    expect(label).toBeGreaterThan(icon)
+  })
+
+  it('relabels the Atmosphere button while in handle entry and restores it', async () => {
+    const { elements } = runPage(
+      () => jsonResponse(200, {}),
+      render({ branding: LOGIN_PAGE_BRANDING_WITH_HANDLE_LOGIN }),
+    )
+
+    await elements.atprotoButton.click()
+    expect(elements.atprotoLabel.textContent).toBe('Sign in with email')
+
+    await elements.atprotoButton.click()
+    expect(elements.atprotoLabel.textContent).toBe('Sign in with Atmosphere')
   })
 })

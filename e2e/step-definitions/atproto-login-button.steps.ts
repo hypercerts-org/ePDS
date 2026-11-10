@@ -1,7 +1,7 @@
 /**
  * Step definitions for atproto-login-button.feature.
  *
- * Exercises the "Or sign in with ATProto/Bluesky" button rendered on
+ * Exercises the "Sign in with Atmosphere" button rendered on
  * the auth-service login page when the OAuth client declares
  * `epds_handle_login_url` in its client metadata.
  *
