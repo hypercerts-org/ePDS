@@ -923,7 +923,6 @@ export function renderLoginPage(input: {
     .btn-atproto.handle-mode .btn-atproto-icon { display: none; }
     .btn-atproto.handle-mode .btn-atproto-email-icon { display: block; }
     .sign-in-alternatives .btn-social:last-child { margin-bottom: 0; }
-    .btn-atproto { color: #1A130F !important; background: var(--input-bg) !important; border-color: var(--input-border) !important; }
     .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: var(--muted-foreground); font-size: 13px; }
     .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #ececec; }
     .flash-msg { padding: 12px; border-radius: 10px; margin: 12px 0; font-size: 14px; text-align: center; }
