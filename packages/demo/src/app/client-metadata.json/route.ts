@@ -73,8 +73,8 @@ export async function GET() {
     // clients get the default PDS template regardless.
     email_template_uri: `${baseUrl}/email-template.html`,
     email_subject_template: '{{code}} — your {{app_name}} code',
-    // Opt in to the auth-service login page's "Or sign in with
-    // ATProto/Bluesky" button. Submitting a handle redirects here with
+    // Opt in to the auth-service login page's "Sign in with Atmosphere"
+    // button. Submitting a handle redirects here with
     // ?handle=<value>, which our /api/oauth/login route already handles
     // (resolves handle → PDS → fresh PAR against that PDS).
     epds_handle_login_url: `${baseUrl}/api/oauth/login`,

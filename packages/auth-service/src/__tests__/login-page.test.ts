@@ -434,7 +434,7 @@ describe('renderLoginPage handle login button', () => {
   // for the toggle handler), so assertions must look for the actual button
   // element and the inlined handleLoginUrl JS variable.
   const BUTTON_HTML =
-    'class="btn-social btn-atproto">Or sign in with ATProto/Bluesky'
+    '<span class="btn-atproto-label">Sign in with Atmosphere</span>'
 
   it('omits the button when epds_handle_login_url is not declared', () => {
     const html = render({})

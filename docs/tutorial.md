@@ -345,7 +345,7 @@ The skip only applies to initial sign-up — returning users go through
 normal consent handling (which may still be auto-approved if they have
 already granted the requested scopes).
 
-#### Optional: offer ATProto/Bluesky handle sign-in
+#### Optional: offer Atmosphere handle sign-in
 
 Users who already have an ATProto identity on a different PDS (e.g.
 `alice.bsky.social`) can't authenticate against your PDS directly —
@@ -360,9 +360,11 @@ Opt in by adding `epds_handle_login_url` to your client metadata:
 }
 ```
 
-When set, the auth-service login page renders an "Or sign in with
-ATProto/Bluesky" button under the email form. Clicking it switches the
-form into handle-entry mode (placeholder `you.bsky.social`); submitting
+When set, the auth-service login page renders a "Sign in with
+Atmosphere" button under the email form, after an "or" divider (and
+above "Sign in with Google" when the client also offers it). Clicking it
+switches the form into handle-entry mode (placeholder `you.bsky.social`)
+and relabels the button "Sign in with email"; submitting
 a handle navigates the browser to your declared URL with `?handle=<value>`
 appended. Your route is responsible for resolving the handle to its PDS
 and starting a fresh PAR against that PDS.
@@ -393,10 +395,11 @@ by listing it in your client metadata:
 }
 ```
 
-The login page then renders a "Sign in with Google" button above the
-email form. The button appears only when both the operator configured
-Google and your client lists it, so enabling Google for one app does not
-change other apps' login pages. `"google"` is the only accepted value;
+The login page then renders a "Sign in with Google" button below the
+email form, after an "or" divider (and after "Sign in with Atmosphere"
+when your client also offers it). The button appears only when both the
+operator configured Google and your client lists it, so enabling Google
+for one app does not change other apps' login pages. `"google"` is the only accepted value;
 other values are ignored, and if the field is unset no social button is
 rendered.
 

@@ -12,7 +12,9 @@
  *      (?epds_social_provider=google), redirect straight to it
  *   5. Otherwise render login page with:
  *      - Email OTP form (submits to better-auth /api/auth/* endpoints)
- *      - Social login buttons (only for configured providers)
+ *      - Under one "or" divider: "Sign in with Atmosphere" (clients that
+ *        declare epds_handle_login_url), then "Sign in with Google"
+ *        (clients that offer it); no divider when neither is offered
  *      - A fixed error message when a social sign-in came back with
  *        ?epds_social_error= (see lib/social-sign-in-error.ts)
  *      - "Recover with backup email" link (shown by default; clients
@@ -219,7 +221,7 @@ const SOCIAL_PROVIDER_IDS: readonly SocialProviderId[] = ['google']
 /**
  * The social providers a client's login page offers: configured on this
  * auth service AND listed in the client's `epds_social_providers`, the same
- * way `epds_handle_login_url` gates the ATProto/Bluesky button. Configuring
+ * way `epds_handle_login_url` gates the Atmosphere button. Configuring
  * Google on a shared PDS therefore leaves the login page of every other
  * client unchanged.
  */
@@ -709,19 +711,36 @@ function renderTermsHtml(opts: {
   )}" class="terms-link" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</div>`
 }
 
+/** Label of the button that hands off to handle sign-in. */
+const ATMOSPHERE_BUTTON_LABEL = 'Sign in with Atmosphere'
+/** Label of that same button while the form is in handle-entry mode. */
+const EMAIL_BUTTON_LABEL = 'Sign in with email'
+
 /**
- * Social sign-in buttons for the providers this client's page offers.
- * better-auth's /sign-in/social is POST-only, so these are buttons handled
- * by the page script, not links (a link's GET is a 404).
+ * Blue "@" mark on the Atmosphere button, sized like the Google icon. Hidden
+ * (via `.handle-mode`) while the button reads "Sign in with email".
  */
-function renderSocialButtonsHtml(
-  offeredSocial: readonly SocialProviderId[],
-): string {
-  if (!offeredSocial.includes('google')) return ''
-  return `
-    <div class="divider"><span>or continue with</span></div>
-    <div class="social-buttons">
-      <button type="button" class="btn-social btn-google" data-social-provider="google">
+const ATMOSPHERE_ICON_SVG = `<svg class="btn-atproto-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+          <path fill="#527FF1" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10h5v-2h-5c-4.34 0-8-3.66-8-8s3.66-8 8-8 8 3.66 8 8v1.43c0 .79-.71 1.57-1.5 1.57s-1.5-.78-1.5-1.57V12c0-2.76-2.24-5-5-5s-5 2.24-5 5 2.24 5 5 5c1.38 0 2.64-.56 3.54-1.47.65.89 1.77 1.47 2.96 1.47 1.97 0 3.5-1.6 3.5-3.57V12c0-5.52-4.48-10-10-10zm0 13c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z"/>
+        </svg>`
+
+/**
+ * Envelope outline on the same button, the reverse of {@link ATMOSPHERE_ICON_SVG}:
+ * hidden by default and shown (via `.handle-mode`) while the button reads
+ * "Sign in with email". Uses currentColor so it matches the button text.
+ */
+const EMAIL_ICON_SVG = `<svg class="btn-atproto-email-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <rect x="3" y="5" width="18" height="14" rx="2"/>
+          <path d="m3 7 9 6 9-6"/>
+        </svg>`
+
+/**
+ * Google sign-in button. better-auth's /sign-in/social is POST-only, so
+ * this is a button handled by the page script, not a link (a link's GET is
+ * a 404).
+ */
+function renderGoogleButtonHtml(): string {
+  return `<button type="button" class="btn-social btn-google" data-social-provider="google">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
           <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
           <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
@@ -729,10 +748,34 @@ function renderSocialButtonsHtml(
           <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
         </svg>
         Sign in with Google
-      </button>
-    </div>
-    <div class="divider"><span>or use email</span></div>
-  `
+      </button>`
+}
+
+/**
+ * The sign-in options offered under the email form, after a single "or"
+ * divider: Atmosphere (when the client declares a handle login URL), then
+ * Google (when the client offers it). Empty when neither is offered, so the
+ * divider never leads to nothing.
+ */
+function renderAlternativesHtml(
+  handleLoginUrl: string,
+  offeredSocial: readonly SocialProviderId[],
+): string {
+  const buttons = [
+    handleLoginUrl
+      ? `<button type="button" class="btn-social btn-atproto">
+        ${ATMOSPHERE_ICON_SVG}
+        ${EMAIL_ICON_SVG}
+        <span class="btn-atproto-label">${ATMOSPHERE_BUTTON_LABEL}</span>
+      </button>`
+      : '',
+    offeredSocial.includes('google') ? renderGoogleButtonHtml() : '',
+  ].filter(Boolean)
+  if (buttons.length === 0) return ''
+  return `<div class="divider"><span>or</span></div>
+      <div class="sign-in-alternatives">
+      ${buttons.join('\n      ')}
+      </div>`
 }
 
 export function renderLoginPage(input: {
@@ -803,7 +846,7 @@ export function renderLoginPage(input: {
       ? `Code already sent to ${escapeHtml(otpSubtitleEmail(opts.loginHint, flowEmailMasked))}`
       : ''
 
-  // ATProto/Bluesky handle login button.
+  // Atmosphere (ATProto handle) login button.
   //
   // Only rendered when the OAuth client declares `epds_handle_login_url` in
   // its client metadata. The button toggles the email form into handle-entry
@@ -817,9 +860,6 @@ export function renderLoginPage(input: {
   // value from injecting a `javascript:` redirect target into the page.
   const handleLoginUrl = isSafeHttpUrl(b.epds_handle_login_url)
     ? (b.epds_handle_login_url as string)
-    : ''
-  const handleLoginButtonHtml = handleLoginUrl
-    ? `<button type="button" class="btn-social btn-atproto">Or sign in with ATProto/Bluesky</button>`
     : ''
 
   const termsHtml = renderTermsHtml(opts)
@@ -835,7 +875,7 @@ export function renderLoginPage(input: {
   const flashRegionHtml =
     '<div id="error-msg" class="flash-msg hidden" role="status" aria-live="polite"></div>'
 
-  const socialButtonsHtml = renderSocialButtonsHtml(offeredSocial)
+  const alternativesHtml = renderAlternativesHtml(handleLoginUrl, offeredSocial)
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -879,7 +919,11 @@ export function renderLoginPage(input: {
     .btn-secondary:focus-visible { outline: 2px solid var(--focus-border, #2563eb); outline-offset: 2px; }
     .btn-social { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 13px 20px; border: 1px solid var(--btn-secondary-border); border-radius: 9999px; font-family: inherit; font-size: 15px; font-weight: 500; cursor: pointer; text-decoration: none; background: white; color: #333; margin-bottom: 8px; transition: background 0.15s; }
     .btn-social:hover { background: #fafafa; }
-    .btn-atproto { margin-top: 12px; margin-bottom: 0; color: #1A130F !important; background: var(--input-bg) !important; border-color: var(--input-border) !important; }
+    .btn-atproto-email-icon { display: none; }
+    .btn-atproto.handle-mode .btn-atproto-icon { display: none; }
+    .btn-atproto.handle-mode .btn-atproto-email-icon { display: block; }
+    .sign-in-alternatives .btn-social:last-child { margin-bottom: 0; }
+    .btn-atproto { color: #1A130F !important; background: var(--input-bg) !important; border-color: var(--input-border) !important; }
     .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: var(--muted-foreground); font-size: 13px; }
     .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #ececec; }
     .flash-msg { padding: 12px; border-radius: 10px; margin: 12px 0; font-size: 14px; text-align: center; }
@@ -924,8 +968,6 @@ export function renderLoginPage(input: {
     ${logoHtml}
     <h1 id="heading">${opts.initialStep === 'otp' ? 'Enter your code' : 'Sign in'}</h1>
 
-    ${socialButtonsHtml}
-
     <!-- Step 1: Email entry (calls better-auth sendOtp) -->
     <div id="step-email" class="step-email${opts.initialStep === 'otp' ? ' hidden' : ''}">
       <form id="form-send-otp">
@@ -944,7 +986,7 @@ export function renderLoginPage(input: {
         <div id="flash-slot-email">${opts.initialStep === 'otp' ? '' : flashRegionHtml}</div>
         <button type="submit" class="btn-primary" disabled>Continue</button>
       </form>
-      ${handleLoginButtonHtml}
+      ${alternativesHtml}
     </div>
 
     <noscript><div class="flash-msg error">JavaScript is required to sign in with email.</div></noscript>
@@ -1013,6 +1055,8 @@ export function renderLoginPage(input: {
       var otpSubtitle = document.getElementById('otp-subtitle');
       var otpEmailInput = document.getElementById('otp-email');
       var atprotoBtn = document.querySelector('.btn-atproto');
+      // Only the label span is rewritten on toggle, so the icon survives.
+      var atprotoLabel = atprotoBtn && atprotoBtn.querySelector('.btn-atproto-label');
       var sendOtpForm = document.getElementById('form-send-otp');
       var emailInput = document.getElementById('email');
       var emailLabel = document.querySelector('label[for="email"]');
@@ -1440,7 +1484,8 @@ export function renderLoginPage(input: {
           // handles; remove it for handle mode.
           emailInput.removeAttribute('required');
           sendOtpBtn.textContent = 'Sign in';
-          atprotoBtn.textContent = 'Or sign in with email';
+          atprotoLabel.textContent = ${toScriptJson(EMAIL_BUTTON_LABEL)};
+          atprotoBtn.classList.add('handle-mode');
         } else {
           emailLabel.textContent = 'Enter your email address';
           emailInput.type = 'email';
@@ -1450,7 +1495,8 @@ export function renderLoginPage(input: {
           emailInput.value = '';
           emailInput.setAttribute('required', '');
           sendOtpBtn.textContent = 'Continue';
-          atprotoBtn.textContent = 'Or sign in with ATProto/Bluesky';
+          atprotoLabel.textContent = ${toScriptJson(ATMOSPHERE_BUTTON_LABEL)};
+          atprotoBtn.classList.remove('handle-mode');
         }
         emailInput.focus();
         clearError();
