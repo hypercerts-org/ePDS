@@ -267,6 +267,29 @@ describe('renderLoginPage sign-in option order', () => {
     expect(render({ branding }).match(/class="divider"/g)).toHaveLength(1)
   })
 
+  // The OTP step hides #step-email, so keeping the alternatives inside it is
+  // what hides them on the code screen (initial render and after sending).
+  it('keeps Atmosphere and Google inside the email step', () => {
+    const html = render({
+      branding: LOGIN_PAGE_BRANDING_WITH_HANDLE_LOGIN,
+      initialStep: 'otp',
+    })
+    const emailStep = html.indexOf(
+      '<div id="step-email" class="step-email hidden">',
+    )
+    const otpStep = html.indexOf('<div id="step-otp"')
+
+    expect(emailStep).not.toBe(-1)
+    for (const marker of [
+      'btn-social btn-atproto"',
+      'data-social-provider="google"',
+    ]) {
+      const pos = html.indexOf(marker)
+      expect(pos).toBeGreaterThan(emailStep)
+      expect(pos).toBeLessThan(otpStep)
+    }
+  })
+
   it('puts the @ icon before the Atmosphere label', () => {
     const html = render({ branding: LOGIN_PAGE_BRANDING_WITH_HANDLE_LOGIN })
     const icon = html.indexOf('class="btn-atproto-icon"')
