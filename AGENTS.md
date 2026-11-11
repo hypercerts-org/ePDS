@@ -419,13 +419,6 @@ import { AuthServiceContext } from './context.js'
   managed by better-auth. Expiry is hardcoded at 600 s with 5 allowed attempts.
 - Internal service-to-service calls use `x-internal-secret` header.
 
-## Task Tracking
-
-- Use `bd` (beads) for all task tracking — **not** TodoWrite or markdown files.
-- `bd ready` — show available work; `bd create` — new issue; `bd close` — done.
-- `bd export -o .beads/issues.jsonl` to export issues (commit this file).
-- Do **not** use `bd sync` (obsolete).
-
 ## Releases & Changesets
 
 ePDS uses [Changesets](https://github.com/changesets/changesets) for versioning
