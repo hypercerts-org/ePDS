@@ -137,6 +137,8 @@ export interface PageElements {
   code: FakeElement
   resendButton: FakeElement
   atprotoButton: FakeElement
+  /** The button's label span, the only part the mode toggle rewrites. */
+  atprotoLabel: FakeElement
 }
 
 /** What a test drives and observes on a page script run by runPageScript. */
@@ -179,6 +181,7 @@ export function runPageScript(
   )
   emailInput.checkValidity = () =>
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput.value.trim())
+  const atprotoLabel = fakeElement()
   const elements: PageElements = {
     emailInput,
     sendOtpForm: fakeElement({}, { 'button[type=submit]': sendOtpButton }),
@@ -187,7 +190,8 @@ export function runPageScript(
     verifyButton,
     code: fakeElement(),
     resendButton: fakeElement(),
-    atprotoButton: fakeElement(),
+    atprotoButton: fakeElement({}, { '.btn-atproto-label': atprotoLabel }),
+    atprotoLabel,
   }
   const navigations: string[] = []
   const assign = vi.fn<(url: string) => void>((url) => {

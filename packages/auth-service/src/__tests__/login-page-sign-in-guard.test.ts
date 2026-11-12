@@ -1,7 +1,7 @@
 /**
  * The login page runs one sign-in attempt at a time across every method:
  * the social buttons, sending and verifying an email code, a resend, and
- * the ATProto/Bluesky handle hand-off. Two in flight race each other — a
+ * the Atmosphere handle hand-off. Two in flight race each other — a
  * second POST /sign-in/social replaces the first one's OAuth state, and a
  * verify can land while the page is already leaving for a provider.
  *
