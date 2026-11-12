@@ -1,6 +1,7 @@
 ---
 name: epds-login
 description: Implement AT Protocol OAuth login against an ePDS instance with @atproto/oauth-client-node. Covers email-first OTP, hosted email entry, Google sign-in, handle/DID login, client metadata, callbacks, and debugging. Use when building passwordless login against ePDS, adding a "Sign in with Google" button, configuring confidential/public OAuth clients, or integrating NodeOAuthClient.
+license: MIT OR Apache-2.0
 ---
 
 # Implementing ePDS Login

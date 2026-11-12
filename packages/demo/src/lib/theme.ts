@@ -115,7 +115,6 @@ function buildInjectedCss(
     `.btn-secondary, .recovery-link { color: ${page.textMuted}; }`,
     `.btn-secondary:hover, .recovery-link:hover { color: ${page.text}; }`,
     `.btn-social { background: ${page.inputBg}; border-color: ${page.inputBorder}; color: ${page.text}; }`,
-    `.btn-atproto { background: ${page.inputBg} !important; border-color: ${page.inputBorder} !important; color: ${page.text} !important; }`,
     `.btn-social:hover { background: ${page.inputBorder}; }`,
     `.divider { color: ${page.textHint}; }`,
     `.divider::before, .divider::after { background: ${page.inputBorder}; }`,

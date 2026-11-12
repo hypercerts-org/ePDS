@@ -1,5 +1,31 @@
 # ePDS
 
+## 0.11.1
+
+### Who should read this release
+
+- **End users:**
+  - [The sign-in page now asks for your email first and lists the other ways to sign in below it.](#v0.11.1-the-sign-in-page-now-asks-for-your-email-first-and-lists)
+- **Operators:**
+  - [ePDS is now licensed under either MIT or Apache-2.0, at your option.](#v0.11.1-epds-is-now-licensed-under-either-mit-or-apache-2-0-at-your)
+
+### Patch Changes
+
+- <a id="v0.11.1-epds-is-now-licensed-under-either-mit-or-apache-2-0-at-your"></a> [#283](https://github.com/hypercerts-org/ePDS/pull/283) [`d4a33e8`](https://github.com/hypercerts-org/ePDS/commit/d4a33e8448fbd700c6520834a99955bbf9e104d0) Thanks [@holkexyz](https://github.com/holkexyz)! - ePDS is now licensed under either MIT or Apache-2.0, at your option.
+
+  **Affects:** Operators
+
+  **Operators:** The repository now ships `LICENSE-MIT` and `LICENSE-APACHE`, and every package.json says `"MIT OR Apache-2.0"`. Earlier releases were MIT, and MIT is still one of the two choices. Neither license covers the logos and wordmarks in the repository, such as the Certified brandmark and wordmark shown on the sign-in pages. They belong to their owners.
+
+- <a id="v0.11.1-the-sign-in-page-now-asks-for-your-email-first-and-lists"></a> [#285](https://github.com/hypercerts-org/ePDS/pull/285) [`74fe233`](https://github.com/hypercerts-org/ePDS/commit/74fe233700b9b521313b10301651cfadfa05f66c) Thanks [@Kzoeps](https://github.com/Kzoeps)! - The sign-in page now asks for your email first and lists the other ways to sign in below it.
+
+  **Affects:** End users
+
+  **End users:**
+  - Enter your email address and continue, or choose "Sign in with Atmosphere" or "Sign in with Google" under the "or" line.
+  - "Sign in with Atmosphere" replaces the old "Or sign in with ATProto/Bluesky" button, and switches to "Sign in with email" while you are typing a handle.
+  - Other sign-in options no longer appear on the screen where you enter your code.
+
 ## 0.11.0
 
 ### Summary

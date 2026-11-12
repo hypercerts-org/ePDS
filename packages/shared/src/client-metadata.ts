@@ -71,7 +71,7 @@ export interface ClientMetadata {
   epds_skip_consent_on_signup?: boolean
   /**
    * ePDS extension — when set, the auth-service login page renders an
-   * "Or sign in with ATProto/Bluesky" button. Submitting a handle
+   * "Sign in with Atmosphere" button. Submitting a handle
    * navigates the browser to this URL with a `handle=<value>` query
    * param added (via `URLSearchParams.set`, so any existing query
    * string is preserved), letting the client resolve the handle to a

@@ -1,9 +1,9 @@
 {
   "name": "ePDS",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "private": true,
   "description": "ePDS — extended Personal Data Server for AT Protocol with passwordless OTP authentication",
-  "license": "MIT",
+  "license": "MIT OR Apache-2.0",
   "engines": {
     "node": ">=22.19.0"
   },
@@ -55,6 +55,7 @@
     "eslint-plugin-import": "^2.32.0",
     "prettier": "^3.8.1",
     "tsx": "^4.0.0",
+    "typescript": "^5.3.3",
     "typescript-eslint": "^8.56.0",
     "vitest": "^4.1.0"
   },
