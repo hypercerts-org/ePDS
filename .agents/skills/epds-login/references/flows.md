@@ -40,7 +40,7 @@ Google:
 ```typescript
 const url = await client.authorize(epdsUrl)
 url.searchParams.set('epds_social_provider', 'google')
-url.searchParams.set('login_hint', email) // optional: pre-selects the account
+if (email) url.searchParams.set('login_hint', email) // optional: pre-selects the account
 ```
 
 ePDS redirects straight to Google and sends no email code. The user comes back
