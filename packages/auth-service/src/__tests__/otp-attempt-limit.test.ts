@@ -164,12 +164,15 @@ const surfaces: [string, () => Promise<Verifier>][] = [
   ['/account/verify-otp route', startWrapper],
 ]
 
-describe.each(surfaces)('OTP attempt limit via %s', (_name, makeVerifier) => {
-  // On the direct surface this reproduces the 1.4.18 race (the correct code
-  // is accepted). On the /account/verify-otp surface HTTP staggers the
-  // requests, so it only checks the limit holds; it is not a race repro.
+describe('OTP attempt limit via Better Auth sign-in endpoint', () => {
+  // Reproduces the 1.4.18 race (the correct code is accepted). Direct calls
+  // all start before any of them finishes, so every racer is refused while
+  // the first wrong guess holds the code. Over HTTP the requests are
+  // staggered: a later correct guess may legitimately arrive after that
+  // guess restores the code and succeed with budget left, so this is not
+  // run against /account/verify-otp. The next test covers that route.
   it('does not evaluate a burst of concurrent guesses in parallel', async () => {
-    const verifier = await makeVerifier()
+    const verifier = direct
     const code = await issueCode()
 
     // 19 wrong guesses and then the correct code, all in flight at once.
@@ -191,7 +194,9 @@ describe.each(surfaces)('OTP attempt limit via %s', (_name, makeVerifier) => {
     const used = storedAttempts()
     expect(used === null || (used >= 1 && used <= ALLOWED_ATTEMPTS)).toBe(true)
   })
+})
 
+describe.each(surfaces)('OTP attempt limit via %s', (_name, makeVerifier) => {
   it('keeps an honest counter after a burst, so the 5-attempt budget still holds', async () => {
     const verifier = await makeVerifier()
     const code = await issueCode()
