@@ -243,7 +243,9 @@ async function main() {
 
 // The unhandledRejection listener is log-only, so a startup failure must exit
 // non-zero here or the process would end with status 0.
-main().catch((err: unknown) => {
+try {
+  await main()
+} catch (err) {
   logger.fatal({ err }, 'auth-service failed to start')
   process.exit(1)
-})
+}
