@@ -5,7 +5,7 @@
  */
 import Database from 'better-sqlite3'
 import { betterAuth } from 'better-auth'
-import { getMigrations } from 'better-auth/db'
+import { getMigrations } from 'better-auth/db/migration'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildSocialProviders, databaseHooks } from '../better-auth.js'
 import {

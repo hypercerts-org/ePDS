@@ -8,7 +8,7 @@
  * email codes captured from a stub EmailSender, so both kinds of sign-in
  * run through stock better-auth.
  */
-import { getMigrations } from 'better-auth/db'
+import { getMigrations } from 'better-auth/db/migration'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EpdsDb } from '@certified-app/shared'
 import { createBetterAuth, refuseUnverifiedUser } from '../better-auth.js'

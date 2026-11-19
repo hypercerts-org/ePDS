@@ -15,7 +15,7 @@ import type { AddressInfo } from 'node:net'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import Database from 'better-sqlite3'
-import { getMigrations } from 'better-auth/db'
+import { getMigrations } from 'better-auth/db/migration'
 import cookieParser from 'cookie-parser'
 import express from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -165,21 +165,45 @@ const surfaces: [string, () => Promise<Verifier>][] = [
 ]
 
 describe.each(surfaces)('OTP attempt limit via %s', (_name, makeVerifier) => {
-  it('counts every concurrent wrong guess, then refuses the correct code', async () => {
+  it('does not evaluate a burst of concurrent guesses in parallel', async () => {
     const verifier = await makeVerifier()
     const code = await issueCode()
 
+    // 19 wrong guesses and then the correct code, all in flight at once.
+    // Better Auth 1.4.18 let every one read the same attempt counter and
+    // compare itself, so the burst was not limited and the correct code
+    // got in. Since 1.7.16 only one guess at a time can compare against
+    // the stored code; the rest are refused unevaluated.
     const results = await Promise.all(
+      Array.from({ length: CONCURRENT_GUESSES }, (_, i) =>
+        verifier.verify(
+          i === CONCURRENT_GUESSES - 1 ? code : wrongCode(code, i),
+        ),
+      ),
+    )
+
+    expect(results).not.toContain(true)
+    // null: the burst arrived slowly enough to be evaluated one by one and
+    // used up the code. Either way it never exceeded the allowance.
+    const used = storedAttempts()
+    expect(used === null || (used >= 1 && used <= ALLOWED_ATTEMPTS)).toBe(true)
+  })
+
+  it('keeps an honest counter after a burst, so the 5-attempt budget still holds', async () => {
+    const verifier = await makeVerifier()
+    const code = await issueCode()
+
+    await Promise.all(
       Array.from({ length: CONCURRENT_GUESSES }, (_, i) =>
         verifier.verify(wrongCode(code, i)),
       ),
     )
+    // null: already exhausted (see above); nothing left to spend.
+    const used = storedAttempts() ?? ALLOWED_ATTEMPTS
+    for (let i = 0; i < ALLOWED_ATTEMPTS - used; i++) {
+      expect(await verifier.verify(wrongCode(code, 1000 + i))).toBe(false)
+    }
 
-    expect(results.every((ok) => !ok)).toBe(true)
-    // Either every guess was counted, or the code was invalidated once the
-    // limit was reached. A counter below the limit means guesses were lost.
-    const attempts = storedAttempts()
-    expect(attempts === null || attempts >= ALLOWED_ATTEMPTS).toBe(true)
     expect(await verifier.verify(code)).toBe(false)
   })
 

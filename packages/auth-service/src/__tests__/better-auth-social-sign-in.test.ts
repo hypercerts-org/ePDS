@@ -16,7 +16,7 @@
  */
 import Database from 'better-sqlite3'
 import { betterAuth } from 'better-auth'
-import { getMigrations } from 'better-auth/db'
+import { getMigrations } from 'better-auth/db/migration'
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import {
   buildSocialProviders,
@@ -159,11 +159,14 @@ describe('Google sign-in emailVerified (real better-auth)', () => {
 
     // The address's owner then signs in with an email code, which creates
     // a verified user for it.
-    await ctx.internalAdapter.createUser({
-      email: 'alice@example.com',
-      name: 'alice@example.com',
-      emailVerified: true,
-    })
+    await ctx.internalAdapter.createUser(
+      {
+        email: 'alice@example.com',
+        name: 'alice@example.com',
+        emailVerified: true,
+      },
+      { method: 'email-otp' },
+    )
 
     // The Google identity still cannot sign in as that user.
     await expect(signInWithGoogle(auth, claims)).rejects.toThrow(
@@ -177,11 +180,14 @@ describe('Google sign-in emailVerified (real better-auth)', () => {
     const auth = await makeAuth()
     const ctx = await auth.$context
     // As created by a successful email-OTP sign-in.
-    await ctx.internalAdapter.createUser({
-      email: 'alice@example.com',
-      name: 'alice@example.com',
-      emailVerified: true,
-    })
+    await ctx.internalAdapter.createUser(
+      {
+        email: 'alice@example.com',
+        name: 'alice@example.com',
+        emailVerified: true,
+      },
+      { method: 'email-otp' },
+    )
 
     await expect(
       signInWithGoogle(auth, {
@@ -197,11 +203,14 @@ describe('Google sign-in emailVerified (real better-auth)', () => {
   it('links a verified Gmail identity to an existing user', async () => {
     const auth = await makeAuth()
     const ctx = await auth.$context
-    await ctx.internalAdapter.createUser({
-      email: 'alice@gmail.com',
-      name: 'alice@gmail.com',
-      emailVerified: true,
-    })
+    await ctx.internalAdapter.createUser(
+      {
+        email: 'alice@gmail.com',
+        name: 'alice@gmail.com',
+        emailVerified: true,
+      },
+      { method: 'email-otp' },
+    )
 
     const user = await signInWithGoogle(auth, {
       email: 'alice@gmail.com',
