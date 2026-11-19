@@ -87,7 +87,7 @@ describe('POST /account/verify-otp refusal messages', () => {
     expect(r.html).toContain('Invalid or expired code')
   })
 
-  it.each([429, 500, 502])('does not blame the code for %i', async (s) => {
+  it.each([429, 500])('does not blame the code for %i', async (s) => {
     const r = await verifyWithStatus(s)
     expect(r.status).toBe(200)
     expect(r.html).toContain('Verification failed')

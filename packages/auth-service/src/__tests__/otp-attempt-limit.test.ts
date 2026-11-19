@@ -48,6 +48,7 @@ const ctx = {
 
 let dbPath: string
 let auth: BetterAuthInstance
+let digestSpy: { mockRestore: () => void } | undefined
 let server: ReturnType<ReturnType<typeof express>['listen']> | undefined
 
 beforeEach(async () => {
@@ -64,6 +65,8 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  digestSpy?.mockRestore()
+  digestSpy = undefined
   vi.useRealTimers()
   vi.unstubAllEnvs()
   codes.clear()
@@ -109,6 +112,25 @@ function storedAttempts(): number | null {
   } finally {
     sqlite.close()
   }
+}
+
+/**
+ * Counts wrong guesses that reached the code comparison, independently of
+ * the stored attempt counter. The plugin runs with storeOTP: 'hashed', so
+ * every guess it compares is SHA-256 hashed; a guess refused before
+ * comparison (1.7.16+ does this while another guess holds the code) is not.
+ * The real code is hashed once when issued and is not counted.
+ */
+function countEvaluatedGuesses(realCode: string): () => number {
+  const subtle = globalThis.crypto.subtle
+  const digest = subtle.digest.bind(subtle)
+  let evaluated = 0
+  digestSpy = vi.spyOn(subtle, 'digest').mockImplementation((alg, data) => {
+    const text = new TextDecoder().decode(data as Uint8Array)
+    if (text !== realCode && /^\d{6}$/.test(text)) evaluated++
+    return digest(alg, data)
+  })
+  return () => evaluated
 }
 
 interface Verifier {
@@ -197,18 +219,24 @@ describe('OTP attempt limit via Better Auth sign-in endpoint', () => {
 })
 
 describe.each(surfaces)('OTP attempt limit via %s', (_name, makeVerifier) => {
-  it('keeps an honest counter after a burst, so the 5-attempt budget still holds', async () => {
+  it('spends the 5-attempt budget on every guess a burst evaluates', async () => {
     const verifier = await makeVerifier()
     const code = await issueCode()
+    const evaluated = countEvaluatedGuesses(code)
 
     await Promise.all(
       Array.from({ length: CONCURRENT_GUESSES }, (_, i) =>
         verifier.verify(wrongCode(code, i)),
       ),
     )
-    // null: already exhausted (see above); nothing left to spend.
-    const used = storedAttempts() ?? ALLOWED_ATTEMPTS
-    for (let i = 0; i < ALLOWED_ATTEMPTS - used; i++) {
+    // Top up with sequential wrong guesses until 5 have been evaluated in
+    // total. Better Auth 1.4.18 evaluated the whole burst but recorded it as
+    // one attempt, so the code was still live after 20 evaluated guesses.
+    // Only the direct-endpoint run fails on 1.4.18. Over HTTP the requests
+    // are staggered, so the route run guards the 5-attempt budget through
+    // /account/verify-otp, not the race itself.
+    for (let i = 0; evaluated() < ALLOWED_ATTEMPTS; i++) {
+      expect(i).toBeLessThan(ALLOWED_ATTEMPTS)
       expect(await verifier.verify(wrongCode(code, 1000 + i))).toBe(false)
     }
 
