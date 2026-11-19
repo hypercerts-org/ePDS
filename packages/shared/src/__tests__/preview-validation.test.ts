@@ -111,6 +111,20 @@ describe('validateClientMetadataForPreview', () => {
     expect(byId['branding-css'].detail).toContain('exceeds')
   })
 
+  it('warns when colors are not strings, matching what real flows use', async () => {
+    const url = 'https://typed.example/client-metadata.json'
+    mockFetchOnce({
+      client_id: url,
+      redirect_uris: ['https://typed.example/cb'],
+      brand_color: 5,
+      background_color: { r: 0 },
+    })
+    const result = await validateClientMetadataForPreview(url, [])
+    const byId = Object.fromEntries(result.checks.map((c) => [c.id, c]))
+    expect(byId['brand-color'].severity).toBe('warn')
+    expect(byId['background-color'].severity).toBe('warn')
+  })
+
   it('warns (not errors) when optional branding fields are missing', async () => {
     const url = 'https://plain.example/client-metadata.json'
     mockFetchOnce({
