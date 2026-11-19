@@ -176,7 +176,20 @@ async function fetchMetadata(
       }
     }
     try {
-      const metadata = (await res.json()) as ClientMetadata
+      const body: unknown = await res.json()
+      if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+        return {
+          metadata: null,
+          fetchCheck: {
+            id: 'fetch-json',
+            label: 'Response is a JSON object',
+            severity: 'error',
+            detail:
+              'The server returned 200 but the JSON body is not an object.',
+          },
+        }
+      }
+      const metadata = body as ClientMetadata
       return {
         metadata,
         fetchCheck: {
