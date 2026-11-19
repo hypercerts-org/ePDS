@@ -419,11 +419,14 @@ upstream: the login page for handle/DID `login_hint`s sends `useFlowEmail`
 instead of the account's private email, and this hook swaps the address stored
 on the `auth_flow` row into the request body.
 
-It relies on better-auth 1.4.18 behaviour (re-checked on 1.7.26 by `flow-email-plugin.test.ts`) (`dist/api/index.mjs`, router
-`onRequest`):
+It relies on better-auth behaviour (last checked against 1.7.26;
+`dist/api/index.mjs`, router `onRequest`):
 
-- every plugin's `onRequest` runs before the rate limiter, origin check and
-  endpoint, and the `{ request }` it returns is what those stages receive;
+- the rate limiter runs first, on the original request (it keys on IP and
+  path, which the rewrite does not change), then every plugin's `onRequest`;
+  the `{ request }` the hook returns is what the origin check and endpoint
+  receive. The hook's own 400/500 answers therefore count against the
+  limiter (on 1.4.18 they did not);
 - `toNodeHandler` builds the `Request` from the Node request with a
   streaming body and the original `content-length` header (the hook reads
   a bounded clone, passes the original through unread, and drops
