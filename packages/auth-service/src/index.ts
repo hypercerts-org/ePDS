@@ -229,6 +229,12 @@ async function main() {
     process.exit(0)
   }
 
+  // Log-only: route errors are forwarded to errorHandler, so anything that
+  // reaches here escaped a code path we do not control (timers, listeners).
+  process.on('unhandledRejection', (reason) => {
+    logger.error({ err: reason }, 'Unhandled promise rejection')
+  })
+
   process.on('SIGTERM', shutdown)
   process.on('SIGINT', shutdown)
 }

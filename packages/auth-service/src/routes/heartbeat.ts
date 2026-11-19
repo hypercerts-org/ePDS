@@ -20,7 +20,8 @@
  * auth_flow row is gone, the ping returns `flow_expired` and the
  * browser stops pinging. No new tokens are issued.
  */
-import { Router, type Request, type Response } from 'express'
+import { type Router, type Request, type Response } from 'express'
+import { createAsyncRouter } from '../lib/async-router.js'
 import { createLogger } from '@certified-app/shared'
 import type { AuthServiceContext } from '../context.js'
 import { cleanExit } from '../lib/clean-exit.js'
@@ -49,7 +50,7 @@ export type HeartbeatResponse =
     }
 
 export function createHeartbeatRouter(ctx: AuthServiceContext): Router {
-  const router = Router()
+  const router = createAsyncRouter()
   const { pdsUrl, internalSecret } = requireInternalEnv()
 
   router.get('/auth/ping', async (req: Request, res: Response) => {

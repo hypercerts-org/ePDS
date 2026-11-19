@@ -13,7 +13,8 @@
  * submit) directly to the better-auth API endpoints. This file provides the HTML
  * forms that orchestrate those calls.
  */
-import { Router, type Request, type Response } from 'express'
+import { type Router, type Request, type Response } from 'express'
+import { createAsyncRouter } from '../lib/async-router.js'
 import { escapeHtml, maskEmail, createLogger } from '@certified-app/shared'
 import { fromNodeHeaders } from 'better-auth/node'
 import type { AuthServiceContext } from '../context.js'
@@ -33,7 +34,7 @@ export function createAccountLoginRouter(
   auth: BetterAuthInstance,
   ctx: AuthServiceContext,
 ): Router {
-  const router = Router()
+  const router = createAsyncRouter()
 
   // GET /account/login - show email form (or redirect if already logged in)
   router.get('/account/login', async (req: Request, res: Response) => {

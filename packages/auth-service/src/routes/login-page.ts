@@ -34,7 +34,8 @@
  *   - On success, better-auth redirects to /auth/complete (the bridge route)
  *   - Bridge reads epds_auth_flow cookie → auth_flow → HMAC-signed redirect
  */
-import { Router, type Request, type Response } from 'express'
+import { type Router, type Request, type Response } from 'express'
+import { createAsyncRouter } from '../lib/async-router.js'
 import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -248,7 +249,7 @@ export function createLoginPageRouter(
   ctx: AuthServiceContext,
   auth: Pick<BetterAuthInstance, 'api'>,
 ): Router {
-  const router = Router()
+  const router = createAsyncRouter()
 
   router.get('/oauth/authorize', async (req: Request, res: Response) => {
     // Express's qs parser turns a repeated `?request_uri=a&request_uri=b` into

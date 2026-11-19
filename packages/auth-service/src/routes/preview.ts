@@ -25,7 +25,8 @@
  * synthesises the field, so the button is only visible when iterating
  * against client metadata that already declares it.
  */
-import { Router, type Request, type Response } from 'express'
+import { type Router, type Request, type Response } from 'express'
+import { createAsyncRouter } from '../lib/async-router.js'
 import { randomBytes } from 'node:crypto'
 import type { AuthServiceContext } from '../context.js'
 import { resolvePreviewOtpCharset } from '../otp-input.js'
@@ -142,7 +143,7 @@ function sendHtml(res: Response, html: string): void {
 }
 
 export function createPreviewRouter(ctx: AuthServiceContext): Router {
-  const router = Router()
+  const router = createAsyncRouter()
 
   // Single gate: every route 404s unless the env flag is on. Checked
   // at each request rather than at mount time so the flag can flip
