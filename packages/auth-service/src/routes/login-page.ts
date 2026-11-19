@@ -1838,13 +1838,13 @@ export function renderLoginPage(input: {
               // path, reasoning that a typo should be retyped rather
               // than resent. But "Invalid OTP" does not reliably mean
               // a typo: better-auth throws it from two places
-              // (1.4.18 email-otp/routes.mjs) — the wrong-code
+              // (email-otp/routes.mjs) — the wrong-code
               // comparison, and a missing stored code. The second
               // covers several states where retyping cannot possibly
               // work and a fresh code is the only recovery:
               //
-              //   - after a lockout. TOO_MANY_ATTEMPTS deletes the
-              //     stored value, so it is reported exactly once and
+              //   - after a lockout. TOO_MANY_ATTEMPTS leaves the
+              //     code consumed, so it is reported exactly once and
               //     every later submit falls through to "Invalid OTP".
               //   - after the code was consumed elsewhere, e.g. the
               //     user completed sign-in in another tab.
