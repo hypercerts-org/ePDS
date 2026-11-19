@@ -189,10 +189,13 @@ export const socialProviders: SocialProvidersConfig = {}
 
 /**
  * The message better-auth reports when {@link refuseUnverifiedUser} refuses
- * a user. Its OAuth callback turns it into `?error=email_not_verified` on
- * the errorCallbackURL; its ID-token sign-in returns it as a 401.
+ * a user. Its OAuth callback turns it into `?error=email_not_verified` (plus
+ * an `error_description`) on the errorCallbackURL; its ID-token sign-in returns it as a 401.
  */
 export const EMAIL_NOT_VERIFIED = 'email not verified'
+
+/** The `?error=` value of that redirect. */
+export const EMAIL_NOT_VERIFIED_CODE = 'email_not_verified'
 
 /**
  * better-auth `databaseHooks.user.create.before`: never create a user whose
@@ -211,7 +214,12 @@ export function refuseUnverifiedUser(user: {
 }): Promise<void> {
   if (hasVerifiedEmail(user)) return Promise.resolve()
   return Promise.reject(
-    new APIError('FORBIDDEN', { message: EMAIL_NOT_VERIFIED }),
+    // better-auth 1.7 only turns a hook's APIError into an error redirect
+    // when it carries a `code`; without one the callback answers 403.
+    new APIError('FORBIDDEN', {
+      message: EMAIL_NOT_VERIFIED,
+      code: EMAIL_NOT_VERIFIED_CODE,
+    }),
   )
 }
 

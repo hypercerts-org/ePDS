@@ -93,7 +93,9 @@ describe('createBetterAuth wiring', () => {
         email: 'alice@example.com',
         email_verified: true,
       }),
-    ).toBe('/auth/complete?error=email_not_verified')
+    ).toBe(
+      '/auth/complete?error=email_not_verified&error_description=email+not+verified',
+    )
     expect(await storedUser(auth, 'alice@example.com')).toBeNull()
   })
 
@@ -191,7 +193,7 @@ describe('a Google sign-in started on the server (createBetterAuth)', () => {
     const { state } = await start(auth)
     stubGoogleToken({ email: 'alice@gmail.com', email_verified: true })
     expect(await googleCallback(auth, `code=c&state=${state}`, '')).toBe(
-      '/auth/complete?error=state_mismatch',
+      '/auth/complete?epds_social_provider=google&error=state_mismatch',
     )
     expect(await storedUser(auth, 'alice@gmail.com')).toBeNull()
   })

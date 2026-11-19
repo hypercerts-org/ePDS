@@ -82,7 +82,9 @@ describe('installTestGoogleTokenEndpoint', () => {
     }
     expect(
       await googleCallback(auth, `code=${code(claims)}&state=${state}`, cookie),
-    ).toBe('/auth/complete?error=email_not_verified')
+    ).toBe(
+      '/auth/complete?error=email_not_verified&error_description=email+not+verified',
+    )
   })
 
   it('leaves every other request alone', async () => {

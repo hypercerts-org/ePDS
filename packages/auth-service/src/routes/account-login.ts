@@ -120,7 +120,9 @@ export function createAccountLoginRouter(
       // code) instead of throwing; without this check a failed verification
       // would redirect to /account as if it had succeeded.
       if (!response.ok) {
-        throw new Error(`invalid or expired code (better-auth status ${response.status})`)
+        throw new Error(
+          `invalid or expired code (better-auth status ${response.status})`,
+        )
       }
 
       // Forward the Set-Cookie header from better-auth's response

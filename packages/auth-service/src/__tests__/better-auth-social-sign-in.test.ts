@@ -242,7 +242,7 @@ describe('Google redirect flow outcomes (real better-auth)', () => {
     stubGoogleToken({ email: 'alice@example.com', email_verified: true })
 
     expect(await googleCallback(auth, `code=c&state=${state}`, cookie)).toBe(
-      '/auth/complete?error=email_not_verified',
+      '/auth/complete?error=email_not_verified&error_description=email+not+verified',
     )
     expect(await storedUser(auth, 'alice@example.com')).toBeNull()
   })
