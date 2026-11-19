@@ -516,24 +516,57 @@ describe('signCallback / verifyCallback control characters', () => {
       })
     }
 
-    it(`verifyCallback rejects a newline in ${field}`, () => {
-      const { sig, ts } = signCallback(base, secret)
-      expect(
-        verifyCallback({ ...base, [field]: 'a\nb' }, ts, sig, secret),
-      ).toBe(false)
+    // The signature is computed over the bad payload itself, so only the
+    // control-character check (not an HMAC mismatch) can reject it.
+    it(`verifyCallback rejects a correctly signed newline in ${field}`, async () => {
+      const params = { ...base, [field]: 'a\nb' }
+      const ts = nowTs()
+      const sig = await hmacOver(params, ts)
+      expect(verifyCallback(params, ts, sig, secret)).toBe(false)
     })
   }
 
-  it('verifyCallback rejects control characters in ts', () => {
-    const { sig, ts } = signCallback(base, secret)
-    expect(verifyCallback(base, `${ts}\n`, sig, secret)).toBe(false)
+  it('hand-built signature over clean values verifies', async () => {
+    const ts = nowTs()
+    expect(verifyCallback(base, ts, await hmacOver(base, ts), secret)).toBe(
+      true,
+    )
   })
 
-  it.each(['12abc', '+123', ' 123', '1e3', '-1', ''])(
-    'verifyCallback rejects non-digit ts %j',
-    (badTs) => {
-      const { sig } = signCallback(base, secret)
+  // Each of these parses to the current time with parseInt and is signed
+  // over the exact string, so only the digits-only ts check rejects it.
+  it.each([
+    (t: string) => `${t}\n`,
+    (t: string) => `${t}abc`,
+    (t: string) => `+${t}`,
+    (t: string) => ` ${t}`,
+    (t: string) => `${t}.5`,
+  ])(
+    'verifyCallback rejects a correctly signed non-digit ts (%#)',
+    async (make) => {
+      const badTs = make(nowTs())
+      const sig = await hmacOver(base, badTs)
       expect(verifyCallback(base, badTs, sig, secret)).toBe(false)
     },
   )
+
+  function nowTs(): string {
+    return Math.floor(Date.now() / 1000).toString()
+  }
+
+  async function hmacOver(p: CallbackParams, ts: string): Promise<string> {
+    const { createHmac } = await import('node:crypto')
+    const payload = [
+      p.request_uri,
+      p.email,
+      p.approved,
+      p.new_account,
+      p.handle ?? '',
+      p.client_id ?? '',
+      p.epds_handle_mode ?? '',
+      p.email_verified,
+      ts,
+    ].join('\n')
+    return createHmac('sha256', secret).update(payload).digest('hex')
+  }
 })
