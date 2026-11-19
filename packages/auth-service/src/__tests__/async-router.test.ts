@@ -7,7 +7,7 @@ import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import express, { type RequestHandler } from 'express'
-import { createAsyncRouter } from '../lib/async-router.js'
+import { createAsyncRouter, forwardAsyncErrors } from '../lib/async-router.js'
 import { errorHandler } from '../lib/error-middleware.js'
 
 let server: Server
@@ -36,6 +36,15 @@ beforeAll(async () => {
       await Promise.reject(new Error('rejected'))
     },
   ])
+  router.get('/next-err', (_req, _res, next) => {
+    next(new Error('forwarded'))
+  })
+  router.get('/skip', (_req, _res, next) => {
+    next('route')
+  })
+  router.get('/skip', (_req, res) => {
+    res.json({ skipped: true })
+  })
   app.use(router)
   app.use(errorHandler)
 
@@ -72,5 +81,41 @@ describe('createAsyncRouter', () => {
   it('wraps handlers passed as arrays', async () => {
     const res = await fetch(`${baseUrl}/with-middleware`, { method: 'POST' })
     expect(res.status).toBe(500)
+  })
+
+  it('passes next(err) to the error handler', async () => {
+    expect((await fetch(`${baseUrl}/next-err`)).status).toBe(500)
+  })
+
+  it("honours next('route')", async () => {
+    const res = await fetch(`${baseUrl}/skip`)
+    expect(await res.json()).toEqual({ skipped: true })
+  })
+
+  it('wraps a standalone async handler such as the better-auth mount', async () => {
+    const app = express()
+    app.all(
+      '/api/auth/*',
+      forwardAsyncErrors(async () => {
+        await Promise.reject(new Error('auth handler failed'))
+      }),
+    )
+    app.use(errorHandler)
+    const s = await new Promise<Server>((resolve) => {
+      const srv = app.listen(0, '127.0.0.1', () => {
+        resolve(srv)
+      })
+    })
+    try {
+      const port = (s.address() as AddressInfo).port
+      const res = await fetch(`http://127.0.0.1:${port}/api/auth/anything`)
+      expect(res.status).toBe(500)
+    } finally {
+      await new Promise<void>((resolve) => {
+        s.close(() => {
+          resolve()
+        })
+      })
+    }
   })
 })

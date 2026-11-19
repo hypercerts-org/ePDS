@@ -231,3 +231,21 @@ describe('validateClientMetadataForPreview', () => {
     expect(result.checks.find((c) => c.id === 'trusted-client')).toBeUndefined()
   })
 })
+
+describe('validateClientMetadataForPreview non-object body', () => {
+  it.each([
+    ['null', null],
+    ['an array', []],
+  ])('reports a fetch-json error when the body is %s', async (_l, body) => {
+    mockFetchOnce(body)
+    const result = await validateClientMetadataForPreview(
+      'https://cool.app/client-metadata.json',
+      null,
+    )
+    expect(result.fetched).toBe(false)
+    expect(result.checks[0]).toMatchObject({
+      id: 'fetch-json',
+      severity: 'error',
+    })
+  })
+})
