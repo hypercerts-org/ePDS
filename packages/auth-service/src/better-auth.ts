@@ -52,8 +52,9 @@ const logger = createLogger('auth:better-auth')
  * Note on "Invalid OTP": better-auth throws it both for a wrong code and for
  * no pending code at all, so the message says "invalid or unrecognized" rather
  * than implying only a typo. The two cases remain indistinguishable in the log.
- * "Too many attempts" additionally deletes the stored code (better-auth 1.4.18
- * dist/plugins/email-otp/routes.mjs), which the message reflects.
+ * "Too many attempts" additionally leaves the code consumed (better-auth 1.7
+ * dist/plugins/email-otp/routes.mjs, atomicVerifyOTP), which the message
+ * reflects.
  */
 const OTP_FAILURE_MESSAGES: Record<string, string> = {
   'OTP expired': 'OTP verification failed: code expired',

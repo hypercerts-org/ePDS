@@ -419,7 +419,7 @@ upstream: the login page for handle/DID `login_hint`s sends `useFlowEmail`
 instead of the account's private email, and this hook swaps the address stored
 on the `auth_flow` row into the request body.
 
-It relies on better-auth 1.4.18 behaviour (`dist/api/index.mjs`, router
+It relies on better-auth 1.4.18 behaviour (re-checked on 1.7.26 by `flow-email-plugin.test.ts`) (`dist/api/index.mjs`, router
 `onRequest`):
 
 - every plugin's `onRequest` runs before the rate limiter, origin check and
