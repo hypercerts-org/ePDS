@@ -19,9 +19,6 @@ import { getMigrations } from 'better-auth/db/migration'
 import { emailOTP } from 'better-auth/plugins'
 import type { GoogleOptions } from 'better-auth/social-providers'
 import Database from 'better-sqlite3'
-// Anchors the zod type that better-auth 1.7's inferred return type mentions,
-// so declaration emit can name it ('zod' is a direct dependency for this).
-import type {} from 'zod/v4/core'
 import type { EmailSender } from './email/sender.js'
 import { flowEmailPlugin } from './lib/flow-email-plugin.js'
 import { getDidByEmail } from './lib/get-did-by-email.js'
@@ -29,6 +26,9 @@ import { mapGoogleProfileToUser } from './lib/google-email-verified.js'
 import { ensurePdsUrl } from './lib/pds-url.js'
 import { hasVerifiedEmail } from './lib/verified-email.js'
 
+// Declaration emit (TS2742) needs 'zod' resolvable from this package, because
+// better-auth 1.7's inferred return type mentions zod/v4/core. The direct
+// 'zod' dependency in package.json provides that; no import is needed.
 export type BetterAuthInstance = ReturnType<typeof createBetterAuth>
 
 /** The logger type used across this module — avoids a direct pino dependency. */
