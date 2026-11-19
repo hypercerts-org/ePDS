@@ -192,7 +192,7 @@ export const socialProviders: SocialProvidersConfig = {}
  * The message better-auth reports when {@link refuseUnverifiedUser} refuses
  * a user. Its OAuth callback turns it into `?error=email_not_verified` (plus
  * an `error_description`) on the errorCallbackURL; its ID-token sign-in
- * returns it as a 401 (1.4.18 behaviour, not re-verified on 1.7).
+ * rejects the request with an error response.
  */
 export const EMAIL_NOT_VERIFIED = 'email not verified'
 
