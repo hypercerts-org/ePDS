@@ -31,6 +31,7 @@ import {
   validateOtpCharset,
   validateOtpLength,
 } from './lib/otp-config-validation.js'
+import { forwardAsyncErrors } from './lib/async-router.js'
 import { errorHandler, notFoundHandler } from './lib/error-middleware.js'
 
 const logger = createLogger('auth-service')
@@ -51,7 +52,7 @@ export function createAuthService(config: AuthServiceConfig): {
     config.otpLength,
     config.otpCharset,
   )
-  app.all('/api/auth/*', toNodeHandler(betterAuthInstance))
+  app.all('/api/auth/*', forwardAsyncErrors(toNodeHandler(betterAuthInstance)))
 
   // Webhook verification requires the exact request bytes, so mount this
   // before any urlencoded or JSON body parser. It deliberately sits outside
@@ -165,6 +166,13 @@ export function createAuthService(config: AuthServiceConfig): {
 
 // Entry point when run directly
 async function main() {
+  // Registered first so a rejection during startup is logged, not fatal.
+  // Log-only: route errors are forwarded to errorHandler, so anything that
+  // reaches here escaped a code path we do not control (timers, listeners).
+  process.on('unhandledRejection', (reason) => {
+    logger.error({ err: reason }, 'Unhandled promise rejection')
+  })
+
   const config: AuthServiceConfig = {
     hostname: process.env.AUTH_HOSTNAME || 'auth.localhost',
     port: resolveAuthPort(),
@@ -228,12 +236,6 @@ async function main() {
     ctx.destroy()
     process.exit(0)
   }
-
-  // Log-only: route errors are forwarded to errorHandler, so anything that
-  // reaches here escaped a code path we do not control (timers, listeners).
-  process.on('unhandledRejection', (reason) => {
-    logger.error({ err: reason }, 'Unhandled promise rejection')
-  })
 
   process.on('SIGTERM', shutdown)
   process.on('SIGINT', shutdown)
