@@ -2,7 +2,8 @@
  * Decide whether a Google sign-in proves control of the email address it
  * reports.
  *
- * better-auth 1.4.18's Google provider copies the ID token's
+ * better-auth 1.4.18's Google provider (behaviour not re-verified on
+ * 1.7, which the tests in create-better-auth.test.ts still exercise) copies the ID token's
  * `email_verified` claim into the user's `emailVerified` unchanged, and the
  * code that consumes it (user creation, implicit account linking) tests it
  * for truthiness. Taking the claim at face value is wrong in two ways:

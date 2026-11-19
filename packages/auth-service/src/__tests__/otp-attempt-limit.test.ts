@@ -165,6 +165,9 @@ const surfaces: [string, () => Promise<Verifier>][] = [
 ]
 
 describe.each(surfaces)('OTP attempt limit via %s', (_name, makeVerifier) => {
+  // On the direct surface this reproduces the 1.4.18 race (the correct code
+  // is accepted). On the /account/verify-otp surface HTTP staggers the
+  // requests, so it only checks the limit holds; it is not a race repro.
   it('does not evaluate a burst of concurrent guesses in parallel', async () => {
     const verifier = await makeVerifier()
     const code = await issueCode()

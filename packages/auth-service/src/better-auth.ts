@@ -191,7 +191,8 @@ export const socialProviders: SocialProvidersConfig = {}
 /**
  * The message better-auth reports when {@link refuseUnverifiedUser} refuses
  * a user. Its OAuth callback turns it into `?error=email_not_verified` (plus
- * an `error_description`) on the errorCallbackURL; its ID-token sign-in returns it as a 401.
+ * an `error_description`) on the errorCallbackURL; its ID-token sign-in
+ * returns it as a 401 (1.4.18 behaviour, not re-verified on 1.7).
  */
 export const EMAIL_NOT_VERIFIED = 'email not verified'
 
@@ -206,7 +207,7 @@ export const EMAIL_NOT_VERIFIED_CODE = 'email_not_verified'
  * in practice this refuses social sign-ins whose provider does not vouch
  * for the email. Such a sign-in must not leave a user behind: an email-OTP
  * sign-in for that address later marks the existing user verified
- * (better-auth 1.4.18 email-otp), while the social identity stays linked to
+ * (better-auth 1.4.18 email-otp; not re-verified on 1.7), while the social identity stays linked to
  * it, so whoever controls the social account would from then on sign in as
  * the person who proved the address by email.
  */
