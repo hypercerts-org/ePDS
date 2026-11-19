@@ -99,6 +99,16 @@ export interface CallbackParams {
   email_verified: string
 }
 
+// The payload is "\n"-joined, so a field containing a newline (or any other
+// control character) could shift content between fields and still produce the
+// same bytes. Reject them on both sides instead of changing the format.
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
+
+function hasControlChars(fields: string[]): boolean {
+  return fields.some((f) => CONTROL_CHARS.test(f))
+}
+
 /**
  * Sign the epds-callback redirect parameters with HMAC-SHA256.
  * Returns the hex signature and the Unix timestamp (seconds) used.
@@ -119,7 +129,7 @@ export function signCallback(
   secret: string,
 ): { sig: string; ts: string } {
   const ts = Math.floor(Date.now() / 1000).toString()
-  const payload = [
+  const fields = [
     params.request_uri,
     params.email,
     params.approved,
@@ -129,7 +139,13 @@ export function signCallback(
     params.epds_handle_mode ?? '', // empty string when absent
     params.email_verified, // required — no sentinel, see the note above
     ts,
-  ].join('\n')
+  ]
+  if (hasControlChars(fields)) {
+    throw new Error(
+      'Cannot sign callback: a field contains a control character (U+0000-U+001F, U+007F). Fields are newline-joined, so control characters would make the signed payload ambiguous.',
+    )
+  }
+  const payload = fields.join('\n')
   const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex')
   return { sig, ts }
 }
@@ -147,14 +163,14 @@ export function verifyCallback(
   sig: string,
   secret: string,
 ): boolean {
+  if (!/^\d+$/.test(ts)) return false
   const tsNum = parseInt(ts, 10)
-  if (isNaN(tsNum)) return false
 
   const now = Math.floor(Date.now() / 1000)
   const age = now - tsNum
   if (age < 0 || age > CALLBACK_MAX_AGE_SECONDS) return false
 
-  const payload = [
+  const fields = [
     params.request_uri,
     params.email,
     params.approved,
@@ -164,7 +180,9 @@ export function verifyCallback(
     params.epds_handle_mode ?? '', // empty string when absent — matches signCallback sentinel
     params.email_verified, // required — matches signCallback, no sentinel
     ts,
-  ].join('\n')
+  ]
+  if (hasControlChars(fields)) return false
+  const payload = fields.join('\n')
   const expected = crypto
     .createHmac('sha256', secret)
     .update(payload)

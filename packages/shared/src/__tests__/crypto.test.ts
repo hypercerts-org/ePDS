@@ -477,3 +477,63 @@ describe('signCallback / verifyCallback with client_id', () => {
     expect(verifyCallback(withoutClient, ts, sig, secret)).toBe(false)
   })
 })
+
+describe('signCallback / verifyCallback control characters', () => {
+  const secret = 'test-secret-32bytes-padding-here'
+  const base: CallbackParams = {
+    request_uri:
+      'urn:ietf:params:oauth:request_uri:req-0123456789abcdef0123456789abcdef',
+    email: 'user@example.com',
+    approved: '1',
+    new_account: '0',
+    handle: 'alice',
+    client_id: 'https://app.example/client-metadata.json',
+    epds_handle_mode: 'random',
+    email_verified: '1',
+  }
+  const fields = [
+    'request_uri',
+    'email',
+    'approved',
+    'new_account',
+    'handle',
+    'client_id',
+    'epds_handle_mode',
+    'email_verified',
+  ] as const
+
+  it('still signs and verifies normal values', () => {
+    const { sig, ts } = signCallback(base, secret)
+    expect(verifyCallback(base, ts, sig, secret)).toBe(true)
+  })
+
+  for (const field of fields) {
+    for (const ch of ['\n', '\r', '\0', '\x1f', '\x7f']) {
+      it(`signCallback throws on ${JSON.stringify(ch)} in ${field}`, () => {
+        expect(() =>
+          signCallback({ ...base, [field]: `a${ch}b` }, secret),
+        ).toThrow(/control character/)
+      })
+    }
+
+    it(`verifyCallback rejects a newline in ${field}`, () => {
+      const { sig, ts } = signCallback(base, secret)
+      expect(
+        verifyCallback({ ...base, [field]: 'a\nb' }, ts, sig, secret),
+      ).toBe(false)
+    })
+  }
+
+  it('verifyCallback rejects control characters in ts', () => {
+    const { sig, ts } = signCallback(base, secret)
+    expect(verifyCallback(base, `${ts}\n`, sig, secret)).toBe(false)
+  })
+
+  it.each(['12abc', '+123', ' 123', '1e3', '-1', ''])(
+    'verifyCallback rejects non-digit ts %j',
+    (badTs) => {
+      const { sig } = signCallback(base, secret)
+      expect(verifyCallback(base, badTs, sig, secret)).toBe(false)
+    },
+  )
+})
