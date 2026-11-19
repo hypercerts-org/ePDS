@@ -241,4 +241,9 @@ async function main() {
   process.on('SIGINT', shutdown)
 }
 
-void main()
+// The unhandledRejection listener is log-only, so a startup failure must exit
+// non-zero here or the process would end with status 0.
+main().catch((err: unknown) => {
+  logger.fatal({ err }, 'auth-service failed to start')
+  process.exit(1)
+})
