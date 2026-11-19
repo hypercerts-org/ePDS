@@ -2,14 +2,13 @@
  * Repeated `request_uri` query params parse to an array; the route must
  * answer 400 instead of calling string methods on it.
  */
-import type { Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import express from 'express'
 import { createRecoveryRouter } from '../routes/recovery.js'
 import type { AuthServiceContext } from '../context.js'
+import { listenOnLoopback, type TestServer } from './__helpers__/listen.js'
 
-let server: Server
+let server: TestServer
 let baseUrl: string
 
 beforeAll(async () => {
@@ -19,21 +18,11 @@ beforeAll(async () => {
   } as unknown as AuthServiceContext
   const app = express()
   app.use(createRecoveryRouter(ctx, {}))
-  await new Promise<void>((resolve) => {
-    server = app.listen(0, '127.0.0.1', () => {
-      resolve()
-    })
-  })
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  server = await listenOnLoopback(app)
+  baseUrl = server.baseUrl
 })
 
-afterAll(async () => {
-  await new Promise<void>((resolve) => {
-    server.close(() => {
-      resolve()
-    })
-  })
-})
+afterAll(() => server.close())
 
 describe('GET /auth/recover request_uri validation', () => {
   it('returns 400 for a repeated request_uri', async () => {

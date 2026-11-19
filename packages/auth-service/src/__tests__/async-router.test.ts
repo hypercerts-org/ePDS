@@ -3,14 +3,13 @@
  * would otherwise leave an unhandled rejection that kills the process), and
  * the server must keep serving afterwards.
  */
-import type { Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import express, { type RequestHandler } from 'express'
 import { createAsyncRouter, forwardAsyncErrors } from '../lib/async-router.js'
 import { errorHandler } from '../lib/error-middleware.js'
+import { listenOnLoopback, type TestServer } from './__helpers__/listen.js'
 
-let server: Server
+let server: TestServer
 let baseUrl: string
 
 beforeAll(async () => {
@@ -48,21 +47,11 @@ beforeAll(async () => {
   app.use(router)
   app.use(errorHandler)
 
-  await new Promise<void>((resolve) => {
-    server = app.listen(0, '127.0.0.1', () => {
-      resolve()
-    })
-  })
-  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  server = await listenOnLoopback(app)
+  baseUrl = server.baseUrl
 })
 
-afterAll(async () => {
-  await new Promise<void>((resolve) => {
-    server.close(() => {
-      resolve()
-    })
-  })
-})
+afterAll(() => server.close())
 
 describe('createAsyncRouter', () => {
   it('turns a rejected async handler into a 500 and keeps serving', async () => {
@@ -101,21 +90,12 @@ describe('createAsyncRouter', () => {
       }),
     )
     app.use(errorHandler)
-    const s = await new Promise<Server>((resolve) => {
-      const srv = app.listen(0, '127.0.0.1', () => {
-        resolve(srv)
-      })
-    })
+    const s = await listenOnLoopback(app)
     try {
-      const port = (s.address() as AddressInfo).port
-      const res = await fetch(`http://127.0.0.1:${port}/api/auth/anything`)
+      const res = await fetch(`${s.baseUrl}/api/auth/anything`)
       expect(res.status).toBe(500)
     } finally {
-      await new Promise<void>((resolve) => {
-        s.close(() => {
-          resolve()
-        })
-      })
+      await s.close()
     }
   })
 })
