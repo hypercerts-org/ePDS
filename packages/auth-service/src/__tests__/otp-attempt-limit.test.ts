@@ -192,7 +192,7 @@ describe('OTP attempt limit via Better Auth sign-in endpoint', () => {
   // the first wrong guess holds the code. Over HTTP the requests are
   // staggered: a later correct guess may legitimately arrive after that
   // guess restores the code and succeed with budget left, so this is not
-  // run against /account/verify-otp. The next test covers that route.
+  // run against /account/verify-otp.
   it('does not evaluate a burst of concurrent guesses in parallel', async () => {
     const verifier = direct
     const code = await issueCode()
@@ -216,11 +216,9 @@ describe('OTP attempt limit via Better Auth sign-in endpoint', () => {
     const used = storedAttempts()
     expect(used === null || (used >= 1 && used <= ALLOWED_ATTEMPTS)).toBe(true)
   })
-})
 
-describe.each(surfaces)('OTP attempt limit via %s', (_name, makeVerifier) => {
   it('spends the 5-attempt budget on every guess a burst evaluates', async () => {
-    const verifier = await makeVerifier()
+    const verifier = direct
     const code = await issueCode()
     const evaluated = countEvaluatedGuesses(code)
 
@@ -232,9 +230,8 @@ describe.each(surfaces)('OTP attempt limit via %s', (_name, makeVerifier) => {
     // Top up with sequential wrong guesses until 5 have been evaluated in
     // total. Better Auth 1.4.18 evaluated the whole burst but recorded it as
     // one attempt, so the code was still live after 20 evaluated guesses.
-    // Only the direct-endpoint run fails on 1.4.18. Over HTTP the requests
-    // are staggered, so the route run guards the 5-attempt budget through
-    // /account/verify-otp, not the race itself.
+    // Direct endpoint only: over HTTP the requests are staggered, so the
+    // route could not catch the 1.4.18 bug.
     for (let i = 0; evaluated() < ALLOWED_ATTEMPTS; i++) {
       expect(i).toBeLessThan(ALLOWED_ATTEMPTS)
       expect(await verifier.verify(wrongCode(code, 1000 + i))).toBe(false)
@@ -242,7 +239,9 @@ describe.each(surfaces)('OTP attempt limit via %s', (_name, makeVerifier) => {
 
     expect(await verifier.verify(code)).toBe(false)
   })
+})
 
+describe.each(surfaces)('OTP attempt limit via %s', (_name, makeVerifier) => {
   it('refuses the correct code after 5 sequential wrong guesses', async () => {
     const verifier = await makeVerifier()
     const code = await issueCode()
