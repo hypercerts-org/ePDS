@@ -477,3 +477,93 @@ describe('signCallback / verifyCallback with client_id', () => {
     expect(verifyCallback(withoutClient, ts, sig, secret)).toBe(false)
   })
 })
+
+describe('signCallback / verifyCallback control characters', () => {
+  const secret = 'test-secret-32bytes-padding-here'
+  const base: CallbackParams = {
+    request_uri:
+      'urn:ietf:params:oauth:request_uri:req-0123456789abcdef0123456789abcdef',
+    email: 'user@example.com',
+    approved: '1',
+    new_account: '0',
+    handle: 'alice',
+    client_id: 'https://app.example/client-metadata.json',
+    epds_handle_mode: 'random',
+    email_verified: '1',
+  }
+  const fields = [
+    'request_uri',
+    'email',
+    'approved',
+    'new_account',
+    'handle',
+    'client_id',
+    'epds_handle_mode',
+    'email_verified',
+  ] as const
+
+  // Every signed field is checked on both sides. verifyCallback gets a
+  // signature computed over the bad payload itself, so only the
+  // control-character check (not an HMAC mismatch) can reject it.
+  async function expectRejected(params: CallbackParams) {
+    expect(() => signCallback(params, secret)).toThrow(/control character/)
+    const ts = nowTs()
+    const sig = await hmacOver(params, ts)
+    expect(verifyCallback(params, ts, sig, secret)).toBe(false)
+  }
+
+  it.each(fields)(
+    'rejects a newline in %s when signing and verifying',
+    (field) => expectRejected({ ...base, [field]: 'a\nb' }),
+  )
+
+  // Range boundaries (U+0000, U+001F, U+007F) plus the common line breaks.
+  it.each(['\r', '\0', '\x1f', '\x7f'])(
+    'rejects %j in a field when signing and verifying',
+    (ch) => expectRejected({ ...base, email: `a${ch}b` }),
+  )
+
+  it('hand-built signature over clean values verifies', async () => {
+    const ts = nowTs()
+    expect(verifyCallback(base, ts, await hmacOver(base, ts), secret)).toBe(
+      true,
+    )
+  })
+
+  // Each of these parses to the current time with parseInt and is signed
+  // over the exact string, so only the digits-only ts check rejects it.
+  it.each([
+    (t: string) => `${t}\n`,
+    (t: string) => `${t}abc`,
+    (t: string) => `+${t}`,
+    (t: string) => ` ${t}`,
+    (t: string) => `${t}.5`,
+  ])(
+    'verifyCallback rejects a correctly signed non-digit ts (%#)',
+    async (make) => {
+      const badTs = make(nowTs())
+      const sig = await hmacOver(base, badTs)
+      expect(verifyCallback(base, badTs, sig, secret)).toBe(false)
+    },
+  )
+
+  function nowTs(): string {
+    return Math.floor(Date.now() / 1000).toString()
+  }
+
+  async function hmacOver(p: CallbackParams, ts: string): Promise<string> {
+    const { createHmac } = await import('node:crypto')
+    const payload = [
+      p.request_uri,
+      p.email,
+      p.approved,
+      p.new_account,
+      p.handle ?? '',
+      p.client_id ?? '',
+      p.epds_handle_mode ?? '',
+      p.email_verified,
+      ts,
+    ].join('\n')
+    return createHmac('sha256', secret).update(payload).digest('hex')
+  }
+})
