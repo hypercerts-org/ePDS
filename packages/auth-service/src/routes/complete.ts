@@ -353,18 +353,27 @@ export function createCompleteRouter(
     // Consent is handled by the stock @atproto/oauth-provider middleware —
     // pds-core's epds-callback redirects through /oauth/authorize which shows
     // the upstream consent UI with actual OAuth scopes if needed.
+    // Build the URL before cleanup: signCallback throws on values it
+    // refuses to sign, and the flow must stay resumable in that case.
+    let redirectUrl: string
+    try {
+      redirectUrl = buildEpdsCallbackUrl({
+        flowRequestUri: flow.requestUri,
+        flowClientId: flow.clientId,
+        email,
+        isNewAccount: false,
+        flowHandleMode: flow.handleMode,
+        emailVerified,
+        pdsPublicUrl: ctx.config.pdsPublicUrl,
+        epdsCallbackSecret: ctx.config.epdsCallbackSecret,
+      })
+    } catch (err) {
+      logger.error({ err, flowId }, 'Failed to sign epds-callback redirect')
+      await exitWithServerError(res, flow.clientId)
+      return
+    }
     ctx.db.deleteAuthFlow(flowId)
     res.clearCookie(AUTH_FLOW_COOKIE)
-    const redirectUrl = buildEpdsCallbackUrl({
-      flowRequestUri: flow.requestUri,
-      flowClientId: flow.clientId,
-      email,
-      isNewAccount: false,
-      flowHandleMode: flow.handleMode,
-      emailVerified,
-      pdsPublicUrl: ctx.config.pdsPublicUrl,
-      epdsCallbackSecret: ctx.config.epdsCallbackSecret,
-    })
     logger.info(
       { email, flowId, isNewAccount },
       'Bridge: redirecting to epds-callback',
