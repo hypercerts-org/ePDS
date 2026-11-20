@@ -116,6 +116,26 @@ export function createAccountLoginRouter(
         asResponse: true,
       })
 
+      // asResponse returns error responses (wrong, expired or exhausted
+      // code) instead of throwing; without this check a failed verification
+      // would redirect to /account as if it had succeeded.
+      if (!response.ok) {
+        res.type('html').send(
+          renderOtpForm({
+            email,
+            csrfToken: res.locals.csrfToken,
+            otpLength: ctx.config.otpLength,
+            otpCharset: ctx.config.otpCharset,
+            error: otpRefusalMessage(response.status),
+          }),
+        )
+        logger.warn(
+          { email, status: response.status },
+          'OTP verification refused',
+        )
+        return
+      }
+
       // Forward the Set-Cookie header from better-auth's response
       const setCookie = response.headers.get('set-cookie')
       if (setCookie) {
@@ -125,10 +145,7 @@ export function createAccountLoginRouter(
       return
     } catch (err: unknown) {
       logger.warn({ err, email }, 'OTP verification failed')
-      const errMsg =
-        err instanceof Error && err.message.includes('invalid')
-          ? 'Invalid or expired code. Please try again.'
-          : 'Verification failed. Please try again.'
+      const errMsg = 'Verification failed. Please try again.'
       res.type('html').send(
         renderOtpForm({
           email,
@@ -142,6 +159,13 @@ export function createAccountLoginRouter(
   })
 
   return router
+}
+
+/** 400/401/403: wrong, expired or exhausted code. Anything else (429, 5xx) is not the user's typo. */
+function otpRefusalMessage(status: number): string {
+  return status === 400 || status === 401 || status === 403
+    ? 'Invalid or expired code. Please try again.'
+    : 'Verification failed. Please try again.'
 }
 
 function renderLoginForm(opts: { csrfToken: string; error?: string }): string {

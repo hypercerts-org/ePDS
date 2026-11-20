@@ -264,5 +264,25 @@ describe('flow-email hook inside better-auth', () => {
       ])
       expect(messages[3]).toMatch(/too many requests/i)
     })
+
+    it("counts the hook's own 400 answers, since the limiter runs before it", async () => {
+      // Unknown flow cookie: the hook answers 400 itself. better-auth 1.7
+      // rate limits before plugin hooks, so these count (1.4.18 did not).
+      const headers = {
+        'x-forwarded-for': '203.0.113.78',
+        cookie: 'epds_auth_flow=no-such-flow',
+      }
+      const statuses: number[] = []
+      for (let i = 0; i < 4; i++) {
+        const res = await postJson(
+          server!,
+          '/sign-in/email-otp',
+          { useFlowEmail: true, otp: '000000' },
+          headers,
+        )
+        statuses.push(res.status)
+      }
+      expect(statuses).toEqual([400, 400, 400, 429])
+    })
   })
 })

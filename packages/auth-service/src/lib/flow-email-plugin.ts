@@ -9,14 +9,13 @@
  * instead and this hook swaps the stored address in before better-auth sees
  * the request.
  *
- * Hook placement: better-auth's router runs every plugin's `onRequest`
- * before its rate limiter, origin check and endpoint handler, and passes the
- * request we return to all of them. So the rewritten request is rate limited
- * by IP and path, origin-checked, and handled by the stock endpoint (which
- * sets the session cookie) exactly as if the browser had sent the email.
- * Nothing else about the request changes. The one exception is the hook's
- * own 400/500 answers, which are returned before the limiter and so are not
- * counted by it; they cost a bounded body read and one SQLite point read.
+ * Hook order (better-auth 1.7): the rate limiter runs first, then this
+ * hook, and the request we return is what the endpoint sees. The limiter
+ * keys on IP and path, which the rewrite does not change, so a rewritten
+ * request is limited like a typed-email one, and the hook's own 400/500
+ * answers count against the limit too. The stock endpoint (which sets the
+ * session cookie) handles the rewritten request exactly as if the browser
+ * had sent the email.
  *
  * Scope is deliberately narrow:
  * - only the two OTP endpoints the login page calls;

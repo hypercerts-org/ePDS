@@ -5,7 +5,7 @@
  */
 import Database from 'better-sqlite3'
 import { betterAuth } from 'better-auth'
-import { getMigrations } from 'better-auth/db'
+import { getMigrations } from 'better-auth/db/migration'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildSocialProviders, databaseHooks } from '../better-auth.js'
 import {
@@ -82,7 +82,9 @@ describe('installTestGoogleTokenEndpoint', () => {
     }
     expect(
       await googleCallback(auth, `code=${code(claims)}&state=${state}`, cookie),
-    ).toBe('/auth/complete?error=email_not_verified')
+    ).toBe(
+      '/auth/complete?error=email_not_verified&error_description=email+not+verified',
+    )
   })
 
   it('leaves every other request alone', async () => {
