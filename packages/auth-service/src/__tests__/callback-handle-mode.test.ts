@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   pingParRequest: vi.fn(),
   resolveRecoveryEmail: vi.fn(),
   resolveClientBranding: vi.fn(),
+  cleanExit: vi.fn(),
 }))
 
 vi.mock('../lib/get-did-by-email.js', () => ({
@@ -25,6 +26,10 @@ vi.mock('../lib/get-did-by-email.js', () => ({
 
 vi.mock('../lib/ping-par-request.js', () => ({
   pingParRequest: mocks.pingParRequest,
+}))
+
+vi.mock('../lib/clean-exit.js', () => ({
+  cleanExit: mocks.cleanExit,
 }))
 
 vi.mock('../lib/resolve-recovery-email.js', () => ({
@@ -40,7 +45,10 @@ const REQUEST_URI = 'urn:ietf:params:oauth:request_uri:req-123'
 const CLIENT_ID = 'https://app.example/client.json'
 const realFetch = globalThis.fetch.bind(globalThis)
 
-function makeCtx(handleMode: HandleMode | null): AuthServiceContext {
+function makeCtx(
+  handleMode: HandleMode | null,
+  deleteAuthFlow = vi.fn(),
+): AuthServiceContext {
   return {
     config: {
       pdsPublicUrl: 'https://pds.example',
@@ -55,7 +63,7 @@ function makeCtx(handleMode: HandleMode | null): AuthServiceContext {
         clientId: CLIENT_ID,
         handleMode,
       })),
-      deleteAuthFlow: vi.fn(),
+      deleteAuthFlow,
     },
   } as unknown as AuthServiceContext
 }
@@ -181,6 +189,11 @@ beforeEach(() => {
   mocks.pingParRequest.mockReset()
   mocks.resolveRecoveryEmail.mockReset()
   mocks.resolveClientBranding.mockReset()
+  mocks.cleanExit.mockReset()
+  mocks.cleanExit.mockImplementation(({ res }: { res: express.Response }) => {
+    res.status(500).send('server_error exit')
+    return Promise.resolve()
+  })
   mocks.pingParRequest.mockResolvedValue({ ok: true })
   mocks.resolveRecoveryEmail.mockResolvedValue(null)
   mocks.resolveClientBranding.mockResolvedValue({
@@ -372,6 +385,44 @@ describe('a session whose email is not verified', () => {
 
       expect(url.pathname).toBe('/auth/complete')
       expect(mocks.pingParRequest).not.toHaveBeenCalled()
+    },
+  )
+})
+
+// signCallback refuses values it cannot sign safely. The route must answer
+// with the server_error exit and leave the flow and cookie in place, rather
+// than delete them and leave the request unanswered.
+describe('/auth/complete when the callback URL cannot be built', () => {
+  it.each([
+    ['an existing account', 'did:plc:alice', 'picker'],
+    ['a new account in random mode', null, 'random'],
+  ] as const)(
+    'ends with the server_error exit and keeps the flow for %s',
+    async (_label, did, handleMode) => {
+      mocks.getDidByEmail.mockResolvedValue(did)
+      const deleteAuthFlow = vi.fn()
+      const app = await startApp(
+        makeCtx(handleMode, deleteAuthFlow),
+        makeAuth({ email: 'alice\n@example.com', emailVerified: true }),
+      )
+      try {
+        const res = await fetch(`${app.baseUrl}/auth/complete`, {
+          redirect: 'manual',
+          headers: { cookie: `${AUTH_FLOW_COOKIE}=flow-1` },
+        })
+
+        expect(res.status).toBe(500)
+        expect(mocks.cleanExit).toHaveBeenCalledWith(
+          expect.objectContaining({
+            code: 'server_error',
+            clientId: CLIENT_ID,
+          }),
+        )
+        expect(deleteAuthFlow).not.toHaveBeenCalled()
+        expect(res.headers.get('set-cookie')).toBeNull()
+      } finally {
+        await app.close()
+      }
     },
   )
 })

@@ -203,16 +203,23 @@ export function createCompleteRouter(
         'PAR ping returned non-OK on random mode complete — proceeding anyway',
       )
     }
-    const url = buildEpdsCallbackUrl({
-      flowRequestUri: flow.requestUri,
-      flowClientId: flow.clientId,
-      email,
-      isNewAccount: true,
-      flowHandleMode: flow.handleMode,
-      emailVerified,
-      pdsPublicUrl: ctx.config.pdsPublicUrl,
-      epdsCallbackSecret: ctx.config.epdsCallbackSecret,
-    })
+    let url: string
+    try {
+      url = buildEpdsCallbackUrl({
+        flowRequestUri: flow.requestUri,
+        flowClientId: flow.clientId,
+        email,
+        isNewAccount: true,
+        flowHandleMode: flow.handleMode,
+        emailVerified,
+        pdsPublicUrl: ctx.config.pdsPublicUrl,
+        epdsCallbackSecret: ctx.config.epdsCallbackSecret,
+      })
+    } catch (err) {
+      logger.error({ err, flowId }, 'Failed to sign epds-callback redirect')
+      await exitWithServerError(res, flow.clientId)
+      return
+    }
     logger.info(
       { email, flowId },
       'New user (random mode): skipping handle picker, redirecting to epds-callback',
