@@ -1,4 +1,5 @@
-import { Router, type Request, type Response } from 'express'
+import { type Router, type Request, type Response } from 'express'
+import { createAsyncRouter } from '../lib/async-router.js'
 import Database from 'better-sqlite3'
 import { createLogger, verifyInternalSecret } from '@certified-app/shared'
 
@@ -34,7 +35,7 @@ export function createTestHooksRouter(dbLocation: string): Router {
     'Test hooks ENABLED — /_internal/test/* routes are live (EPDS_TEST_HOOKS=1)',
   )
 
-  const router = Router()
+  const router = createAsyncRouter()
 
   router.post(
     '/_internal/test/expire-auth-flow',

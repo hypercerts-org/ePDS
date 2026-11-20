@@ -176,7 +176,20 @@ async function fetchMetadata(
       }
     }
     try {
-      const metadata = (await res.json()) as ClientMetadata
+      const body: unknown = await res.json()
+      if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+        return {
+          metadata: null,
+          fetchCheck: {
+            id: 'fetch-json',
+            label: 'Response is a JSON object',
+            severity: 'error',
+            detail:
+              'The server returned 200 but the JSON body is not an object.',
+          },
+        }
+      }
+      const metadata = body as ClientMetadata
       return {
         metadata,
         fetchCheck: {
@@ -287,7 +300,9 @@ function checkRedirectUris(metadata: ClientMetadata): PreviewCheck {
 function checkBrandColor(metadata: ClientMetadata): PreviewCheck {
   const label = 'brand_color set'
   const labelHtml = `${code('brand_color')} set`
-  if (metadata.brand_color) {
+  // Real flows drop non-string colors (sanitizeClientMetadata), so only a
+  // string counts as set.
+  if (typeof metadata.brand_color === 'string' && metadata.brand_color) {
     return {
       id: 'brand-color',
       label,
@@ -310,7 +325,10 @@ function checkBrandColor(metadata: ClientMetadata): PreviewCheck {
 function checkBackgroundColor(metadata: ClientMetadata): PreviewCheck {
   const label = 'background_color set'
   const labelHtml = `${code('background_color')} set`
-  if (metadata.background_color) {
+  if (
+    typeof metadata.background_color === 'string' &&
+    metadata.background_color
+  ) {
     return {
       id: 'background-color',
       label,

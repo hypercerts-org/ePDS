@@ -27,7 +27,8 @@
  *                      or the template fetch fails — mirrors real-
  *                      sender behaviour bit-for-bit.
  */
-import { Router, type Request, type Response } from 'express'
+import { type Router, type Request, type Response } from 'express'
+import { createAsyncRouter } from '../lib/async-router.js'
 import type { AuthServiceContext } from '../context.js'
 import { escapeHtml } from '@certified-app/shared'
 import {
@@ -130,7 +131,7 @@ function renderEmailPreview(opts: {
 }
 
 export function createPreviewEmailsRouter(ctx: AuthServiceContext): Router {
-  const router = Router()
+  const router = createAsyncRouter()
 
   // Match the gate in createPreviewRouter: /preview/* is 404 unless the
   // flag is on. Checked per-request so the flag can flip without a restart.

@@ -15,7 +15,8 @@
  * redirects back with ?error=handle_taken, the user can retry with a different handle.
  * Stale rows are cleaned up by cleanupExpiredAuthFlows() every 5 minutes.
  */
-import { Router, type Request, type Response } from 'express'
+import { type Router, type Request, type Response } from 'express'
+import { createAsyncRouter } from '../lib/async-router.js'
 import type { AuthServiceContext } from '../context.js'
 import {
   createLogger,
@@ -48,7 +49,7 @@ export function createChooseHandleRouter(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth instance has no exported type
   auth: any,
 ): Router {
-  const router = Router()
+  const router = createAsyncRouter()
 
   const { pdsUrl, internalSecret } = requireInternalEnv()
   const handleDomain = ctx.config.pdsHostname

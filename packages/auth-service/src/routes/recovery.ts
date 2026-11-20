@@ -14,7 +14,8 @@
  * Note: recovery uses the backup email as the verified identity. The auth_flow
  * table threads request_uri through the flow via epds_auth_flow cookie.
  */
-import { Router, type Request, type Response } from 'express'
+import { type Router, type Request, type Response } from 'express'
+import { createAsyncRouter } from '../lib/async-router.js'
 import type { AuthServiceContext } from '../context.js'
 import { createLogger, escapeHtml, maskEmail } from '@certified-app/shared'
 import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
@@ -36,7 +37,7 @@ export function createRecoveryRouter(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth instance has no exported type
   auth: any,
 ): Router {
-  const router = Router()
+  const router = createAsyncRouter()
   const otpLength = ctx.config.otpLength
   const otpCharset = ctx.config.otpCharset
 
@@ -73,9 +74,10 @@ export function createRecoveryRouter(
   }
 
   router.get('/auth/recover', async (req: Request, res: Response) => {
-    const requestUri = req.query.request_uri as string | undefined
+    const requestUri = req.query.request_uri
 
-    if (!requestUri) {
+    // Repeated or nested query params parse to arrays/objects.
+    if (!requestUri || typeof requestUri !== 'string') {
       res
         .status(400)
         .type('html')

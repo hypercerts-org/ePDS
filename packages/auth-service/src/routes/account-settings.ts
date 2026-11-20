@@ -1,4 +1,10 @@
-import { Router, type Request, type Response, type NextFunction } from 'express'
+import {
+  type Router,
+  type Request,
+  type Response,
+  type NextFunction,
+} from 'express'
+import { createAsyncRouter } from '../lib/async-router.js'
 import type { AuthServiceContext } from '../context.js'
 import {
   createLogger,
@@ -53,7 +59,7 @@ export function createAccountSettingsRouter(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth instance has no exported type
   auth: any,
 ): Router {
-  const router = Router()
+  const router = createAsyncRouter()
   const requireAuth = requireBetterAuth(auth)
 
   const pdsUrl = ensurePdsUrl(
