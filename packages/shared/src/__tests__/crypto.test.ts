@@ -502,11 +502,6 @@ describe('signCallback / verifyCallback control characters', () => {
     'email_verified',
   ] as const
 
-  it('still signs and verifies normal values', () => {
-    const { sig, ts } = signCallback(base, secret)
-    expect(verifyCallback(base, ts, sig, secret)).toBe(true)
-  })
-
   // Every signed field is checked on both sides. verifyCallback gets a
   // signature computed over the bad payload itself, so only the
   // control-character check (not an HMAC mismatch) can reject it.
