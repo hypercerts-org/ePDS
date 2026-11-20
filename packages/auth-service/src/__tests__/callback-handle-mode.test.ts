@@ -48,6 +48,7 @@ const realFetch = globalThis.fetch.bind(globalThis)
 function makeCtx(
   handleMode: HandleMode | null,
   deleteAuthFlow = vi.fn(),
+  requestUri: string = REQUEST_URI,
 ): AuthServiceContext {
   return {
     config: {
@@ -59,7 +60,7 @@ function makeCtx(
     db: {
       getAuthFlow: vi.fn(() => ({
         flowId: 'flow-1',
-        requestUri: REQUEST_URI,
+        requestUri,
         clientId: CLIENT_ID,
         handleMode,
       })),
@@ -257,6 +258,51 @@ describe('auth-service epds-callback handle mode threading', () => {
       expect(url.pathname).toBe('/oauth/epds-callback')
       expect(url.searchParams.get('epds_handle_mode')).toBe('picker')
       expect(url.searchParams.get('handle')).toBe('alice1')
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('POST /auth/choose-handle signing failure', () => {
+  // signCallback rejects any field containing a control character (the
+  // payload is newline-joined, so a control char would make it ambiguous).
+  // A flow row whose request_uri carries a newline passes every upstream
+  // guard (cookie, DB row, session, verified email, handleMode, PDS lookup,
+  // PAR ping, handle format + availability) and only fails at signing.
+  // Without the try/catch the async Express 4 handler would reject before
+  // sending a response, leaving the browser without feedback and surfacing
+  // as an unhandled rejection under Node's default behaviour.
+  it('returns a server_error response instead of rejecting unhandled', async () => {
+    mocks.getDidByEmail.mockResolvedValue(null)
+    const app = await startApp(
+      makeCtx('picker', vi.fn(), 'urn:ietf:params:oauth:request_uri:bad\nuri'),
+      makeAuth(),
+    )
+    try {
+      const res = await fetch(`${app.baseUrl}/auth/choose-handle`, {
+        method: 'POST',
+        redirect: 'manual',
+        headers: {
+          cookie: `${AUTH_FLOW_COOKIE}=flow-1`,
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({ handle: 'Alice1' }),
+      })
+
+      // The browser receives the error response — not a 303 redirect that
+      // the unhandled-rejection path would never send.
+      expect(res.status).toBe(500)
+      expect(res.headers.get('location')).toBeNull()
+      expect(await res.text()).toBe('server_error exit')
+      // Routed through the same server_error clean-exit as /auth/complete.
+      expect(mocks.cleanExit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          code: 'server_error',
+          fallbackStatus: 500,
+          clientId: CLIENT_ID,
+        }),
+      )
     } finally {
       await app.close()
     }
