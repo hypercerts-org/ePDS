@@ -4,7 +4,7 @@
  * attempts") in our pino logs, with the user's email attached.
  *
  * These are exactly the errors better-auth throws from its email-otp verify
- * endpoint (better-auth 1.4.18 dist/plugins/email-otp/routes.mjs), which the
+ * endpoint (better-auth 1.7 dist/plugins/email-otp/routes.mjs), which the
  * browser posts to directly and which were previously logged nowhere.
  */
 import { describe, it, expect, vi } from 'vitest'

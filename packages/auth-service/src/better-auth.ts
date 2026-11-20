@@ -15,7 +15,7 @@ import { createLogger } from '@certified-app/shared'
 import { betterAuth } from 'better-auth'
 import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { generateRandomString } from 'better-auth/crypto'
-import { getMigrations } from 'better-auth/db'
+import { getMigrations } from 'better-auth/db/migration'
 import { emailOTP } from 'better-auth/plugins'
 import type { GoogleOptions } from 'better-auth/social-providers'
 import Database from 'better-sqlite3'
@@ -26,6 +26,9 @@ import { mapGoogleProfileToUser } from './lib/google-email-verified.js'
 import { ensurePdsUrl } from './lib/pds-url.js'
 import { hasVerifiedEmail } from './lib/verified-email.js'
 
+// Declaration emit (TS2742) needs 'zod' resolvable from this package, because
+// better-auth 1.7's inferred return type mentions zod/v4/core. The direct
+// 'zod' dependency in package.json provides that; no import is needed.
 export type BetterAuthInstance = ReturnType<typeof createBetterAuth>
 
 /** The logger type used across this module — avoids a direct pino dependency. */
@@ -49,8 +52,9 @@ const logger = createLogger('auth:better-auth')
  * Note on "Invalid OTP": better-auth throws it both for a wrong code and for
  * no pending code at all, so the message says "invalid or unrecognized" rather
  * than implying only a typo. The two cases remain indistinguishable in the log.
- * "Too many attempts" additionally deletes the stored code (better-auth 1.4.18
- * dist/plugins/email-otp/routes.mjs), which the message reflects.
+ * "Too many attempts" additionally leaves the code consumed (better-auth 1.7
+ * dist/plugins/email-otp/routes.mjs, atomicVerifyOTP), which the message
+ * reflects.
  */
 const OTP_FAILURE_MESSAGES: Record<string, string> = {
   'OTP expired': 'OTP verification failed: code expired',
@@ -186,10 +190,14 @@ export const socialProviders: SocialProvidersConfig = {}
 
 /**
  * The message better-auth reports when {@link refuseUnverifiedUser} refuses
- * a user. Its OAuth callback turns it into `?error=email_not_verified` on
- * the errorCallbackURL; its ID-token sign-in returns it as a 401.
+ * a user. Its OAuth callback turns it into `?error=email_not_verified` (plus
+ * an `error_description`) on the errorCallbackURL; its ID-token sign-in
+ * rejects the request with an error response.
  */
 export const EMAIL_NOT_VERIFIED = 'email not verified'
+
+/** The `?error=` value of that redirect. */
+export const EMAIL_NOT_VERIFIED_CODE = 'email_not_verified'
 
 /**
  * better-auth `databaseHooks.user.create.before`: never create a user whose
@@ -199,16 +207,22 @@ export const EMAIL_NOT_VERIFIED = 'email not verified'
  * in practice this refuses social sign-ins whose provider does not vouch
  * for the email. Such a sign-in must not leave a user behind: an email-OTP
  * sign-in for that address later marks the existing user verified
- * (better-auth 1.4.18 email-otp), while the social identity stays linked to
- * it, so whoever controls the social account would from then on sign in as
- * the person who proved the address by email.
+ * (better-auth email-otp; checked against 1.7.26), while the social
+ * identity stays linked to it, so whoever controls the social account
+ * would from then on sign in as the person who proved the address by
+ * email.
  */
 export function refuseUnverifiedUser(user: {
   emailVerified?: unknown
 }): Promise<void> {
   if (hasVerifiedEmail(user)) return Promise.resolve()
   return Promise.reject(
-    new APIError('FORBIDDEN', { message: EMAIL_NOT_VERIFIED }),
+    // better-auth 1.7 only turns a hook's APIError into an error redirect
+    // when it carries a `code`; without one the callback answers 403.
+    new APIError('FORBIDDEN', {
+      message: EMAIL_NOT_VERIFIED,
+      code: EMAIL_NOT_VERIFIED_CODE,
+    }),
   )
 }
 
