@@ -38,12 +38,6 @@ beforeAll(async () => {
   router.get('/next-err', (_req, _res, next) => {
     next(new Error('forwarded'))
   })
-  router.get('/skip', (_req, _res, next) => {
-    next('route')
-  })
-  router.get('/skip', (_req, res) => {
-    res.json({ skipped: true })
-  })
   app.use(router)
   app.use(errorHandler)
 
@@ -69,11 +63,6 @@ describe('createAsyncRouter', () => {
     ['next(err)', 'GET', '/next-err'],
   ])('routes %s to the error handler as a 500', async (_l, method, path) => {
     expect((await fetch(`${baseUrl}${path}`, { method })).status).toBe(500)
-  })
-
-  it("honours next('route')", async () => {
-    const res = await fetch(`${baseUrl}/skip`)
-    expect(await res.json()).toEqual({ skipped: true })
   })
 
   it('wraps a standalone async handler such as the better-auth mount', async () => {

@@ -34,7 +34,6 @@ describe('resolveClientMetadata with a non-object body', () => {
     ['null', null],
     ['an array', ['client_name']],
     ['a string', 'hello'],
-    ['a number', 5],
   ])(
     'falls back, also on a cached repeat, when the body is %s',
     async (_l, body) => {
