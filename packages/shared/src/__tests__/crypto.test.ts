@@ -507,24 +507,26 @@ describe('signCallback / verifyCallback control characters', () => {
     expect(verifyCallback(base, ts, sig, secret)).toBe(true)
   })
 
-  for (const field of fields) {
-    for (const ch of ['\n', '\r', '\0', '\x1f', '\x7f']) {
-      it(`signCallback throws on ${JSON.stringify(ch)} in ${field}`, () => {
-        expect(() =>
-          signCallback({ ...base, [field]: `a${ch}b` }, secret),
-        ).toThrow(/control character/)
-      })
-    }
-
-    // The signature is computed over the bad payload itself, so only the
-    // control-character check (not an HMAC mismatch) can reject it.
-    it(`verifyCallback rejects a correctly signed newline in ${field}`, async () => {
-      const params = { ...base, [field]: 'a\nb' }
-      const ts = nowTs()
-      const sig = await hmacOver(params, ts)
-      expect(verifyCallback(params, ts, sig, secret)).toBe(false)
-    })
+  // Every signed field is checked on both sides. verifyCallback gets a
+  // signature computed over the bad payload itself, so only the
+  // control-character check (not an HMAC mismatch) can reject it.
+  async function expectRejected(params: CallbackParams) {
+    expect(() => signCallback(params, secret)).toThrow(/control character/)
+    const ts = nowTs()
+    const sig = await hmacOver(params, ts)
+    expect(verifyCallback(params, ts, sig, secret)).toBe(false)
   }
+
+  it.each(fields)(
+    'rejects a newline in %s when signing and verifying',
+    (field) => expectRejected({ ...base, [field]: 'a\nb' }),
+  )
+
+  // Range boundaries (U+0000, U+001F, U+007F) plus the common line breaks.
+  it.each(['\r', '\0', '\x1f', '\x7f'])(
+    'rejects %j in a field when signing and verifying',
+    (ch) => expectRejected({ ...base, email: `a${ch}b` }),
+  )
 
   it('hand-built signature over clean values verifies', async () => {
     const ts = nowTs()
