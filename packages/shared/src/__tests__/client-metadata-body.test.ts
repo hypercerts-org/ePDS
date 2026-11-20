@@ -35,17 +35,14 @@ describe('resolveClientMetadata with a non-object body', () => {
     ['an array', ['client_name']],
     ['a string', 'hello'],
     ['a number', 5],
-  ])('falls back when the body is %s', async (_label, body) => {
-    respondWith(body)
-    const metadata = await resolveClientMetadata(CLIENT_ID)
-    expect(metadata).toEqual({ client_name: 'cool.app' })
-  })
-
-  it('does not cache the raw body', async () => {
-    respondWith(['x'])
-    await resolveClientMetadata(CLIENT_ID)
-    const again = await resolveClientMetadata(CLIENT_ID)
-    expect(Array.isArray(again)).toBe(false)
-    expect(again).toEqual({ client_name: 'cool.app' })
-  })
+  ])(
+    'falls back, also on a cached repeat, when the body is %s',
+    async (_l, body) => {
+      respondWith(body)
+      const expected = { client_name: 'cool.app' }
+      expect(await resolveClientMetadata(CLIENT_ID)).toEqual(expected)
+      // A second call must not surface the raw body from the cache.
+      expect(await resolveClientMetadata(CLIENT_ID)).toEqual(expected)
+    },
+  )
 })

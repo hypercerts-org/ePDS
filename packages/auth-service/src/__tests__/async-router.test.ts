@@ -63,17 +63,12 @@ describe('createAsyncRouter', () => {
     expect(good.status).toBe(200)
   })
 
-  it('turns a synchronous throw into a 500', async () => {
-    expect((await fetch(`${baseUrl}/sync-throw`)).status).toBe(500)
-  })
-
-  it('wraps handlers passed as arrays', async () => {
-    const res = await fetch(`${baseUrl}/with-middleware`, { method: 'POST' })
-    expect(res.status).toBe(500)
-  })
-
-  it('passes next(err) to the error handler', async () => {
-    expect((await fetch(`${baseUrl}/next-err`)).status).toBe(500)
+  it.each([
+    ['a synchronous throw', 'GET', '/sync-throw'],
+    ['a handler passed in an array', 'POST', '/with-middleware'],
+    ['next(err)', 'GET', '/next-err'],
+  ])('routes %s to the error handler as a 500', async (_l, method, path) => {
+    expect((await fetch(`${baseUrl}${path}`, { method })).status).toBe(500)
   })
 
   it("honours next('route')", async () => {

@@ -25,14 +25,10 @@ beforeAll(async () => {
 afterAll(() => server.close())
 
 describe('GET /auth/recover request_uri validation', () => {
-  it('returns 400 for a repeated request_uri', async () => {
-    const res = await fetch(
-      `${baseUrl}/auth/recover?request_uri=a&request_uri=b`,
-    )
-    expect(res.status).toBe(400)
-  })
-
-  it('returns 400 for a missing request_uri', async () => {
-    expect((await fetch(`${baseUrl}/auth/recover`)).status).toBe(400)
+  it.each([
+    ['a repeated', '?request_uri=a&request_uri=b'],
+    ['a missing', ''],
+  ])('returns 400 for %s request_uri', async (_l, query) => {
+    expect((await fetch(`${baseUrl}/auth/recover${query}`)).status).toBe(400)
   })
 })

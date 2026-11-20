@@ -18,9 +18,8 @@ describe('sanitizeClientMetadata', () => {
     })
   })
 
-  it('ignores a non-object branding value', () => {
-    expect(sanitizeClientMetadata({ branding: null })).toEqual({})
-    expect(sanitizeClientMetadata({ branding: 'x' })).toEqual({})
+  it.each([null, 'x'])('ignores a non-object branding value %j', (branding) => {
+    expect(sanitizeClientMetadata({ branding })).toEqual({})
   })
 
   it('keeps well-typed values', () => {
