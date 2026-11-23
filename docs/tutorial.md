@@ -399,9 +399,9 @@ The login page then renders a "Sign in with Google" button below the
 email form, after an "or" divider (and after "Sign in with Atmosphere"
 when your client also offers it). The button appears only when both the
 operator configured Google and your client lists it, so enabling Google
-for one app does not change other apps' login pages. `"google"` is the only accepted value;
-other values are ignored, and if the field is unset no social button is
-rendered.
+for one app does not change other apps' login pages. `"google"` and
+`"openstreetmap"` (below) are the accepted values; other values are
+ignored, and if the field is unset no social button is rendered.
 
 To put a "Sign in with Google" button on your own page instead, start the
 OAuth flow as usual and add `epds_social_provider=google` to the
@@ -415,6 +415,21 @@ to the login page with a message and does not start Google again, and if
 Google sign-in cannot be started the login page shows an error instead.
 The demo app's "Sign in with Google" button
 (`packages/demo/src/app/components/LoginForm.tsx`) does this.
+
+#### Optional: offer OpenStreetMap sign-in
+
+If the operator has configured OpenStreetMap, list it the same way
+(`"epds_social_providers": ["openstreetmap"]`, alone or with `"google"`).
+The simplest flow is a "Sign in with OpenStreetMap" button on your own
+page that adds `epds_social_provider=openstreetmap` to the
+`/oauth/authorize` URL, as above (it takes no `login_hint`): ePDS sends
+the browser straight to OpenStreetMap and back, so users never see the
+ePDS login page. Listing it also renders the button on that login page.
+
+OpenStreetMap never creates an account: it signs in to an account whose
+owner connected their OpenStreetMap identity in Account Settings after
+signing in once with an email code. An unconnected identity returns to
+the login page with a message explaining that.
 
 #### Optional: custom CSS and favicon for ePDS pages (trusted clients)
 

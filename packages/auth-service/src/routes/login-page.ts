@@ -55,8 +55,11 @@ import {
   resolveHandleMode as sharedResolveHandleMode,
   type HandleMode,
 } from '@certified-app/shared'
-import { socialProviders } from '../better-auth.js'
-import { startSocialSignIn } from '../lib/start-social-sign-in.js'
+import { genericOAuthProviders, socialProviders } from '../better-auth.js'
+import {
+  providerOrigins,
+  startSocialSignIn,
+} from '../lib/start-social-sign-in.js'
 import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
 import {
   resolveLoginHint,
@@ -136,7 +139,9 @@ function isSafeHttpUrl(value: string | undefined): boolean {
  * older JS engines. The typed parameter excludes `undefined`, which
  * JSON.stringify would return as a non-string.
  */
-function toScriptJson(value: string | boolean | null): string {
+function toScriptJson(
+  value: string | boolean | null | Record<string, string>,
+): string {
   return JSON.stringify(value).replace(
     /[<>&\u2028\u2029]/g,
     (ch) =>
@@ -215,8 +220,11 @@ export function heartbeatEnabledFor(req: Request): boolean {
 }
 
 /** The social providers the login page knows how to offer. */
-type SocialProviderId = 'google'
-const SOCIAL_PROVIDER_IDS: readonly SocialProviderId[] = ['google']
+type SocialProviderId = 'google' | 'openstreetmap'
+const SOCIAL_PROVIDER_IDS: readonly SocialProviderId[] = [
+  'google',
+  'openstreetmap',
+]
 
 /**
  * The social providers a client's login page offers: configured on this
@@ -232,7 +240,9 @@ export function clientSocialProviders(
     ? branding.epds_social_providers
     : []
   return SOCIAL_PROVIDER_IDS.filter(
-    (id) => id in socialProviders && requested.includes(id),
+    (id) =>
+      (id in socialProviders || id in genericOAuthProviders) &&
+      requested.includes(id),
   )
 }
 
@@ -752,10 +762,25 @@ function renderGoogleButtonHtml(): string {
 }
 
 /**
+ * OpenStreetMap sign-in button, handled by the page script like Google's.
+ * It signs in only to an account the OpenStreetMap identity was connected
+ * to in account settings (see lib/openstreetmap.ts).
+ */
+function renderOpenStreetMapButtonHtml(): string {
+  return `<button type="button" class="btn-social btn-openstreetmap" data-social-provider="openstreetmap">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+          <circle cx="12" cy="12" r="10" fill="#7EBC6F"/>
+          <path d="M6 15.5l3.5-5 3 3.5 2-2.5 3.5 4" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Sign in with OpenStreetMap
+      </button>`
+}
+
+/**
  * The sign-in options offered under the email form, after a single "or"
  * divider: Atmosphere (when the client declares a handle login URL), then
- * Google (when the client offers it). Empty when neither is offered, so the
- * divider never leads to nothing.
+ * Google and OpenStreetMap (each when the client offers it). Empty when
+ * none is offered, so the divider never leads to nothing.
  */
 function renderAlternativesHtml(
   handleLoginUrl: string,
@@ -770,6 +795,9 @@ function renderAlternativesHtml(
       </button>`
       : '',
     offeredSocial.includes('google') ? renderGoogleButtonHtml() : '',
+    offeredSocial.includes('openstreetmap')
+      ? renderOpenStreetMapButtonHtml()
+      : '',
   ].filter(Boolean)
   if (buttons.length === 0) return ''
   return `<div class="divider"><span>or</span></div>
@@ -1543,9 +1571,7 @@ export function renderLoginPage(input: {
       // Only ever leave this page for the provider's own authorization
       // server: an https URL on the host better-auth sends that provider
       // to. Anything else in the response is treated as a failed start.
-      var socialProviderOrigins = {
-        google: 'https://accounts.google.com',
-      };
+      var socialProviderOrigins = ${toScriptJson(providerOrigins())};
       function socialProviderUrl(provider, url) {
         if (typeof url !== 'string') return null;
         var expected = Object.prototype.hasOwnProperty.call(

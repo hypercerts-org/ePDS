@@ -138,6 +138,17 @@ this area's main gap: `login-page.ts`, `consent.ts`, `recovery.ts`, `account-log
   It also starts a Google sign-in the way `GET /oauth/authorize` does for
   `?epds_social_provider=google` (`lib/start-social-sign-in.ts`), and
   checks the state cookie it returns completes the callback.
+- `better-auth-osm-sign-in.test.ts` runs the OpenStreetMap provider config,
+  linking options and link guard through a real better-auth instance with
+  OpenStreetMap's discovery, JWKS, token and userinfo endpoints stubbed and
+  a really RS256-signed ID token (`__helpers__/osm-sign-in.ts`). It pins
+  that an unconnected identity creates no user, never joins one by email,
+  links only from a live session, and then signs in by `sub`.
+  `create-better-auth.test.ts` repeats the connect-then-sign-in path on
+  the production instance after a real email-code sign-in.
+- `account-settings-osm-router.test.ts` mounts the account settings router
+  on an ephemeral Express server with better-auth's API mocked, covering
+  the OpenStreetMap section and its connect / disconnect routes.
 - `createBetterAuth()` can also be driven through `toNodeHandler` on an
   ephemeral Express server against a temp SQLite file migrated with
   `runBetterAuthMigrations()`, with a fake `EmailSender` and a mocked

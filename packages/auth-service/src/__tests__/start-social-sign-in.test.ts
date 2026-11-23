@@ -5,7 +5,10 @@
  * button makes the same check in the browser (login-page-social-buttons).
  */
 import { describe, expect, it } from 'vitest'
-import { providerAuthorizationUrl } from '../lib/start-social-sign-in.js'
+import {
+  providerAuthorizationUrl,
+  providerOrigins,
+} from '../lib/start-social-sign-in.js'
 
 const GOOGLE_URL =
   'https://accounts.google.com/o/oauth2/v2/auth?client_id=google-id&state=s'
@@ -37,9 +40,46 @@ describe('providerAuthorizationUrl', () => {
   })
 
   it.each(['github', 'toString', '__proto__'])(
-    'refuses any provider but Google (%s)',
+    'refuses an unknown provider (%s)',
     (provider) => {
       expect(providerAuthorizationUrl(provider, GOOGLE_URL)).toBeNull()
     },
   )
+})
+
+describe('providerAuthorizationUrl for OpenStreetMap', () => {
+  const OSM_URL = 'https://www.openstreetmap.org/oauth2/authorize?state=s'
+  const DEV_URL =
+    'https://master.apis.dev.openstreetmap.org/oauth2/authorize?state=s'
+
+  it('accepts the production issuer by default', () => {
+    expect(providerAuthorizationUrl('openstreetmap', OSM_URL, {})).toBe(OSM_URL)
+    expect(providerAuthorizationUrl('openstreetmap', DEV_URL, {})).toBeNull()
+  })
+
+  it('follows OSM_ISSUER, and only it', () => {
+    const env = { OSM_ISSUER: 'https://master.apis.dev.openstreetmap.org' }
+    expect(providerAuthorizationUrl('openstreetmap', DEV_URL, env)).toBe(
+      DEV_URL,
+    )
+    expect(providerAuthorizationUrl('openstreetmap', OSM_URL, env)).toBeNull()
+  })
+
+  it('does not accept Google’s server for OpenStreetMap or vice versa', () => {
+    expect(
+      providerAuthorizationUrl(
+        'openstreetmap',
+        'https://accounts.google.com/o/oauth2/v2/auth',
+        {},
+      ),
+    ).toBeNull()
+    expect(providerAuthorizationUrl('google', OSM_URL, {})).toBeNull()
+  })
+
+  it('lists one origin per provider', () => {
+    expect(providerOrigins({})).toEqual({
+      google: 'https://accounts.google.com',
+      openstreetmap: 'https://www.openstreetmap.org',
+    })
+  })
 })

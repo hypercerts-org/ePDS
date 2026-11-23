@@ -21,6 +21,7 @@ vi.mock('../better-auth.js', () => ({
   socialProviders: {
     google: { clientId: 'google-id', clientSecret: 'google-secret' },
   },
+  genericOAuthProviders: {},
 }))
 
 const { renderLoginPage } = await import('../routes/login-page.js')

@@ -19,6 +19,9 @@ vi.mock('../better-auth.js', () => ({
   socialProviders: {
     google: { clientId: 'google-id', clientSecret: 'google-secret' },
   },
+  genericOAuthProviders: {
+    openstreetmap: { providerId: 'openstreetmap', clientId: 'osm-id' },
+  },
 }))
 
 const { renderLoginPage } = await import('../routes/login-page.js')
@@ -230,6 +233,34 @@ describe('renderLoginPage social sign-in opt-in', () => {
   it('renders the Google button when the client lists it', () => {
     const html = render({ branding: { epds_social_providers: ['google'] } })
     expect(html).toContain('data-social-provider="google"')
+  })
+
+  it('renders the OpenStreetMap button only when the client lists it', () => {
+    expect(render()).not.toContain('data-social-provider="openstreetmap"')
+    const html = render({
+      branding: { epds_social_providers: ['google', 'openstreetmap'] },
+    })
+    expect(html).toContain(
+      '<button type="button" class="btn-social btn-openstreetmap" data-social-provider="openstreetmap">',
+    )
+    expect(html.indexOf('data-social-provider="google"')).toBeLessThan(
+      html.indexOf('data-social-provider="openstreetmap"'),
+    )
+  })
+
+  it('lets the page script follow OpenStreetMap’s configured issuer', () => {
+    vi.stubEnv('OSM_ISSUER', 'https://master.apis.dev.openstreetmap.org')
+    try {
+      expect(render()).toContain(
+        '"openstreetmap":"https://master.apis.dev.openstreetmap.org"',
+      )
+      vi.stubEnv('OSM_ISSUER', '')
+      expect(render()).toContain(
+        '"openstreetmap":"https://www.openstreetmap.org"',
+      )
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('ignores unknown and removed providers and a non-array value', () => {

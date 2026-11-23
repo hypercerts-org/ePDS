@@ -10,13 +10,26 @@
  */
 import { createLogger } from '@certified-app/shared'
 import type { BetterAuthInstance } from '../better-auth.js'
+import { osmIssuer, OSM_PROVIDER_ID } from './openstreetmap.js'
 import { SOCIAL_PROVIDER_PARAM } from './social-sign-in-error.js'
 
 const logger = createLogger('auth:start-social-sign-in')
 
-/** The origin of each provider's authorization server. */
-const PROVIDER_ORIGINS: Record<string, string> = {
-  google: 'https://accounts.google.com',
+/** The social providers a sign-in can be started for. */
+export type StartableSocialProvider = 'google' | typeof OSM_PROVIDER_ID
+
+/**
+ * The origin of each provider's authorization server. OpenStreetMap's is
+ * its configured issuer (`OSM_ISSUER`), whose discovery document serves
+ * the authorization endpoint on the same origin.
+ */
+export function providerOrigins(
+  env: NodeJS.ProcessEnv = process.env,
+): Record<StartableSocialProvider, string> {
+  return {
+    google: 'https://accounts.google.com',
+    [OSM_PROVIDER_ID]: osmIssuer(env),
+  }
 }
 
 /**
@@ -27,14 +40,15 @@ const PROVIDER_ORIGINS: Record<string, string> = {
 export function providerAuthorizationUrl(
   provider: string,
   url: unknown,
+  env: NodeJS.ProcessEnv = process.env,
 ): string | null {
-  if (typeof url !== 'string' || !Object.hasOwn(PROVIDER_ORIGINS, provider)) {
+  const origins: Record<string, string> = providerOrigins(env)
+  if (typeof url !== 'string' || !Object.hasOwn(origins, provider)) {
     return null
   }
   try {
     const parsed = new URL(url)
-    return parsed.protocol === 'https:' &&
-      parsed.origin === PROVIDER_ORIGINS[provider]
+    return parsed.protocol === 'https:' && parsed.origin === origins[provider]
       ? parsed.href
       : null
   } catch {
@@ -50,12 +64,13 @@ export interface SocialSignInStart {
 }
 
 /**
- * Start `provider`'s sign-in, passing `loginHint` to Google when set.
- * Resolves to null when the sign-in could not be started.
+ * Start `provider`'s sign-in, passing `loginHint` to Google when set
+ * (OpenStreetMap signs in by username, so an email hint means nothing to
+ * it). Resolves to null when the sign-in could not be started.
  */
 export async function startSocialSignIn(
   auth: Pick<BetterAuthInstance, 'api'>,
-  provider: 'google',
+  provider: StartableSocialProvider,
   loginHint: string,
 ): Promise<SocialSignInStart | null> {
   try {
@@ -67,7 +82,7 @@ export async function startSocialSignIn(
         // naming the provider (see lib/social-sign-in-error.ts).
         errorCallbackURL: `/auth/complete?${SOCIAL_PROVIDER_PARAM}=${provider}`,
         disableRedirect: true,
-        ...(loginHint ? { loginHint } : {}),
+        ...(loginHint && provider === 'google' ? { loginHint } : {}),
       },
       returnHeaders: true,
     })

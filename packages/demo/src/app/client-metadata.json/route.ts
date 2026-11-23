@@ -78,9 +78,9 @@ export async function GET() {
     // ?handle=<value>, which our /api/oauth/login route already handles
     // (resolves handle → PDS → fresh PAR against that PDS).
     epds_handle_login_url: `${baseUrl}/api/oauth/login`,
-    // Opt in to the "Sign in with Google" button; it renders only on an
-    // auth service that has Google configured.
-    epds_social_providers: ['google'],
+    // Opt in to the "Sign in with Google" and "Sign in with OpenStreetMap"
+    // buttons; each renders only on an auth service that has it configured.
+    epds_social_providers: ['google', 'openstreetmap'],
     ...(process.env.EPDS_SKIP_CONSENT_ON_SIGNUP === 'true' && {
       epds_skip_consent_on_signup: true,
     }),
