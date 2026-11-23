@@ -419,13 +419,17 @@ The demo app's "Sign in with Google" button
 #### Optional: offer OpenStreetMap sign-in
 
 If the operator has configured OpenStreetMap, list it the same way
-(`"epds_social_providers": ["openstreetmap"]`, alone or with `"google"`)
-to render a "Sign in with OpenStreetMap" button, or start it directly with
-`epds_social_provider=openstreetmap` on `/oauth/authorize` as above (it
-takes no `login_hint`). OpenStreetMap never creates an account: it signs
-in to an account whose owner connected their OpenStreetMap identity in
-Account Settings after signing in once with an email code. An unconnected
-identity returns to the login page with a message explaining that.
+(`"epds_social_providers": ["openstreetmap"]`, alone or with `"google"`).
+The simplest flow is a "Sign in with OpenStreetMap" button on your own
+page that adds `epds_social_provider=openstreetmap` to the
+`/oauth/authorize` URL, as above (it takes no `login_hint`): ePDS sends
+the browser straight to OpenStreetMap and back, so users never see the
+ePDS login page. Listing it also renders the button on that login page.
+
+OpenStreetMap never creates an account: it signs in to an account whose
+owner connected their OpenStreetMap identity in Account Settings after
+signing in once with an email code. An unconnected identity returns to
+the login page with a message explaining that.
 
 #### Optional: custom CSS and favicon for ePDS pages (trusted clients)
 
