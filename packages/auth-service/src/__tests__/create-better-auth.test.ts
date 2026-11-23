@@ -20,6 +20,12 @@ import {
   signInWithGoogleRedirect,
   stubGoogleToken,
 } from './__helpers__/google-sign-in.js'
+import {
+  OSM_TEST_ENV,
+  openStreetMapCallback,
+  startOpenStreetMap,
+  stubOpenStreetMap,
+} from './__helpers__/osm-sign-in.js'
 
 vi.mock('../lib/get-did-by-email.js', () => ({
   getDidByEmail: vi.fn(() => Promise.resolve(null)),
@@ -206,3 +212,76 @@ describe('a Google sign-in started on the server (createBetterAuth)', () => {
     ).toBe('/auth/complete?epds_social_provider=google&error=access_denied')
   })
 })
+
+describe('createBetterAuth with OpenStreetMap', () => {
+  beforeEach(() => {
+    for (const [key, value] of Object.entries(OSM_TEST_ENV)) {
+      vi.stubEnv(key, value)
+    }
+    stubOpenStreetMap()
+  })
+
+  // routes/account-settings.ts types `auth` as `any` and its router test
+  // mocks auth.api, so neither tsc nor that test notices a misnamed call.
+  it('exposes the better-auth endpoints the account routes call', async () => {
+    const auth = await makeAuth()
+    for (const name of [
+      'linkSocialAccount',
+      'unlinkAccount',
+      'listUserAccounts',
+    ]) {
+      expect(typeof (auth.api as Record<string, unknown>)[name]).toBe(
+        'function',
+      )
+    }
+  })
+
+  it('leaves account linking at better-auth’s defaults without it', async () => {
+    vi.stubEnv('OSM_CLIENT_ID', '')
+    const auth = await makeAuth()
+    expect(auth.options).not.toHaveProperty('account')
+  })
+
+  it('signs in with OpenStreetMap only after it was connected while signed in by email code', async () => {
+    const auth = await makeAuth()
+
+    const refused = await openStreetMapCallback(
+      auth,
+      await startOpenStreetMap(auth, { sub: '1001' }),
+    )
+    expect(refused.location).toBe('/auth/complete?error=signup_disabled')
+
+    const { headers } = await signInWithEmailCodeHeaders(
+      auth,
+      'alice@example.com',
+    )
+    const sessionCookie = headers
+      .getSetCookie()
+      .map((c) => c.split(';')[0])
+      .join('; ')
+    const linked = await openStreetMapCallback(
+      auth,
+      await startOpenStreetMap(auth, { sub: '1001', sessionCookie }),
+    )
+    expect(linked.location).toBe('/account?osm=connected')
+
+    const signedIn = await openStreetMapCallback(
+      auth,
+      await startOpenStreetMap(auth, { sub: '1001' }),
+    )
+    expect(signedIn.location).toBe('/auth/complete')
+    const session = await auth.api.getSession({
+      headers: { cookie: signedIn.cookie },
+    })
+    expect(session?.user.email).toBe('alice@example.com')
+    expect(session?.user.emailVerified).toBe(true)
+  })
+})
+
+/** {@link signInWithEmailCode}, also returning the session cookie headers. */
+async function signInWithEmailCodeHeaders(auth: Auth, email: string) {
+  await auth.api.sendVerificationOTP({ body: { email, type: 'sign-in' } })
+  const otp = codes.get(email)
+  if (!otp) throw new Error(`no code was sent to ${email}`)
+  return auth.api.signInEmailOTP({ body: { email, otp }, returnHeaders: true })
+}

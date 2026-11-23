@@ -27,6 +27,7 @@ export const SOCIAL_PROVIDER_PARAM = 'epds_social_provider'
 /** Display names for the social providers the login page can offer. */
 const PROVIDER_NAMES: Record<string, string> = {
   google: 'Google',
+  openstreetmap: 'OpenStreetMap',
 }
 
 function providerName(provider: unknown): string | null {
@@ -39,6 +40,7 @@ export type SocialSignInErrorCode =
   | 'cancelled'
   | 'email_unverified'
   | 'no_email'
+  | 'not_connected'
   | 'failed'
 
 // `name` is the provider's display name, or null when it is not known.
@@ -50,6 +52,8 @@ const MESSAGES: Record<SocialSignInErrorCode, (name: string | null) => string> =
       `${name ?? 'That account'} could not confirm that this email address is yours. Please sign in with a code sent to your email instead.`,
     no_email: (name) =>
       `${name ?? 'That account'} did not share an email address. Please sign in with your email instead.`,
+    not_connected: (name) =>
+      `${name ? `This ${name} account` : 'That account'} isn't connected to an account here yet. Sign in with your email once, then connect it in your account settings.`,
     failed: (name) =>
       `Could not sign in with ${name ?? 'that account'}. Please try again, or sign in with your email instead.`,
   }
@@ -64,6 +68,9 @@ const MESSAGES: Record<SocialSignInErrorCode, (name: string | null) => string> =
  * - `email_not_verified`: the user-creation guard in better-auth.ts
  *   (refuseUnverifiedUser) refused an email the provider did not prove.
  * - `email_not_found`: the provider returned no email address.
+ * - `signup_disabled`: a provider that only signs in to accounts it was
+ *   connected to (OpenStreetMap, see lib/openstreetmap.ts) is not
+ *   connected to one yet.
  */
 export function socialSignInErrorCode(
   betterAuthError: unknown,
@@ -76,6 +83,8 @@ export function socialSignInErrorCode(
       return 'email_unverified'
     case 'email_not_found':
       return 'no_email'
+    case 'signup_disabled':
+      return 'not_connected'
     default:
       return 'failed'
   }

@@ -169,16 +169,20 @@ card when both `PDS_TERMS_OF_SERVICE_URL` and `PDS_PRIVACY_POLICY_URL`
 
 ### Social providers (optional)
 
-Google is the only social provider. Both ID and SECRET must be set to
-enable it. Its button appears on the login page only for OAuth clients
-that also list it in their client metadata
-(`"epds_social_providers": ["google"]`), so enabling Google does not change
-the login page of clients that did not ask for it.
+Two social providers are available: Google and OpenStreetMap. For each,
+both ID and SECRET must be set to enable it. A provider's button appears on
+the login page only for OAuth clients that also list it in their client
+metadata (`"epds_social_providers": ["google", "openstreetmap"]`), so
+enabling a provider does not change the login page of clients that did not
+ask for it.
 
-| Variable               | Description                                                                        |
-| ---------------------- | ---------------------------------------------------------------------------------- |
-| `GOOGLE_CLIENT_ID`     | Google OAuth client ID — [Google Cloud Console](https://console.cloud.google.com/) |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret                                                         |
+| Variable               | Description                                                                                                                                     |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GOOGLE_CLIENT_ID`     | Google OAuth client ID — [Google Cloud Console](https://console.cloud.google.com/)                                                              |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret                                                                                                                      |
+| `OSM_CLIENT_ID`        | OpenStreetMap OAuth 2 application client ID                                                                                                     |
+| `OSM_CLIENT_SECRET`    | OpenStreetMap OAuth 2 application client secret                                                                                                 |
+| `OSM_ISSUER`           | OpenStreetMap OIDC issuer, an `https` origin (default `https://www.openstreetmap.org`; dev server: `https://master.apis.dev.openstreetmap.org`) |
 
 #### Redirect URIs
 
@@ -186,9 +190,10 @@ better-auth handles the provider callback under `/api/auth` on the auth
 service, so register exactly these URIs with the provider (one per auth
 hostname, e.g. one for each environment):
 
-| Provider | Redirect / callback URI                            |
-| -------- | -------------------------------------------------- |
-| Google   | `https://<AUTH_HOSTNAME>/api/auth/callback/google` |
+| Provider      | Redirect / callback URI                                   |
+| ------------- | --------------------------------------------------------- |
+| Google        | `https://<AUTH_HOSTNAME>/api/auth/callback/google`        |
+| OpenStreetMap | `https://<AUTH_HOSTNAME>/api/auth/callback/openstreetmap` |
 
 #### Google setup
 
@@ -203,6 +208,17 @@ hostname, e.g. one for each environment):
    most 100) can sign in.
 4. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on the auth service
    and restart it.
+
+#### OpenStreetMap setup
+
+1. Sign in to the OpenStreetMap instance named by `OSM_ISSUER` and open
+   **My Settings → OAuth 2 applications → Register new application**
+   (`<OSM_ISSUER>/oauth2/applications/new`).
+2. Enter the OpenStreetMap redirect URI above, keep **Confidential
+   application** checked, and grant only **Sign in using OpenStreetMap**
+   (`openid`); ePDS asks for nothing else.
+3. Set `OSM_CLIENT_ID` and `OSM_CLIENT_SECRET` (and `OSM_ISSUER` for a
+   non-production instance) on the auth service and restart it.
 
 #### Which social sign-ins are trusted
 
@@ -219,6 +235,15 @@ control of the address:
   does not count. For any other address Google only checked it once, when
   the Google account was created, so ePDS treats it as unverified
   ([Google's guidance](https://developers.google.com/identity/gsi/web/guides/verify-google-id-token)).
+
+- **OpenStreetMap:** never vouches for an email address, so it never
+  creates an account and never joins one by email. A user who signed in
+  once with an email code connects their OpenStreetMap identity under
+  **Account Settings → OpenStreetMap**; from then on "Sign in with
+  OpenStreetMap" signs in to that account, matched by the OpenStreetMap
+  user id (the ID token's `sub`). An OpenStreetMap identity that is not
+  connected yet returns to the login page with a message saying so. See
+  [design/openstreetmap-login.md](design/openstreetmap-login.md).
 
 An unverified address never creates a user, a PDS account, or a session
 ePDS honours: the user is returned to the login page with a message asking

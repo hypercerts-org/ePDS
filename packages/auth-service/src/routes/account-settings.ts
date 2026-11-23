@@ -8,11 +8,14 @@ import {
   validateLocalPart,
 } from '@certified-app/shared'
 import { fromNodeHeaders } from 'better-auth/node'
+import { genericOAuthProviders } from '../better-auth.js'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
 import { getHandleByDid } from '../lib/get-handle-by-did.js'
 import { ensurePdsUrl } from '../lib/pds-url.js'
 import { renderError } from '../lib/render-error.js'
 import { POWERED_BY_CSS, POWERED_BY_HTML } from '../lib/page-helpers.js'
+import { OSM_PROVIDER_ID } from '../lib/openstreetmap.js'
+import { providerAuthorizationUrl } from '../lib/start-social-sign-in.js'
 import { hasVerifiedEmail } from '../lib/verified-email.js'
 
 const logger = createLogger('auth:account-settings')
@@ -85,6 +88,13 @@ export function createAccountSettingsRouter(
       logger.warn({ err }, 'Failed to list sessions')
     }
 
+    const openStreetMap = genericOAuthProviders.openstreetmap
+      ? {
+          account: await findOsmAccount(auth, req),
+          notice: osmNotice(req.query.osm),
+        }
+      : null
+
     res.type('html').send(
       renderSettingsPage({
         did: did ?? '(unknown)',
@@ -95,9 +105,70 @@ export function createAccountSettingsRouter(
         sessions,
         currentSessionToken: session.session.token,
         csrfToken: res.locals.csrfToken,
+        openStreetMap,
       }),
     )
   })
+
+  // POST /account/openstreetmap/connect — link an OpenStreetMap identity to
+  // this account. better-auth's /link-social ties the OAuth state to this
+  // session, so the identity can only join the account that started it.
+  router.post(
+    '/account/openstreetmap/connect',
+    requireAuth,
+    async (req: Request, res: Response) => {
+      if (!genericOAuthProviders.openstreetmap) {
+        res.redirect(303, '/account')
+        return
+      }
+      try {
+        const { headers, response } = await auth.api.linkSocialAccount({
+          body: {
+            provider: OSM_PROVIDER_ID,
+            callbackURL: '/account?osm=connected',
+            errorCallbackURL: '/account?osm=connect_failed',
+            disableRedirect: true,
+          },
+          headers: fromNodeHeaders(req.headers),
+          returnHeaders: true,
+        })
+        const url = providerAuthorizationUrl(OSM_PROVIDER_ID, response?.url)
+        if (url) {
+          res.append('Set-Cookie', headers.getSetCookie())
+          res.redirect(303, url)
+          return
+        }
+        logger.error('OpenStreetMap link returned no provider URL')
+      } catch (err) {
+        logger.error({ err }, 'Failed to start OpenStreetMap link')
+      }
+      res.redirect(303, '/account?osm=connect_failed')
+    },
+  )
+
+  // POST /account/openstreetmap/disconnect — unlink it again. Email-code
+  // sign-in keeps working without it.
+  router.post(
+    '/account/openstreetmap/disconnect',
+    requireAuth,
+    async (req: Request, res: Response) => {
+      const account = await findOsmAccount(auth, req)
+      if (!account) {
+        res.redirect(303, '/account')
+        return
+      }
+      try {
+        await auth.api.unlinkAccount({
+          body: { accountId: account.id },
+          headers: fromNodeHeaders(req.headers),
+        })
+        res.redirect(303, '/account?osm=disconnected')
+      } catch (err) {
+        logger.warn({ err }, 'Failed to disconnect OpenStreetMap')
+        res.redirect(303, '/account?osm=disconnect_failed')
+      }
+    },
+  )
 
   // POST /account/backup-email/add
   router.post(
@@ -418,6 +489,96 @@ export function createAccountSettingsRouter(
   return router
 }
 
+/** The signed-in user's linked OpenStreetMap account, if any. */
+interface OsmAccount {
+  /** better-auth's account row id (what /unlink-account takes). */
+  id: string
+  /** The OpenStreetMap user id (the ID token's `sub`). */
+  accountId: string
+}
+
+async function findOsmAccount(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth instance has no exported type
+  auth: any,
+  req: Request,
+): Promise<OsmAccount | null> {
+  try {
+    const accounts: unknown = await auth.api.listUserAccounts({
+      headers: fromNodeHeaders(req.headers),
+    })
+    if (!Array.isArray(accounts)) return null
+    const found = (
+      accounts as Array<{
+        id?: unknown
+        providerId?: unknown
+        accountId?: unknown
+      }>
+    ).find((a) => a.providerId === OSM_PROVIDER_ID)
+    return found &&
+      typeof found.id === 'string' &&
+      typeof found.accountId === 'string'
+      ? { id: found.id, accountId: found.accountId }
+      : null
+  } catch (err) {
+    logger.warn({ err }, 'Failed to list linked accounts')
+    return null
+  }
+}
+
+/** Fixed notices for the `?osm=` the connect/disconnect redirects carry. */
+const OSM_NOTICES: Record<string, { text: string; error: boolean }> = {
+  connected: { text: 'OpenStreetMap connected.', error: false },
+  connect_failed: {
+    text: 'Could not connect OpenStreetMap. That OpenStreetMap account may already be connected to another account.',
+    error: true,
+  },
+  disconnected: { text: 'OpenStreetMap disconnected.', error: false },
+  disconnect_failed: {
+    text: 'Could not disconnect OpenStreetMap. Please sign in again and retry.',
+    error: true,
+  },
+}
+
+/** The notice for an `?osm=` value; nothing from the query is reflected. */
+export function osmNotice(
+  value: unknown,
+): { text: string; error: boolean } | null {
+  return typeof value === 'string' && Object.hasOwn(OSM_NOTICES, value)
+    ? OSM_NOTICES[value]
+    : null
+}
+
+function renderOpenStreetMapSection(
+  osm: {
+    account: OsmAccount | null
+    notice: { text: string; error: boolean } | null
+  },
+  csrfToken: string,
+): string {
+  const notice = osm.notice
+    ? `<p class="${osm.notice.error ? 'error' : 'success'}">${escapeHtml(osm.notice.text)}</p>`
+    : ''
+  const body = osm.account
+    ? `<div class="setting-row">
+        <span>Connected as OpenStreetMap user <code>${escapeHtml(osm.account.accountId)}</code></span>
+        <form method="POST" action="/account/openstreetmap/disconnect" style="display:inline">
+          <input type="hidden" name="csrf" value="${escapeHtml(csrfToken)}">
+          <button type="submit" class="btn-danger-sm">Disconnect</button>
+        </form>
+      </div>`
+    : `<form method="POST" action="/account/openstreetmap/connect" class="inline-form">
+        <input type="hidden" name="csrf" value="${escapeHtml(csrfToken)}">
+        <button type="submit" class="btn-primary-sm">Connect OpenStreetMap</button>
+      </form>`
+  return `
+    <section class="section">
+      <h2>OpenStreetMap</h2>
+      <p class="info">Connect your OpenStreetMap account to sign in with it next time.</p>
+      ${notice}
+      ${body}
+    </section>`
+}
+
 function renderSettingsPage(opts: {
   did: string
   email: string
@@ -432,6 +593,10 @@ function renderSettingsPage(opts: {
   }>
   currentSessionToken: string
   csrfToken: string
+  openStreetMap: {
+    account: OsmAccount | null
+    notice: { text: string; error: boolean } | null
+  } | null
 }): string {
   const backupRows = opts.backupEmails
     .map(
@@ -523,6 +688,8 @@ function renderSettingsPage(opts: {
       </form>
     </section>
 
+    ${opts.openStreetMap ? renderOpenStreetMapSection(opts.openStreetMap, opts.csrfToken) : ''}
+
     <section class="section danger-zone">
       <h2>Danger Zone</h2>
       <p class="info">Permanently delete your account and all associated data. This cannot be undone.</p>
@@ -601,6 +768,8 @@ const SETTINGS_CSS = `
   .session-agent { display: block; font-size: 13px; color: #333; }
   .session-date { display: block; font-size: 12px; color: #999; }
   .info { color: #666; font-size: 14px; line-height: 1.5; margin-bottom: 12px; }
+  .error { color: #dc3545; background: #fdf0f0; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
+  .success { color: #28a745; background: #f0fff4; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
   .inline-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   .inline-form input[type="text"], .inline-form input[type="email"] { flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; min-width: 120px; }
   .btn-primary-sm { padding: 8px 16px; background: #0f1828; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; white-space: nowrap; }

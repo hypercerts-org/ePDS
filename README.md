@@ -1,7 +1,7 @@
 # ePDS — extended Personal Data Server
 
 ePDS lets your users sign in to [AT Protocol](https://atproto.com/) apps — like
-[Bluesky](https://bsky.app/) — using familiar login methods: **email OTP** or **Google**.
+[Bluesky](https://bsky.app/) — using familiar login methods: **email OTP**, **Google**, or a connected **OpenStreetMap** account.
 
 Under the hood, ePDS is a standard AT Protocol
 [Personal Data Server (PDS)](https://atproto.com/guides/self-hosting) wrapped with a
@@ -36,6 +36,7 @@ New users get an account created automatically on their first login.
   OAuth client library
 - Two integration patterns depending on your UI needs — see [Login Flows](#login-flows)
 - Google sign-in — configured per deployment, opt-in per app
+- OpenStreetMap sign-in for accounts that connected it — configured per deployment, opt-in per app
 
 ## Login Flows
 

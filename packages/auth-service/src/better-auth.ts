@@ -4,6 +4,8 @@
  * This module creates and exports a better-auth instance configured with:
  * - Email OTP plugin (for future migration from custom OTP implementation)
  * - Google sign-in (only when its env vars are set)
+ * - OpenStreetMap sign-in via the generic OAuth plugin (only when its env
+ *   vars are set; see lib/openstreetmap.ts)
  * - Session lifetime from env vars
  * - An `after` hook that surfaces OTP verification failures in our logs,
  *   with the user's email attached (see logOtpVerificationFailure below)
@@ -16,13 +18,18 @@ import { betterAuth } from 'better-auth'
 import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { generateRandomString } from 'better-auth/crypto'
 import { getMigrations } from 'better-auth/db/migration'
-import { emailOTP } from 'better-auth/plugins'
+import { emailOTP, genericOAuth } from 'better-auth/plugins'
+import type { GenericOAuthConfig } from 'better-auth/plugins'
 import type { GoogleOptions } from 'better-auth/social-providers'
 import Database from 'better-sqlite3'
 import type { EmailSender } from './email/sender.js'
 import { flowEmailPlugin } from './lib/flow-email-plugin.js'
 import { getDidByEmail } from './lib/get-did-by-email.js'
 import { mapGoogleProfileToUser } from './lib/google-email-verified.js'
+import {
+  buildOpenStreetMapConfig,
+  OSM_PROVIDER_ID,
+} from './lib/openstreetmap.js'
 import { ensurePdsUrl } from './lib/pds-url.js'
 import { hasVerifiedEmail } from './lib/verified-email.js'
 
@@ -234,6 +241,73 @@ export const databaseHooks = {
 }
 
 /**
+ * Generic OAuth providers that were configured — exported for use by the
+ * login page and account settings. createBetterAuth refills this object in
+ * place, like {@link socialProviders}.
+ */
+export const genericOAuthProviders: { openstreetmap?: GenericOAuthConfig } = {}
+
+/**
+ * better-auth `account.accountLinking` options. Without OpenStreetMap they
+ * are better-auth's defaults (undefined).
+ *
+ * With OpenStreetMap configured, a signed-in user may connect an
+ * OpenStreetMap identity from account settings. better-auth only links an
+ * identity whose provider is trusted or vouches for the email, and whose
+ * email equals the user's; OpenStreetMap does neither (lib/openstreetmap.ts
+ * gives it a placeholder `.invalid` address), so linking needs:
+ *
+ * - `trustedProviders: ['openstreetmap']`. This also lets better-auth link
+ *   OpenStreetMap implicitly to a user with the same email at sign-in, but
+ *   the placeholder address can never be a user's: no email code can reach
+ *   `.invalid`, and the user-creation guard refuses it unverified.
+ * - `allowDifferentEmails: true`. better-auth reads it only when a
+ *   signed-in user links an identity explicitly (/link-social), and
+ *   {@link refuseNonOsmLink} keeps that endpoint to OpenStreetMap, so
+ *   Google linking is unchanged.
+ * - `allowUnlinkingAll: true`, so the user can disconnect OpenStreetMap
+ *   again. Email-code sign-in needs no better-auth account row, so an
+ *   account with no linked identity can still sign in.
+ */
+export function openStreetMapAccountLinking(osmConfigured: boolean):
+  | {
+      trustedProviders: string[]
+      allowDifferentEmails: true
+      allowUnlinkingAll: true
+    }
+  | undefined {
+  if (!osmConfigured) return undefined
+  return {
+    trustedProviders: [OSM_PROVIDER_ID],
+    allowDifferentEmails: true,
+    allowUnlinkingAll: true,
+  }
+}
+
+/** The code of the error {@link refuseNonOsmLink} answers with. */
+export const LINK_PROVIDER_NOT_ALLOWED = 'link_provider_not_allowed'
+
+/**
+ * better-auth `before` hook check: while OpenStreetMap linking relaxes
+ * the email match (see {@link openStreetMapAccountLinking}), only
+ * OpenStreetMap may be linked explicitly. ePDS offers no other explicit
+ * linking, so this refuses nothing the UI uses.
+ */
+export function refuseNonOsmLink(
+  osmConfigured: boolean,
+  path: string,
+  body: unknown,
+): void {
+  if (!osmConfigured || path !== '/link-social') return
+  const provider = (body as { provider?: unknown } | undefined)?.provider
+  if (provider === OSM_PROVIDER_ID) return
+  throw new APIError('FORBIDDEN', {
+    message: 'Only OpenStreetMap can be linked to an account',
+    code: LINK_PROVIDER_NOT_ALLOWED,
+  })
+}
+
+/**
  * Create a better-auth instance wired to the given EmailSender and EpdsDb.
  *
  * Called once during app startup from index.ts.
@@ -320,6 +394,12 @@ export function createBetterAuth(
   delete socialProviders.google
   Object.assign(socialProviders, buildSocialProviders())
 
+  delete genericOAuthProviders.openstreetmap
+  const osmConfig = buildOpenStreetMapConfig()
+  if (osmConfig) genericOAuthProviders.openstreetmap = osmConfig
+  const osmConfigured = osmConfig !== null
+  const accountLinking = openStreetMapAccountLinking(osmConfigured)
+
   const betterAuthDb = new Database(dbLocation)
 
   return betterAuth({
@@ -350,6 +430,12 @@ export function createBetterAuth(
     // better-auth re-throws the APIError, so the HTTP response is unchanged.
     // See logOtpVerificationFailure above.
     hooks: {
+      // Keeps explicit linking to OpenStreetMap while its relaxed linking
+      // options are on (see openStreetMapAccountLinking).
+      before: createAuthMiddleware((ctx) => {
+        refuseNonOsmLink(osmConfigured, ctx.path, ctx.body)
+        return Promise.resolve()
+      }),
       // createAuthMiddleware's handler type requires a Promise return. Our
       // logging is synchronous, so the callback stays non-async and returns a
       // resolved promise rather than suppressing the require-await lint.
@@ -375,7 +461,13 @@ export function createBetterAuth(
 
     socialProviders,
 
+    ...(accountLinking ? { account: { accountLinking } } : {}),
+
     plugins: [
+      // OpenStreetMap, when configured (lib/openstreetmap.ts). The plugin
+      // registers it as a social provider, so it uses the same
+      // /sign-in/social and /callback/:id endpoints as Google.
+      ...(osmConfig ? [genericOAuth({ config: [osmConfig] })] : []),
       // Substitutes the auth_flow's stored email into the OTP endpoints'
       // request body when the login page sends `useFlowEmail` instead of
       // an address. Must be registered here (the instance mounted at

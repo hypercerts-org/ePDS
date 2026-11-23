@@ -12,6 +12,7 @@ describe('socialSignInErrorCode', () => {
     ['access_denied', 'cancelled'],
     ['account_not_linked', 'email_unverified'],
     ['email_not_found', 'no_email'],
+    ['signup_disabled', 'not_connected'],
     ['invalid_code', 'failed'],
     ['unable_to_create_user', 'failed'],
     ['', 'failed'],
@@ -23,12 +24,15 @@ describe('socialSignInErrorCode', () => {
 })
 
 describe('socialSignInErrorMessage', () => {
-  it.each(['cancelled', 'email_unverified', 'no_email', 'failed'])(
-    'has a message for %s',
-    (code) => {
-      expect(socialSignInErrorMessage(code)).toEqual(expect.any(String))
-    },
-  )
+  it.each([
+    'cancelled',
+    'email_unverified',
+    'no_email',
+    'not_connected',
+    'failed',
+  ])('has a message for %s', (code) => {
+    expect(socialSignInErrorMessage(code)).toEqual(expect.any(String))
+  })
 
   it.each([
     'access_denied',
@@ -40,6 +44,15 @@ describe('socialSignInErrorMessage', () => {
     ['cancelled'],
   ])('has no message for %j', (code) => {
     expect(socialSignInErrorMessage(code)).toBeNull()
+  })
+
+  it('tells an unconnected OpenStreetMap user how to connect it', () => {
+    expect(socialSignInErrorMessage('not_connected', 'openstreetmap')).toBe(
+      "This OpenStreetMap account isn't connected to an account here yet. Sign in with your email once, then connect it in your account settings.",
+    )
+    expect(socialSignInErrorMessage('not_connected')).toMatch(
+      /^That account isn't connected/,
+    )
   })
 
   it('names a known provider', () => {
