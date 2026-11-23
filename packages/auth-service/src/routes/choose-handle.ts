@@ -434,10 +434,34 @@ export function createChooseHandleRouter(
       email_verified: emailVerified ? '1' : '0',
     }
     if (flow.clientId) callbackParams.client_id = flow.clientId
-    const { sig, ts } = signCallback(
-      callbackParams,
-      ctx.config.epdsCallbackSecret,
-    )
+    // signCallback throws on values it refuses to sign (e.g. a control
+    // character in a field — the same guard complete.ts relies on). Without
+    // a catch the async Express 4 handler rejects before sending a response,
+    // leaving the browser without feedback and surfacing as an unhandled
+    // rejection under Node's default behaviour. Mirror complete.ts's
+    // exitWithServerError: log for operators, then bounce the browser back to
+    // the OAuth client with server_error (or a 500 page when there is no
+    // client to return to). The auth_flow row stays alive for retry.
+    let sig: string
+    let ts: string
+    try {
+      ;({ sig, ts } = signCallback(
+        callbackParams,
+        ctx.config.epdsCallbackSecret,
+      ))
+    } catch (err) {
+      logger.error({ err, flowId }, 'Failed to sign epds-callback redirect')
+      await cleanExit({
+        res,
+        clientId: flow.clientId,
+        pdsUrl,
+        code: 'server_error',
+        description:
+          'Authentication failed because of a server error. Please try again.',
+        fallbackStatus: 500,
+      })
+      return
+    }
     const params = new URLSearchParams({ ...callbackParams, ts, sig })
 
     logger.info(
