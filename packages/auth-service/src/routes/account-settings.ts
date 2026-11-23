@@ -14,7 +14,7 @@ import { getHandleByDid } from '../lib/get-handle-by-did.js'
 import { ensurePdsUrl } from '../lib/pds-url.js'
 import { renderError } from '../lib/render-error.js'
 import { POWERED_BY_CSS, POWERED_BY_HTML } from '../lib/page-helpers.js'
-import { OSM_PROVIDER_ID } from '../lib/openstreetmap.js'
+import { OSM_PROVIDER_ID, parseOsmAccountId } from '../lib/openstreetmap.js'
 import { providerAuthorizationUrl } from '../lib/start-social-sign-in.js'
 import { hasVerifiedEmail } from '../lib/verified-email.js'
 
@@ -555,12 +555,15 @@ function renderOpenStreetMapSection(
   },
   csrfToken: string,
 ): string {
+  const noticeClass = osm.notice?.error ? 'error' : 'success'
   const notice = osm.notice
-    ? `<p class="${osm.notice.error ? 'error' : 'success'}">${escapeHtml(osm.notice.text)}</p>`
+    ? `<p class="${noticeClass}">${escapeHtml(osm.notice.text)}</p>`
     : ''
+  const osmUser = osm.account ? parseOsmAccountId(osm.account.accountId) : null
+  const osmHost = osmUser?.host ? ` on ${escapeHtml(osmUser.host)}` : ''
   const body = osm.account
     ? `<div class="setting-row">
-        <span>Connected as OpenStreetMap user <code>${escapeHtml(osm.account.accountId)}</code></span>
+        <span>Connected as OpenStreetMap user <code>${escapeHtml(osmUser?.userId ?? '')}</code>${osmHost}</span>
         <form method="POST" action="/account/openstreetmap/disconnect" style="display:inline">
           <input type="hidden" name="csrf" value="${escapeHtml(csrfToken)}">
           <button type="submit" class="btn-danger-sm">Disconnect</button>

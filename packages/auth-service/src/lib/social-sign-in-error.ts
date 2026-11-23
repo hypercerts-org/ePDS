@@ -52,8 +52,10 @@ const MESSAGES: Record<SocialSignInErrorCode, (name: string | null) => string> =
       `${name ?? 'That account'} could not confirm that this email address is yours. Please sign in with a code sent to your email instead.`,
     no_email: (name) =>
       `${name ?? 'That account'} did not share an email address. Please sign in with your email instead.`,
-    not_connected: (name) =>
-      `${name ? `This ${name} account` : 'That account'} isn't connected to an account here yet. Sign in with your email once, then connect it in your account settings.`,
+    not_connected: (name) => {
+      const subject = name ? `This ${name} account` : 'That account'
+      return `${subject} isn't connected to an account here yet. Sign in with your email once, then connect it in your account settings.`
+    },
     failed: (name) =>
       `Could not sign in with ${name ?? 'that account'}. Please try again, or sign in with your email instead.`,
   }

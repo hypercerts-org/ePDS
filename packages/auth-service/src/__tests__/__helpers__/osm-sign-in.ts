@@ -9,6 +9,8 @@ import { generateKeyPairSync, sign } from 'node:crypto'
 import { expect, vi } from 'vitest'
 
 export const OSM_TEST_ISSUER = 'https://osm.example'
+/** A second OSM instance, whose user ids overlap the first's. */
+export const OSM_OTHER_TEST_ISSUER = 'https://other-osm.example'
 export const OSM_TEST_CLIENT_ID = 'osm-client-id'
 export const OSM_TEST_ENV = {
   OSM_CLIENT_ID: OSM_TEST_CLIENT_ID,
@@ -35,8 +37,9 @@ function signIdToken(claims: Record<string, unknown>): string {
 const next = { sub: '1001', username: 'alice', nonce: '' }
 
 /**
- * Stub OpenStreetMap's endpoints for the whole test. The token endpoint
- * answers for {@link next}; undo with `vi.unstubAllGlobals()`.
+ * Stub the endpoints of OpenStreetMap instances at {@link OSM_TEST_ISSUER}
+ * and {@link OSM_OTHER_TEST_ISSUER} for the whole test. Token endpoints
+ * answer for {@link next}; undo with `vi.unstubAllGlobals()`.
  */
 export function stubOpenStreetMap(): void {
   const realFetch = globalThis.fetch.bind(globalThis)
@@ -49,23 +52,27 @@ export function stubOpenStreetMap(): void {
           : typeof input === 'string'
             ? input
             : input.url
-      if (url === `${OSM_TEST_ISSUER}/.well-known/openid-configuration`) {
+      const issuer = [OSM_TEST_ISSUER, OSM_OTHER_TEST_ISSUER].find((i) =>
+        url.startsWith(`${i}/`),
+      )
+      if (!issuer) return realFetch(input, init)
+      if (url === `${issuer}/.well-known/openid-configuration`) {
         return Promise.resolve(
           Response.json({
-            issuer: OSM_TEST_ISSUER,
-            authorization_endpoint: `${OSM_TEST_ISSUER}/oauth2/authorize`,
-            token_endpoint: `${OSM_TEST_ISSUER}/oauth2/token`,
-            userinfo_endpoint: `${OSM_TEST_ISSUER}/oauth2/userinfo`,
-            jwks_uri: `${OSM_TEST_ISSUER}/oauth2/discovery/keys`,
+            issuer,
+            authorization_endpoint: `${issuer}/oauth2/authorize`,
+            token_endpoint: `${issuer}/oauth2/token`,
+            userinfo_endpoint: `${issuer}/oauth2/userinfo`,
+            jwks_uri: `${issuer}/oauth2/discovery/keys`,
             id_token_signing_alg_values_supported: ['RS256'],
             claims_supported: ['sub', 'preferred_username', 'email'],
           }),
         )
       }
-      if (url === `${OSM_TEST_ISSUER}/oauth2/discovery/keys`) {
+      if (url === `${issuer}/oauth2/discovery/keys`) {
         return Promise.resolve(Response.json({ keys: [jwk] }))
       }
-      if (url === `${OSM_TEST_ISSUER}/oauth2/token`) {
+      if (url === `${issuer}/oauth2/token`) {
         const now = Math.floor(Date.now() / 1000)
         return Promise.resolve(
           Response.json({
@@ -74,7 +81,7 @@ export function stubOpenStreetMap(): void {
             expires_in: 3600,
             scope: 'openid',
             id_token: signIdToken({
-              iss: OSM_TEST_ISSUER,
+              iss: issuer,
               aud: OSM_TEST_CLIENT_ID,
               sub: next.sub,
               nonce: next.nonce,
@@ -84,7 +91,7 @@ export function stubOpenStreetMap(): void {
           }),
         )
       }
-      if (url === `${OSM_TEST_ISSUER}/oauth2/userinfo`) {
+      if (url === `${issuer}/oauth2/userinfo`) {
         return Promise.resolve(
           Response.json({ sub: next.sub, preferred_username: next.username }),
         )

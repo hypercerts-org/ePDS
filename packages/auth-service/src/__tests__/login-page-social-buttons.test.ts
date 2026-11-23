@@ -249,9 +249,18 @@ describe('renderLoginPage social sign-in opt-in', () => {
   })
 
   it('lets the page script follow OpenStreetMap’s configured issuer', () => {
-    expect(render()).toContain(
-      '"openstreetmap":"https://www.openstreetmap.org"',
-    )
+    vi.stubEnv('OSM_ISSUER', 'https://master.apis.dev.openstreetmap.org')
+    try {
+      expect(render()).toContain(
+        '"openstreetmap":"https://master.apis.dev.openstreetmap.org"',
+      )
+      vi.stubEnv('OSM_ISSUER', '')
+      expect(render()).toContain(
+        '"openstreetmap":"https://www.openstreetmap.org"',
+      )
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('ignores unknown and removed providers and a non-array value', () => {

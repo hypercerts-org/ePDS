@@ -26,6 +26,7 @@ import {
   OSM_PLACEHOLDER_EMAIL_DOMAIN,
 } from '../lib/openstreetmap.js'
 import {
+  OSM_OTHER_TEST_ISSUER,
   OSM_TEST_ENV,
   OSM_TEST_ISSUER,
   openStreetMapCallback,
@@ -33,14 +34,21 @@ import {
   stubOpenStreetMap,
 } from './__helpers__/osm-sign-in.js'
 
-async function makeAuth() {
-  const osm = buildOpenStreetMapConfig(OSM_TEST_ENV)
+/**
+ * ePDS's better-auth setup against OSM at `issuer`. Pass the `database`
+ * of an earlier instance to model a deployment whose `OSM_ISSUER` changed.
+ */
+async function makeAuth(
+  issuer = OSM_TEST_ISSUER,
+  database = new Database(':memory:'),
+) {
+  const osm = buildOpenStreetMapConfig({ ...OSM_TEST_ENV, OSM_ISSUER: issuer })
   if (!osm) throw new Error('OpenStreetMap provider not configured')
   const auth = betterAuth({
     secret: 'test-secret-test-secret-test-secret',
     baseURL: 'https://auth.example',
     basePath: '/api/auth',
-    database: new Database(':memory:'),
+    database,
     databaseHooks,
     account: { accountLinking: openStreetMapAccountLinking(true) },
     hooks: {
@@ -57,7 +65,7 @@ async function makeAuth() {
   })
   const { runMigrations } = await getMigrations(auth.options)
   await runMigrations()
-  return auth
+  return Object.assign(auth, { database })
 }
 
 type Auth = Awaited<ReturnType<typeof makeAuth>>
@@ -134,14 +142,18 @@ describe('OpenStreetMap sign-in without a connected account', () => {
     expect(await sessionEmail(auth, cookie)).toBeNull()
   })
 
-  it('never joins an existing user, whatever its email', async () => {
+  it('never joins an existing user, even one holding a placeholder-domain address', async () => {
+    // OSM is a trusted provider, so better-auth would implicitly link a
+    // sign-in whose mapped email equals a verified user's. A placeholder
+    // derived from the sub (as `1001@…` once was) would be guessable; the
+    // random one cannot be matched.
     const auth = await makeAuth()
     await signedInUser(auth, 'alice@example.com')
-    // The placeholder address for this sub, should a user somehow hold it.
     await signedInUser(auth, `1001@${OSM_PLACEHOLDER_EMAIL_DOMAIN}`)
-    const started = await startOpenStreetMap(auth, { sub: '1002' })
-    const { location } = await openStreetMapCallback(auth, started)
+    const started = await startOpenStreetMap(auth, { sub: '1001' })
+    const { location, cookie } = await openStreetMapCallback(auth, started)
     expect(location).toBe('/auth/complete?error=signup_disabled')
+    expect(await sessionEmail(auth, cookie)).toBeNull()
     expect(await userCount(auth)).toBe(2)
   })
 })
@@ -196,6 +208,33 @@ describe('Connecting OpenStreetMap from a signed-in session', () => {
     const signIn = await startOpenStreetMap(auth, { sub: '1001' })
     const { cookie } = await openStreetMapCallback(auth, signIn)
     expect(await sessionEmail(auth, cookie)).toBe('alice@example.com')
+  })
+
+  it('signs in only from the OSM instance it was connected on', async () => {
+    const auth = await makeAuth(OSM_TEST_ISSUER)
+    const alice = await signedInUser(auth, 'alice@example.com')
+    await openStreetMapCallback(
+      auth,
+      await startOpenStreetMap(auth, {
+        sub: '1001',
+        sessionCookie: alice.cookie,
+      }),
+    )
+
+    // Same database, OSM_ISSUER switched: user 1001 there is someone else.
+    const other = await makeAuth(OSM_OTHER_TEST_ISSUER, auth.database)
+    const elsewhere = await openStreetMapCallback(
+      other,
+      await startOpenStreetMap(other, { sub: '1001' }),
+    )
+    expect(elsewhere.location).toBe('/auth/complete?error=signup_disabled')
+    expect(await sessionEmail(other, elsewhere.cookie)).toBeNull()
+
+    const home = await openStreetMapCallback(
+      auth,
+      await startOpenStreetMap(auth, { sub: '1001' }),
+    )
+    expect(await sessionEmail(auth, home.cookie)).toBe('alice@example.com')
   })
 
   it('refuses explicit linking of any other provider', async () => {

@@ -9,9 +9,13 @@ import {
   DEFAULT_OSM_ISSUER,
   mapOsmProfileToUser,
   OSM_PROVIDER_ID,
+  osmAccountSubject,
   osmIssuer,
   osmPlaceholderEmail,
+  parseOsmAccountId,
 } from '../lib/openstreetmap.js'
+
+const PLACEHOLDER = /^[0-9a-f-]{36}@users\.openstreetmap\.invalid$/
 
 describe('buildOpenStreetMapConfig', () => {
   it('is off without both client id and secret', () => {
@@ -38,7 +42,31 @@ describe('buildOpenStreetMapConfig', () => {
       pkce: true,
       disableSignUp: true,
       mapProfileToUser: mapOsmProfileToUser,
+      accountSubject: expect.any(Function),
     })
+  })
+
+  it('keys accounts by the issuer host and the sub', async () => {
+    const subject = (env: NodeJS.ProcessEnv) =>
+      buildOpenStreetMapConfig({
+        OSM_CLIENT_ID: 'id',
+        OSM_CLIENT_SECRET: 'secret',
+        ...env,
+      })?.accountSubject?.({
+        profile: { sub: '1001' },
+      } as Parameters<
+        NonNullable<
+          NonNullable<
+            ReturnType<typeof buildOpenStreetMapConfig>
+          >['accountSubject']
+        >
+      >[0])
+    expect(await subject({})).toBe('www.openstreetmap.org:1001')
+    expect(
+      await subject({
+        OSM_ISSUER: 'https://master.apis.dev.openstreetmap.org',
+      }),
+    ).toBe('master.apis.dev.openstreetmap.org:1001')
   })
 
   it('discovers from OSM_ISSUER, e.g. the OSM dev server', () => {
@@ -71,10 +99,45 @@ describe('osmIssuer', () => {
   })
 })
 
+describe('osmAccountSubject', () => {
+  it('qualifies the sub with the issuer host', () => {
+    expect(osmAccountSubject('https://www.openstreetmap.org', '1001')).toBe(
+      'www.openstreetmap.org:1001',
+    )
+    expect(osmAccountSubject('https://osm.example:8443', 1001)).toBe(
+      'osm.example:8443:1001',
+    )
+  })
+
+  it.each([undefined, null, '', 'alice', '1@x', '-1', {}])(
+    'is empty, which better-auth rejects, for sub %j',
+    (sub) => {
+      expect(osmAccountSubject('https://www.openstreetmap.org', sub)).toBe('')
+    },
+  )
+})
+
+describe('parseOsmAccountId', () => {
+  it('splits off the instance host for display', () => {
+    expect(parseOsmAccountId('www.openstreetmap.org:30869')).toEqual({
+      userId: '30869',
+      host: 'www.openstreetmap.org',
+    })
+    expect(parseOsmAccountId('osm.example:8443:7')).toEqual({
+      userId: '7',
+      host: 'osm.example:8443',
+    })
+    expect(parseOsmAccountId('30869')).toEqual({ userId: '30869', host: null })
+  })
+})
+
 describe('osmPlaceholderEmail', () => {
-  it('is a reserved .invalid address unique to the sub', () => {
-    expect(osmPlaceholderEmail('1001')).toBe('1001@users.openstreetmap.invalid')
-    expect(osmPlaceholderEmail(1001)).toBe('1001@users.openstreetmap.invalid')
+  it('is a fresh, unpredictable reserved .invalid address', () => {
+    const first = osmPlaceholderEmail('1001')
+    expect(first).toMatch(PLACEHOLDER)
+    expect(osmPlaceholderEmail(1001)).toMatch(PLACEHOLDER)
+    expect(osmPlaceholderEmail('1001')).not.toBe(first)
+    expect(first).not.toContain('1001')
   })
 
   it.each([undefined, null, '', 'alice', '1@x', '-1', '1.5', {}, ['1']])(
@@ -95,7 +158,7 @@ describe('mapOsmProfileToUser', () => {
         email_verified: true,
       } as Parameters<typeof mapOsmProfileToUser>[0]),
     ).toEqual({
-      email: '1001@users.openstreetmap.invalid',
+      email: expect.stringMatching(PLACEHOLDER),
       emailVerified: false,
       name: 'alice',
     })

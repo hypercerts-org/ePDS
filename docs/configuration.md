@@ -240,8 +240,9 @@ control of the address:
   creates an account and never joins one by email. A user who signed in
   once with an email code connects their OpenStreetMap identity under
   **Account Settings → OpenStreetMap**; from then on "Sign in with
-  OpenStreetMap" signs in to that account, matched by the OpenStreetMap
-  user id (the ID token's `sub`). An OpenStreetMap identity that is not
+  OpenStreetMap" signs in to that account, matched by the `OSM_ISSUER`
+  host and the OpenStreetMap user id (the ID token's `sub`), so changing
+  `OSM_ISSUER` means users connect again. An OpenStreetMap identity that is not
   connected yet returns to the login page with a message saying so. See
   [design/openstreetmap-login.md](design/openstreetmap-login.md).
 

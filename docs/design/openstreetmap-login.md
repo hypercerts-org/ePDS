@@ -26,7 +26,8 @@ email code.
    calls better-auth's `/link-social`. The OAuth state carries this session,
    and better-auth checks it is still live when OSM redirects back.
 3. better-auth stores the link as an `account` row keyed by
-   `(providerId = openstreetmap, accountId = <ID token sub>)`.
+   `(providerId = openstreetmap, accountId = <issuer host>:<ID token sub>)`,
+   for example `www.openstreetmap.org:30869`.
 4. From then on, **Sign in with OpenStreetMap** finds the user by that key
    (`findAccountOwnerByKey`), and `/auth/complete` continues with the
    user's own verified email as for any other sign-in.
@@ -39,14 +40,21 @@ the login page explains how to connect it.
 - **No account creation.** The provider sets `disableSignUp`, and its
   profile mapping (`mapOsmProfileToUser`) marks the email unverified, so
   the user-creation guard (`refuseUnverifiedUser`) would refuse it too.
-- **No matching by email.** The mapping replaces the email with
-  `<sub>@users.openstreetmap.invalid`. `.invalid` is reserved (RFC 2606),
-  so no email code can reach it and no user can hold it. better-auth's
-  implicit linking by email therefore never matches a real user, even
-  though OSM is a trusted provider (below).
+- **No matching by email.** The mapping replaces the email with a fresh
+  random `<uuid>@users.openstreetmap.invalid`. `.invalid` is reserved
+  (RFC 2606), so no email code can reach it, and being random it cannot
+  equal any stored address. That matters because OSM is a trusted provider
+  (below): better-auth would otherwise implicitly link a sign-in to a
+  verified user with the same email.
+- **Keyed by issuer and `sub`.** OSM user ids are unique only within one
+  OSM instance, so the account key carries the issuer's host
+  (`accountSubject`). A link made against the dev server never signs in a
+  production user with the same id if `OSM_ISSUER` changes. Switching
+  `OSM_ISSUER` therefore means users connect OSM again.
 - **Identity from a verified ID token.** `requireIdTokenVerification`
   drops the provider if discovery yields no JWKS; the ID token's signature,
-  issuer, audience and nonce are checked, and its `sub` is the account key.
+  issuer, audience and nonce are checked, and the userinfo `sub` must
+  equal it.
 - **Narrow linking relaxations**, only while OSM is configured
   (`openStreetMapAccountLinking`):
   - `trustedProviders: ['openstreetmap']`, so the explicit link is allowed

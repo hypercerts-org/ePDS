@@ -50,7 +50,11 @@ function makeAuth(accounts: unknown[] = []) {
 }
 
 const LINKED = [
-  { id: 'row-1', providerId: 'openstreetmap', accountId: '1001' },
+  {
+    id: 'row-1',
+    providerId: 'openstreetmap',
+    accountId: 'www.openstreetmap.org:1001',
+  },
   { id: 'row-2', providerId: 'google', accountId: 'g' },
 ]
 
@@ -118,7 +122,9 @@ describe('GET /account OpenStreetMap section', () => {
 
   it('shows the linked OpenStreetMap user and offers Disconnect', async () => {
     const html = await (await request(makeAuth(LINKED), '/account')).text()
-    expect(html).toContain('Connected as OpenStreetMap user <code>1001</code>')
+    expect(html).toContain(
+      'Connected as OpenStreetMap user <code>1001</code> on www.openstreetmap.org',
+    )
     expect(html).toContain('action="/account/openstreetmap/disconnect"')
   })
 
