@@ -6,6 +6,7 @@ import {
 } from 'express'
 import { createAsyncRouter } from '../lib/async-router.js'
 import { asRequestString } from '../lib/request-params.js'
+import { hasBackupEmailFormat } from '../lib/backup-email-format.js'
 import type { AuthServiceContext } from '../context.js'
 import {
   createLogger,
@@ -117,7 +118,7 @@ export function createAccountSettingsRouter(
         .toLowerCase()
       const primaryEmail = session.user.email.toLowerCase()
 
-      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (!hasBackupEmailFormat(email)) {
         res.redirect(303, '/account?error=invalid_email')
         return
       }
