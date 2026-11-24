@@ -4,13 +4,12 @@
  * content negotiation (JSON for Accept: * / *, HTML for browser Accept)
  * plus the headersSent guard that delegates to Express's default handler.
  */
-import type { Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import express, { type Express } from 'express'
 import { errorHandler, notFoundHandler } from '../lib/error-middleware.js'
+import { listenOnLoopback, type TestServer } from './__helpers__/listen.js'
 
-let server: Server
+let server: TestServer
 let baseUrl: string
 
 beforeAll(async () => {
@@ -31,21 +30,12 @@ beforeAll(async () => {
   app.use(notFoundHandler)
   app.use(errorHandler)
 
-  await new Promise<void>((resolve) => {
-    server = app.listen(0, '127.0.0.1', () => {
-      resolve()
-    })
-  })
-  const addr = server.address() as AddressInfo
-  baseUrl = `http://127.0.0.1:${addr.port}`
+  server = await listenOnLoopback(app)
+  baseUrl = server.baseUrl
 })
 
 afterAll(async () => {
-  await new Promise<void>((resolve) => {
-    server.close(() => {
-      resolve()
-    })
-  })
+  await server.close()
 })
 
 describe('notFoundHandler', () => {

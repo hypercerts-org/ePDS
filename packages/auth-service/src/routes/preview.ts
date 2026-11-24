@@ -25,17 +25,8 @@
  * synthesises the field, so the button is only visible when iterating
  * against client metadata that already declares it.
  */
-import { type Router, type Request, type Response } from 'express'
-import { createAsyncRouter } from '../lib/async-router.js'
 import { randomBytes } from 'node:crypto'
-import type { AuthServiceContext } from '../context.js'
-import { resolvePreviewOtpCharset } from '../otp-input.js'
-import {
-  resolveClientMetadata,
-  getClientCss,
-  getClientFaviconUrl,
-  getClientFaviconUrlDark,
-} from '../lib/client-metadata.js'
+import { type Router, type Request, type Response } from 'express'
 import {
   createLogger,
   getClientMetadataCacheStatus,
@@ -44,6 +35,15 @@ import {
   validateClientMetadataForPreview,
   type ClientMetadata,
 } from '@certified-app/shared'
+import { createAsyncRouter } from '../lib/async-router.js'
+import type { AuthServiceContext } from '../context.js'
+import { resolvePreviewOtpCharset } from '../otp-input.js'
+import {
+  resolveClientMetadata,
+  getClientCss,
+  getClientFaviconUrl,
+  getClientFaviconUrlDark,
+} from '../lib/client-metadata.js'
 import { renderLoginPage } from './login-page.js'
 import { renderChooseHandlePage } from './choose-handle.js'
 import { renderRecoveryForm, renderRecoveryOtpForm } from './recovery.js'

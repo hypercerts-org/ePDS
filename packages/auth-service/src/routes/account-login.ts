@@ -14,10 +14,10 @@
  * forms that orchestrate those calls.
  */
 import { type Router, type Request, type Response } from 'express'
+import { fromNodeHeaders } from 'better-auth/node'
+import { escapeHtml, maskEmail, createLogger } from '@certified-app/shared'
 import { createAsyncRouter } from '../lib/async-router.js'
 import { asRequestString } from '../lib/request-params.js'
-import { escapeHtml, maskEmail, createLogger } from '@certified-app/shared'
-import { fromNodeHeaders } from 'better-auth/node'
 import type { AuthServiceContext } from '../context.js'
 import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
 import type { BetterAuthInstance } from '../better-auth.js'

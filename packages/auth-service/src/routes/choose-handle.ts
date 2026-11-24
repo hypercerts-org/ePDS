@@ -16,9 +16,7 @@
  * Stale rows are cleaned up by cleanupExpiredAuthFlows() every 5 minutes.
  */
 import { type Router, type Request, type Response } from 'express'
-import { createAsyncRouter } from '../lib/async-router.js'
-import { asRequestString } from '../lib/request-params.js'
-import type { AuthServiceContext } from '../context.js'
+import { fromNodeHeaders } from 'better-auth/node'
 import {
   createLogger,
   escapeHtml,
@@ -27,7 +25,9 @@ import {
   type CallbackParams,
   type HandleMode,
 } from '@certified-app/shared'
-import { fromNodeHeaders } from 'better-auth/node'
+import { createAsyncRouter } from '../lib/async-router.js'
+import { asRequestString } from '../lib/request-params.js'
+import type { AuthServiceContext } from '../context.js'
 import { cleanExit } from '../lib/clean-exit.js'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
 import { pingParRequest } from '../lib/ping-par-request.js'

@@ -39,6 +39,9 @@ function wrapAll(args: unknown[]): unknown[] {
  */
 export function createAsyncRouter(): Router {
   const router = Router()
+  // Express exposes overloaded registration methods. Forward the original
+  // path and argument shape, replacing only handler functions, and patch
+  // just these methods on this instance so other router APIs stay untouched.
   for (const method of ROUTE_METHODS) {
     const original = router[method].bind(router) as (...a: unknown[]) => Router
     ;(router as unknown as Record<string, unknown>)[method] = (

@@ -34,13 +34,19 @@
  *   - On success, better-auth redirects to /auth/complete (the bridge route)
  *   - Bridge reads epds_auth_flow cookie → auth_flow → HMAC-signed redirect
  */
-import { type Router, type Request, type Response } from 'express'
-import { createAsyncRouter } from '../lib/async-router.js'
-import { asRequestString } from '../lib/request-params.js'
 import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { type Router, type Request, type Response } from 'express'
+import {
+  escapeHtml,
+  createLogger,
+  resolveHandleMode as sharedResolveHandleMode,
+  type HandleMode,
+} from '@certified-app/shared'
+import { createAsyncRouter } from '../lib/async-router.js'
+import { asRequestString } from '../lib/request-params.js'
 import type { AuthServiceContext } from '../context.js'
 import type { BetterAuthInstance } from '../better-auth.js'
 import {
@@ -51,12 +57,6 @@ import {
   getClientFaviconUrlDark,
   type ClientMetadata,
 } from '../lib/client-metadata.js'
-import {
-  escapeHtml,
-  createLogger,
-  resolveHandleMode as sharedResolveHandleMode,
-  type HandleMode,
-} from '@certified-app/shared'
 import { socialProviders } from '../better-auth.js'
 import { startSocialSignIn } from '../lib/start-social-sign-in.js'
 import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'

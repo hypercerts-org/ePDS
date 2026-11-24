@@ -28,9 +28,9 @@
  *                      sender behaviour bit-for-bit.
  */
 import { type Router, type Request, type Response } from 'express'
+import { escapeHtml } from '@certified-app/shared'
 import { createAsyncRouter } from '../lib/async-router.js'
 import type { AuthServiceContext } from '../context.js'
-import { escapeHtml } from '@certified-app/shared'
 import {
   buildSignInCodeEmail,
   buildWelcomeCodeEmail,

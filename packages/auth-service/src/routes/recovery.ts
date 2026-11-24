@@ -15,11 +15,11 @@
  * table threads request_uri through the flow via epds_auth_flow cookie.
  */
 import { type Router, type Request, type Response } from 'express'
+import { createLogger, escapeHtml, maskEmail } from '@certified-app/shared'
 import { createAsyncRouter } from '../lib/async-router.js'
 import { asRequestString } from '../lib/request-params.js'
 import { hasBackupEmailFormat } from '../lib/backup-email-format.js'
 import type { AuthServiceContext } from '../context.js'
-import { createLogger, escapeHtml, maskEmail } from '@certified-app/shared'
 import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
 import { resolveClientBranding } from '../lib/client-metadata.js'
 import {

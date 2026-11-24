@@ -21,9 +21,9 @@
  * browser stops pinging. No new tokens are issued.
  */
 import { type Router, type Request, type Response } from 'express'
+import { createLogger } from '@certified-app/shared'
 import { createAsyncRouter } from '../lib/async-router.js'
 import { asRequestString } from '../lib/request-params.js'
-import { createLogger } from '@certified-app/shared'
 import type { AuthServiceContext } from '../context.js'
 import { cleanExit } from '../lib/clean-exit.js'
 import { pingParRequest } from '../lib/ping-par-request.js'

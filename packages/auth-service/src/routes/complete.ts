@@ -28,15 +28,15 @@
  * after pds-core's epds-callback redirects through /oauth/authorize.
  */
 import { type Router, type Request, type Response } from 'express'
-import { createAsyncRouter } from '../lib/async-router.js'
-import { asRequestString } from '../lib/request-params.js'
-import type { AuthServiceContext } from '../context.js'
+import { fromNodeHeaders } from 'better-auth/node'
 import {
   createLogger,
   signCallback,
   type CallbackParams,
 } from '@certified-app/shared'
-import { fromNodeHeaders } from 'better-auth/node'
+import { createAsyncRouter } from '../lib/async-router.js'
+import { asRequestString } from '../lib/request-params.js'
+import type { AuthServiceContext } from '../context.js'
 import { cleanExit } from '../lib/clean-exit.js'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
 import { pingParRequest } from '../lib/ping-par-request.js'

@@ -1,7 +1,7 @@
 import { type Router, type Request, type Response } from 'express'
-import { createAsyncRouter } from '../lib/async-router.js'
 import Database from 'better-sqlite3'
 import { createLogger, verifyInternalSecret } from '@certified-app/shared'
+import { createAsyncRouter } from '../lib/async-router.js'
 
 const logger = createLogger('auth:test-hooks')
 

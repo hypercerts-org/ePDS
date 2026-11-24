@@ -4,10 +4,7 @@ import {
   type Response,
   type NextFunction,
 } from 'express'
-import { createAsyncRouter } from '../lib/async-router.js'
-import { asRequestString } from '../lib/request-params.js'
-import { hasBackupEmailFormat } from '../lib/backup-email-format.js'
-import type { AuthServiceContext } from '../context.js'
+import { fromNodeHeaders } from 'better-auth/node'
 import {
   createLogger,
   hashToken,
@@ -15,7 +12,10 @@ import {
   escapeHtml,
   validateLocalPart,
 } from '@certified-app/shared'
-import { fromNodeHeaders } from 'better-auth/node'
+import { createAsyncRouter } from '../lib/async-router.js'
+import { asRequestString } from '../lib/request-params.js'
+import { hasBackupEmailFormat } from '../lib/backup-email-format.js'
+import type { AuthServiceContext } from '../context.js'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
 import { getHandleByDid } from '../lib/get-handle-by-did.js'
 import { ensurePdsUrl } from '../lib/pds-url.js'
