@@ -15,6 +15,7 @@
  */
 import { type Router, type Request, type Response } from 'express'
 import { createAsyncRouter } from '../lib/async-router.js'
+import { asRequestString } from '../lib/request-params.js'
 import { escapeHtml, maskEmail, createLogger } from '@certified-app/shared'
 import { fromNodeHeaders } from 'better-auth/node'
 import type { AuthServiceContext } from '../context.js'
@@ -58,7 +59,7 @@ export function createAccountLoginRouter(
 
   // POST /account/send-otp - send OTP via better-auth, show OTP form
   router.post('/account/send-otp', async (req: Request, res: Response) => {
-    const email = ((req.body.email as string) || '').trim().toLowerCase()
+    const email = (asRequestString(req.body?.email) ?? '').trim().toLowerCase()
 
     if (!email) {
       res.status(400).send(
@@ -92,8 +93,8 @@ export function createAccountLoginRouter(
 
   // POST /account/verify-otp - verify OTP via better-auth, redirect to /account
   router.post('/account/verify-otp', async (req: Request, res: Response) => {
-    const email = ((req.body.email as string) || '').trim().toLowerCase()
-    const otp = ((req.body.otp as string) || '').trim()
+    const email = (asRequestString(req.body?.email) ?? '').trim().toLowerCase()
+    const otp = (asRequestString(req.body?.otp) ?? '').trim()
 
     if (!email || !otp) {
       res.status(400).send(

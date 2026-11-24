@@ -36,6 +36,7 @@
  */
 import { type Router, type Request, type Response } from 'express'
 import { createAsyncRouter } from '../lib/async-router.js'
+import { asRequestString } from '../lib/request-params.js'
 import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -259,7 +260,7 @@ export function createLoginPageRouter(
       typeof req.query.request_uri === 'string'
         ? req.query.request_uri
         : undefined
-    const clientId = req.query.client_id as string | undefined
+    const clientId = asRequestString(req.query.client_id)
     const loginHint =
       typeof req.query.login_hint === 'string'
         ? req.query.login_hint
@@ -456,7 +457,7 @@ export function createLoginPageRouter(
 
     const clientMeta = await safeResolveClientMetadata(effectiveClientId)
     const handleMode = resolveHandleMode(
-      req.query.epds_handle_mode as string | undefined,
+      asRequestString(req.query.epds_handle_mode),
       clientMeta,
     )
 

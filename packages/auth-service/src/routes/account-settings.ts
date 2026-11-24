@@ -5,6 +5,7 @@ import {
   type NextFunction,
 } from 'express'
 import { createAsyncRouter } from '../lib/async-router.js'
+import { asRequestString } from '../lib/request-params.js'
 import type { AuthServiceContext } from '../context.js'
 import {
   createLogger,
@@ -111,7 +112,9 @@ export function createAccountSettingsRouter(
     requireAuth,
     async (req: Request, res: Response) => {
       const session = res.locals.betterAuthSession
-      const email = ((req.body.email as string) || '').trim().toLowerCase()
+      const email = (asRequestString(req.body?.email) ?? '')
+        .trim()
+        .toLowerCase()
       const primaryEmail = session.user.email.toLowerCase()
 
       if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -156,7 +159,7 @@ export function createAccountSettingsRouter(
 
   // GET /account/backup-email/verify?token=... - show confirmation form
   router.get('/account/backup-email/verify', (req: Request, res: Response) => {
-    const token = req.query.token as string | undefined
+    const token = asRequestString(req.query.token)
     if (!token) {
       res
         .status(400)
@@ -194,7 +197,7 @@ export function createAccountSettingsRouter(
 
   // POST /account/backup-email/verify - perform actual verification
   router.post('/account/backup-email/verify', (req: Request, res: Response) => {
-    const token = ((req.body.token as string) || '').trim()
+    const token = (asRequestString(req.body?.token) ?? '').trim()
     if (!token) {
       res
         .status(400)
@@ -219,7 +222,9 @@ export function createAccountSettingsRouter(
     requireAuth,
     async (req: Request, res: Response) => {
       const session = res.locals.betterAuthSession
-      const email = ((req.body.email as string) || '').trim().toLowerCase()
+      const email = (asRequestString(req.body?.email) ?? '')
+        .trim()
+        .toLowerCase()
       const did = await getDidByEmail(
         session.user.email,
         pdsUrl,
@@ -237,7 +242,7 @@ export function createAccountSettingsRouter(
     '/account/session/revoke',
     requireAuth,
     async (req: Request, res: Response) => {
-      const tokenToRevoke = req.body.session_token as string
+      const tokenToRevoke = asRequestString(req.body?.session_token)
       if (tokenToRevoke) {
         try {
           await auth.api.revokeSession({
@@ -286,7 +291,7 @@ export function createAccountSettingsRouter(
     requireAuth,
     async (req: Request, res: Response) => {
       const session = res.locals.betterAuthSession
-      const rawHandle = ((req.body.handle as string) || '').trim()
+      const rawHandle = (asRequestString(req.body?.handle) ?? '').trim()
       const handleDomain = ctx.config.pdsHostname
 
       const normalizedLocal = validateLocalPart(rawHandle, handleDomain)
@@ -354,7 +359,7 @@ export function createAccountSettingsRouter(
     requireAuth,
     async (req: Request, res: Response) => {
       const session = res.locals.betterAuthSession
-      const confirmation = req.body.confirm as string
+      const confirmation = asRequestString(req.body?.confirm)
 
       if (confirmation !== 'DELETE') {
         res.redirect(303, '/account?error=confirm_delete')

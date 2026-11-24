@@ -17,6 +17,7 @@
  */
 import { type Router, type Request, type Response } from 'express'
 import { createAsyncRouter } from '../lib/async-router.js'
+import { asRequestString } from '../lib/request-params.js'
 import type { AuthServiceContext } from '../context.js'
 import {
   createLogger,
@@ -74,7 +75,7 @@ export function createChooseHandleRouter(
     emailVerified: boolean
   } | null> {
     // Guard 1: auth_flow cookie
-    const flowId = req.cookies[AUTH_FLOW_COOKIE] as string | undefined
+    const flowId = asRequestString(req.cookies[AUTH_FLOW_COOKIE])
     if (!flowId) {
       logger.warn('No epds_auth_flow cookie on choose-handle')
       // No clientId in scope; clean-exit falls through to a Start
@@ -238,7 +239,7 @@ export function createChooseHandleRouter(
     const KNOWN_ERROR_MESSAGES: Record<string, string> = {
       handle_taken: 'That handle is not available — please choose another.',
     }
-    const rawError = req.query.error as string | undefined
+    const rawError = asRequestString(req.query.error)
     const error = rawError
       ? (KNOWN_ERROR_MESSAGES[rawError] ?? rawError)
       : undefined
@@ -327,7 +328,7 @@ export function createChooseHandleRouter(
     }
 
     // Step 1: Read and normalise the local part
-    const rawHandle = ((req.body.handle as string) || '').trim()
+    const rawHandle = (asRequestString(req.body?.handle) ?? '').trim()
 
     // Step 2: Validate format and normalise via atproto spec + product constraints
     const normalizedLocal = validateLocalPart(rawHandle, handleDomain)
@@ -473,7 +474,7 @@ export function createChooseHandleRouter(
     }
 
     // Read, validate and normalise the local part
-    const rawLocalPart = ((req.query.handle as string) || '').trim()
+    const rawLocalPart = (asRequestString(req.query.handle) ?? '').trim()
     const normalizedLocal = validateLocalPart(rawLocalPart, handleDomain)
     if (normalizedLocal === null) {
       res.json({ error: 'invalid_format' })

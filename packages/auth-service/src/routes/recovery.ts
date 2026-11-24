@@ -16,6 +16,7 @@
  */
 import { type Router, type Request, type Response } from 'express'
 import { createAsyncRouter } from '../lib/async-router.js'
+import { asRequestString } from '../lib/request-params.js'
 import type { AuthServiceContext } from '../context.js'
 import { createLogger, escapeHtml, maskEmail } from '@certified-app/shared'
 import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
@@ -49,7 +50,7 @@ export function createRecoveryRouter(
     customFaviconUrl: string | null
     customFaviconUrlDark: string | null
   }> {
-    const flowId = req.cookies[AUTH_FLOW_COOKIE] as string | undefined
+    const flowId = asRequestString(req.cookies[AUTH_FLOW_COOKIE])
     const flow = flowId ? ctx.db.getAuthFlow(flowId) : undefined
     const clientId = flow?.clientId ?? null
     const backUri = flow?.requestUri ?? null
@@ -102,8 +103,8 @@ export function createRecoveryRouter(
   })
 
   router.post('/auth/recover', async (req: Request, res: Response) => {
-    const email = ((req.body.email as string) || '').trim().toLowerCase()
-    const requestUri = req.body.request_uri as string
+    const email = (asRequestString(req.body?.email) ?? '').trim().toLowerCase()
+    const requestUri = asRequestString(req.body?.request_uri)
 
     const { customCss, customFaviconUrl, customFaviconUrlDark, backUri } =
       await getFlowBranding(req)
@@ -147,7 +148,7 @@ export function createRecoveryRouter(
       try {
         // Ensure the auth_flow cookie is set so /auth/complete can thread the request_uri.
         // If one already exists from a previous step, we keep it; otherwise create a new one.
-        let flowId = req.cookies[AUTH_FLOW_COOKIE] as string | undefined
+        let flowId = asRequestString(req.cookies[AUTH_FLOW_COOKIE])
         const existingFlow = flowId ? ctx.db.getAuthFlow(flowId) : undefined
         if (!flowId || !existingFlow) {
           const { randomBytes } = await import('node:crypto')
@@ -234,9 +235,9 @@ export function createRecoveryRouter(
 
   // POST /auth/recover/verify - verify recovery OTP via better-auth
   router.post('/auth/recover/verify', async (req: Request, res: Response) => {
-    const code = ((req.body.code as string) || '').trim()
-    const email = ((req.body.email as string) || '').trim().toLowerCase()
-    const requestUri = req.body.request_uri as string
+    const code = (asRequestString(req.body?.code) ?? '').trim()
+    const email = (asRequestString(req.body?.email) ?? '').trim().toLowerCase()
+    const requestUri = asRequestString(req.body?.request_uri)
 
     if (!code || !email || !requestUri) {
       res.status(400).type('html').send(renderError('Missing required fields.'))
