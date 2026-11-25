@@ -49,6 +49,7 @@ export {
   clearClientMetadataCache,
   getClientMetadataCacheStatus,
   _seedClientMetadataCacheForTest,
+  sanitizeClientMetadata,
 } from './client-metadata.js'
 export type {
   ClientMetadata,

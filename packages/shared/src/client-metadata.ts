@@ -215,7 +215,15 @@ export async function resolveClientMetadata(
       return fallback(clientId, options.noCache === true)
     }
 
-    const metadata = (await res.json()) as ClientMetadata
+    const rawBody: unknown = await res.json()
+    if (!isPlainObject(rawBody)) {
+      logger.warn(
+        { clientId },
+        'Client metadata is not a JSON object; using fallback',
+      )
+      return fallback(clientId, options.noCache === true)
+    }
+    const metadata = sanitizeClientMetadata(rawBody)
 
     // Cache the result
     cache.set(clientId, {
@@ -235,6 +243,65 @@ export async function resolveClientMetadata(
     )
     return fallback(clientId, options.noCache === true)
   }
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+const STRING_FIELDS = [
+  'client_name',
+  'client_uri',
+  'logo_uri',
+  'tos_uri',
+  'policy_uri',
+  'email_template_uri',
+  'email_subject_template',
+  'brand_color',
+  'background_color',
+  'epds_handle_mode',
+  'epds_handle_login_url',
+] as const
+
+const BRANDING_STRING_FIELDS = [
+  'css',
+  'favicon_url',
+  'favicon_url_dark',
+] as const
+
+/**
+ * Client metadata is attacker-controlled JSON. Callers dereference these
+ * fields and pass them to string functions, so a wrong-typed value would
+ * throw deep inside a request handler. Keep only fields of the expected
+ * type; everything else is dropped as if absent. Value validation (URL
+ * safety, allowed handle modes, ...) stays with the consumers.
+ */
+export function sanitizeClientMetadata(
+  raw: Record<string, unknown>,
+): ClientMetadata {
+  const out: Record<string, unknown> = {}
+  for (const key of STRING_FIELDS) {
+    if (typeof raw[key] === 'string') out[key] = raw[key]
+  }
+  if (typeof raw.epds_skip_consent_on_signup === 'boolean') {
+    out.epds_skip_consent_on_signup = raw.epds_skip_consent_on_signup
+  }
+  for (const key of ['redirect_uris', 'epds_social_providers'] as const) {
+    const v = raw[key]
+    if (Array.isArray(v)) {
+      out[key] = v.filter((x): x is string => typeof x === 'string')
+    }
+  }
+  if (isPlainObject(raw.branding)) {
+    const branding: Record<string, unknown> = {}
+    for (const key of BRANDING_STRING_FIELDS) {
+      if (typeof raw.branding[key] === 'string') {
+        branding[key] = raw.branding[key]
+      }
+    }
+    out.branding = branding
+  }
+  return out as ClientMetadata
 }
 
 function fallback(clientId: string, skipCache: boolean): ClientMetadata {

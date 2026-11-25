@@ -13,9 +13,11 @@
  * submit) directly to the better-auth API endpoints. This file provides the HTML
  * forms that orchestrate those calls.
  */
-import { Router, type Request, type Response } from 'express'
-import { escapeHtml, maskEmail, createLogger } from '@certified-app/shared'
+import { type Router, type Request, type Response } from 'express'
 import { fromNodeHeaders } from 'better-auth/node'
+import { escapeHtml, maskEmail, createLogger } from '@certified-app/shared'
+import { createAsyncRouter } from '../lib/async-router.js'
+import { asRequestString } from '../lib/validation.js'
 import type { AuthServiceContext } from '../context.js'
 import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
 import type { BetterAuthInstance } from '../better-auth.js'
@@ -33,7 +35,7 @@ export function createAccountLoginRouter(
   auth: BetterAuthInstance,
   ctx: AuthServiceContext,
 ): Router {
-  const router = Router()
+  const router = createAsyncRouter()
 
   // GET /account/login - show email form (or redirect if already logged in)
   router.get('/account/login', async (req: Request, res: Response) => {
@@ -57,7 +59,7 @@ export function createAccountLoginRouter(
 
   // POST /account/send-otp - send OTP via better-auth, show OTP form
   router.post('/account/send-otp', async (req: Request, res: Response) => {
-    const email = ((req.body.email as string) || '').trim().toLowerCase()
+    const email = (asRequestString(req.body?.email) ?? '').trim().toLowerCase()
 
     if (!email) {
       res.status(400).send(
@@ -91,8 +93,8 @@ export function createAccountLoginRouter(
 
   // POST /account/verify-otp - verify OTP via better-auth, redirect to /account
   router.post('/account/verify-otp', async (req: Request, res: Response) => {
-    const email = ((req.body.email as string) || '').trim().toLowerCase()
-    const otp = ((req.body.otp as string) || '').trim()
+    const email = (asRequestString(req.body?.email) ?? '').trim().toLowerCase()
+    const otp = (asRequestString(req.body?.otp) ?? '').trim()
 
     if (!email || !otp) {
       res.status(400).send(
