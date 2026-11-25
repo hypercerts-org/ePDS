@@ -14,6 +14,7 @@
 import {
   escapeCss,
   MAX_CSS_BYTES,
+  sanitizeClientMetadata,
   type ClientMetadata,
 } from './client-metadata.js'
 import { escapeHtml } from './html.js'
@@ -272,13 +273,13 @@ function checkClientIdMatch(
 }
 
 function checkRedirectUris(metadata: ClientMetadata): PreviewCheck {
-  const redirectUris = (
-    metadata as ClientMetadata & { redirect_uris?: unknown }
-  ).redirect_uris
+  const { redirect_uris: redirectUris } = sanitizeClientMetadata({
+    redirect_uris: metadata.redirect_uris,
+  })
   const label = 'redirect_uris non-empty'
   const labelHtml = `${code('redirect_uris')} non-empty`
 
-  if (Array.isArray(redirectUris) && redirectUris.length > 0) {
+  if (redirectUris?.length) {
     return {
       id: 'redirect-uris',
       label,

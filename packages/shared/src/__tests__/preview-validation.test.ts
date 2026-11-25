@@ -216,16 +216,16 @@ describe('validateClientMetadataForPreview', () => {
     expect(check?.severity).toBe('error')
   })
 
-  it('errors on missing redirect_uris', async () => {
-    const url = 'https://b.example/client-metadata.json'
-    mockFetchOnce({
-      client_id: url,
-      // no redirect_uris
-    })
-    const result = await validateClientMetadataForPreview(url, null)
-    const check = result.checks.find((c) => c.id === 'redirect-uris')
-    expect(check?.severity).toBe('error')
-  })
+  it.each([[undefined], [[5]]])(
+    'errors when no string redirect URI is present (%j)',
+    async (redirectUris) => {
+      const url = 'https://b.example/client-metadata.json'
+      mockFetchOnce({ client_id: url, redirect_uris: redirectUris })
+      const result = await validateClientMetadataForPreview(url, null)
+      const check = result.checks.find((c) => c.id === 'redirect-uris')
+      expect(check?.severity).toBe('error')
+    },
+  )
 
   it('errors when the upstream returns 404', async () => {
     const url = 'https://missing.example/client-metadata.json'
