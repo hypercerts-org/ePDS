@@ -8,8 +8,6 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import express, { type Express } from 'express'
-import type { AddressInfo } from 'node:net'
-import type { Server } from 'node:http'
 import { createPreviewEmailsRouter } from '../routes/preview-emails.js'
 import type { AuthServiceContext } from '../context.js'
 import {
@@ -20,6 +18,7 @@ import {
   _seedClientMetadataCacheForTest,
   clearClientMetadataCache,
 } from '@certified-app/shared'
+import { listenOnLoopback, type TestServer } from './__helpers__/listen.js'
 
 const TRUSTED_CLIENT = 'https://branded.example/client-metadata.json'
 const TRUSTED_TEMPLATE_URI = 'https://branded.example/email-template.html'
@@ -35,7 +34,7 @@ function makeCtxStub(): AuthServiceContext {
   } as unknown as AuthServiceContext
 }
 
-let server: Server
+let server: TestServer
 let baseUrl: string
 let app: Express
 let originalPreviewFlag: string | undefined
@@ -44,13 +43,8 @@ beforeAll(async () => {
   originalPreviewFlag = process.env.AUTH_PREVIEW_ROUTES
   app = express()
   app.use(createPreviewEmailsRouter(makeCtxStub()))
-  await new Promise<void>((resolve) => {
-    server = app.listen(0, '127.0.0.1', () => {
-      resolve()
-    })
-  })
-  const addr = server.address() as AddressInfo
-  baseUrl = `http://127.0.0.1:${addr.port}`
+  server = await listenOnLoopback(app)
+  baseUrl = server.baseUrl
 })
 
 afterAll(async () => {
@@ -59,12 +53,7 @@ afterAll(async () => {
   } else {
     process.env.AUTH_PREVIEW_ROUTES = originalPreviewFlag
   }
-  await new Promise<void>((resolve, reject) => {
-    server.close((err) => {
-      if (err) reject(err)
-      else resolve()
-    })
-  })
+  await server.close()
 })
 
 beforeEach(() => {

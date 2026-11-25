@@ -34,11 +34,19 @@
  *   - On success, better-auth redirects to /auth/complete (the bridge route)
  *   - Bridge reads epds_auth_flow cookie → auth_flow → HMAC-signed redirect
  */
-import { Router, type Request, type Response } from 'express'
 import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { type Router, type Request, type Response } from 'express'
+import {
+  escapeHtml,
+  createLogger,
+  resolveHandleMode as sharedResolveHandleMode,
+  type HandleMode,
+} from '@certified-app/shared'
+import { createAsyncRouter } from '../lib/async-router.js'
+import { asRequestString } from '../lib/validation.js'
 import type { AuthServiceContext } from '../context.js'
 import type { BetterAuthInstance } from '../better-auth.js'
 import {
@@ -49,12 +57,6 @@ import {
   getClientFaviconUrlDark,
   type ClientMetadata,
 } from '../lib/client-metadata.js'
-import {
-  escapeHtml,
-  createLogger,
-  resolveHandleMode as sharedResolveHandleMode,
-  type HandleMode,
-} from '@certified-app/shared'
 import { socialProviders } from '../better-auth.js'
 import { startSocialSignIn } from '../lib/start-social-sign-in.js'
 import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
@@ -248,7 +250,7 @@ export function createLoginPageRouter(
   ctx: AuthServiceContext,
   auth: Pick<BetterAuthInstance, 'api'>,
 ): Router {
-  const router = Router()
+  const router = createAsyncRouter()
 
   router.get('/oauth/authorize', async (req: Request, res: Response) => {
     // Express's qs parser turns a repeated `?request_uri=a&request_uri=b` into
@@ -258,7 +260,7 @@ export function createLoginPageRouter(
       typeof req.query.request_uri === 'string'
         ? req.query.request_uri
         : undefined
-    const clientId = req.query.client_id as string | undefined
+    const clientId = asRequestString(req.query.client_id)
     const loginHint =
       typeof req.query.login_hint === 'string'
         ? req.query.login_hint
@@ -455,7 +457,7 @@ export function createLoginPageRouter(
 
     const clientMeta = await safeResolveClientMetadata(effectiveClientId)
     const handleMode = resolveHandleMode(
-      req.query.epds_handle_mode as string | undefined,
+      asRequestString(req.query.epds_handle_mode),
       clientMeta,
     )
 

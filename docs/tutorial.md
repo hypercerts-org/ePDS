@@ -561,6 +561,10 @@ the 10-minute cache that real OAuth flows use is bypassed, so your
 (entries and TTLs) via the `/preview/cache-status` JSON endpoint so you
 can tell when a real user's next request will see the new version.
 
+**Redirect URI diagnostics.** The preview check counts only string entries in
+`redirect_uris`, matching what the live metadata resolver retains. It does not
+validate the URLs themselves.
+
 ### Using `@atproto/oauth-client-node` (recommended for Flow 2)
 
 If your app does **not** need to pass a raw email as `login_hint` (i.e.

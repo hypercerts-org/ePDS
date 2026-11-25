@@ -111,6 +111,20 @@ describe('validateClientMetadataForPreview', () => {
     expect(byId['branding-css'].detail).toContain('exceeds')
   })
 
+  it('warns when colors are not strings, matching what real flows use', async () => {
+    const url = 'https://typed.example/client-metadata.json'
+    mockFetchOnce({
+      client_id: url,
+      redirect_uris: ['https://typed.example/cb'],
+      brand_color: 5,
+      background_color: { r: 0 },
+    })
+    const result = await validateClientMetadataForPreview(url, [])
+    const byId = Object.fromEntries(result.checks.map((c) => [c.id, c]))
+    expect(byId['brand-color'].severity).toBe('warn')
+    expect(byId['background-color'].severity).toBe('warn')
+  })
+
   it('warns (not errors) when optional branding fields are missing', async () => {
     const url = 'https://plain.example/client-metadata.json'
     mockFetchOnce({
@@ -202,16 +216,16 @@ describe('validateClientMetadataForPreview', () => {
     expect(check?.severity).toBe('error')
   })
 
-  it('errors on missing redirect_uris', async () => {
-    const url = 'https://b.example/client-metadata.json'
-    mockFetchOnce({
-      client_id: url,
-      // no redirect_uris
-    })
-    const result = await validateClientMetadataForPreview(url, null)
-    const check = result.checks.find((c) => c.id === 'redirect-uris')
-    expect(check?.severity).toBe('error')
-  })
+  it.each([[undefined], [[5]]])(
+    'errors when no string redirect URI is present (%j)',
+    async (redirectUris) => {
+      const url = 'https://b.example/client-metadata.json'
+      mockFetchOnce({ client_id: url, redirect_uris: redirectUris })
+      const result = await validateClientMetadataForPreview(url, null)
+      const check = result.checks.find((c) => c.id === 'redirect-uris')
+      expect(check?.severity).toBe('error')
+    },
+  )
 
   it('errors when the upstream returns 404', async () => {
     const url = 'https://missing.example/client-metadata.json'
@@ -229,5 +243,23 @@ describe('validateClientMetadataForPreview', () => {
     })
     const result = await validateClientMetadataForPreview(url, null)
     expect(result.checks.find((c) => c.id === 'trusted-client')).toBeUndefined()
+  })
+})
+
+describe('validateClientMetadataForPreview non-object body', () => {
+  it.each([
+    ['null', null],
+    ['an array', []],
+  ])('reports a fetch-json error when the body is %s', async (_l, body) => {
+    mockFetchOnce(body)
+    const result = await validateClientMetadataForPreview(
+      'https://cool.app/client-metadata.json',
+      null,
+    )
+    expect(result.fetched).toBe(false)
+    expect(result.checks[0]).toMatchObject({
+      id: 'fetch-json',
+      severity: 'error',
+    })
   })
 })

@@ -14,9 +14,11 @@
  * Note: recovery uses the backup email as the verified identity. The auth_flow
  * table threads request_uri through the flow via epds_auth_flow cookie.
  */
-import { Router, type Request, type Response } from 'express'
-import type { AuthServiceContext } from '../context.js'
+import { type Router, type Request, type Response } from 'express'
 import { createLogger, escapeHtml, maskEmail } from '@certified-app/shared'
+import { createAsyncRouter } from '../lib/async-router.js'
+import { asRequestString, hasEmailFormat } from '../lib/validation.js'
+import type { AuthServiceContext } from '../context.js'
 import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
 import { resolveClientBranding } from '../lib/client-metadata.js'
 import {
@@ -36,7 +38,7 @@ export function createRecoveryRouter(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth instance has no exported type
   auth: any,
 ): Router {
-  const router = Router()
+  const router = createAsyncRouter()
   const otpLength = ctx.config.otpLength
   const otpCharset = ctx.config.otpCharset
 
@@ -48,7 +50,7 @@ export function createRecoveryRouter(
     customFaviconUrl: string | null
     customFaviconUrlDark: string | null
   }> {
-    const flowId = req.cookies[AUTH_FLOW_COOKIE] as string | undefined
+    const flowId = asRequestString(req.cookies[AUTH_FLOW_COOKIE])
     const flow = flowId ? ctx.db.getAuthFlow(flowId) : undefined
     const clientId = flow?.clientId ?? null
     const backUri = flow?.requestUri ?? null
@@ -73,9 +75,10 @@ export function createRecoveryRouter(
   }
 
   router.get('/auth/recover', async (req: Request, res: Response) => {
-    const requestUri = req.query.request_uri as string | undefined
+    const requestUri = req.query.request_uri
 
-    if (!requestUri) {
+    // Repeated or nested query params parse to arrays/objects.
+    if (!requestUri || typeof requestUri !== 'string') {
       res
         .status(400)
         .type('html')
@@ -100,8 +103,8 @@ export function createRecoveryRouter(
   })
 
   router.post('/auth/recover', async (req: Request, res: Response) => {
-    const email = ((req.body.email as string) || '').trim().toLowerCase()
-    const requestUri = req.body.request_uri as string
+    const email = (asRequestString(req.body?.email) ?? '').trim().toLowerCase()
+    const requestUri = asRequestString(req.body?.request_uri)
 
     const { customCss, customFaviconUrl, customFaviconUrlDark, backUri } =
       await getFlowBranding(req)
@@ -122,7 +125,7 @@ export function createRecoveryRouter(
       return
     }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!hasEmailFormat(email)) {
       res.status(400).send(
         renderRecoveryForm({
           requestUri,
@@ -145,7 +148,7 @@ export function createRecoveryRouter(
       try {
         // Ensure the auth_flow cookie is set so /auth/complete can thread the request_uri.
         // If one already exists from a previous step, we keep it; otherwise create a new one.
-        let flowId = req.cookies[AUTH_FLOW_COOKIE] as string | undefined
+        let flowId = asRequestString(req.cookies[AUTH_FLOW_COOKIE])
         const existingFlow = flowId ? ctx.db.getAuthFlow(flowId) : undefined
         if (!flowId || !existingFlow) {
           const { randomBytes } = await import('node:crypto')
@@ -232,9 +235,9 @@ export function createRecoveryRouter(
 
   // POST /auth/recover/verify - verify recovery OTP via better-auth
   router.post('/auth/recover/verify', async (req: Request, res: Response) => {
-    const code = ((req.body.code as string) || '').trim()
-    const email = ((req.body.email as string) || '').trim().toLowerCase()
-    const requestUri = req.body.request_uri as string
+    const code = (asRequestString(req.body?.code) ?? '').trim()
+    const email = (asRequestString(req.body?.email) ?? '').trim().toLowerCase()
+    const requestUri = asRequestString(req.body?.request_uri)
 
     if (!code || !email || !requestUri) {
       res.status(400).type('html').send(renderError('Missing required fields.'))
