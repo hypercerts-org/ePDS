@@ -46,7 +46,7 @@ import {
   type HandleMode,
 } from '@certified-app/shared'
 import { createAsyncRouter } from '../lib/async-router.js'
-import { asRequestString } from '../lib/request-params.js'
+import { asRequestString } from '../lib/validation.js'
 import type { AuthServiceContext } from '../context.js'
 import type { BetterAuthInstance } from '../better-auth.js'
 import {

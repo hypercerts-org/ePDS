@@ -13,8 +13,7 @@ import {
   validateLocalPart,
 } from '@certified-app/shared'
 import { createAsyncRouter } from '../lib/async-router.js'
-import { asRequestString } from '../lib/request-params.js'
-import { hasBackupEmailFormat } from '../lib/backup-email-format.js'
+import { asRequestString, hasEmailFormat } from '../lib/validation.js'
 import type { AuthServiceContext } from '../context.js'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
 import { getHandleByDid } from '../lib/get-handle-by-did.js'
@@ -118,7 +117,7 @@ export function createAccountSettingsRouter(
         .toLowerCase()
       const primaryEmail = session.user.email.toLowerCase()
 
-      if (!hasBackupEmailFormat(email)) {
+      if (!hasEmailFormat(email)) {
         res.redirect(303, '/account?error=invalid_email')
         return
       }

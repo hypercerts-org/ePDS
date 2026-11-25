@@ -17,8 +17,7 @@
 import { type Router, type Request, type Response } from 'express'
 import { createLogger, escapeHtml, maskEmail } from '@certified-app/shared'
 import { createAsyncRouter } from '../lib/async-router.js'
-import { asRequestString } from '../lib/request-params.js'
-import { hasBackupEmailFormat } from '../lib/backup-email-format.js'
+import { asRequestString, hasEmailFormat } from '../lib/validation.js'
 import type { AuthServiceContext } from '../context.js'
 import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
 import { resolveClientBranding } from '../lib/client-metadata.js'
@@ -126,7 +125,7 @@ export function createRecoveryRouter(
       return
     }
 
-    if (!hasBackupEmailFormat(email)) {
+    if (!hasEmailFormat(email)) {
       res.status(400).send(
         renderRecoveryForm({
           requestUri,
