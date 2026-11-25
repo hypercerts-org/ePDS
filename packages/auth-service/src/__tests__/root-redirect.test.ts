@@ -6,38 +6,25 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import express, { type Express } from 'express'
-import type { AddressInfo } from 'node:net'
-import type { Server } from 'node:http'
 import { createRootRouter } from '../routes/root.js'
+import { listenOnLoopback, type TestServer } from './__helpers__/listen.js'
 
-let server: Server
-let baseUrl: string
+let server: TestServer
 let app: Express
 
 beforeAll(async () => {
   app = express()
   app.use(createRootRouter())
-  await new Promise<void>((resolve) => {
-    server = app.listen(0, '127.0.0.1', () => {
-      resolve()
-    })
-  })
-  const addr = server.address() as AddressInfo
-  baseUrl = `http://127.0.0.1:${addr.port}`
+  server = await listenOnLoopback(app)
 })
 
 afterAll(async () => {
-  await new Promise<void>((resolve, reject) => {
-    server.close((err) => {
-      if (err) reject(err)
-      else resolve()
-    })
-  })
+  await server.close()
 })
 
 describe('root router', () => {
   it('redirects GET / to /account with 303 See Other', async () => {
-    const res = await fetch(`${baseUrl}/`, { redirect: 'manual' })
+    const res = await fetch(`${server.baseUrl}/`, { redirect: 'manual' })
     expect(res.status).toBe(303)
     expect(res.headers.get('location')).toBe('/account')
   })

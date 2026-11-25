@@ -27,14 +27,16 @@
  * Note: consent is handled by the stock @atproto/oauth-provider middleware
  * after pds-core's epds-callback redirects through /oauth/authorize.
  */
-import { Router, type Request, type Response } from 'express'
-import type { AuthServiceContext } from '../context.js'
+import { type Router, type Request, type Response } from 'express'
+import { fromNodeHeaders } from 'better-auth/node'
 import {
   createLogger,
   signCallback,
   type CallbackParams,
 } from '@certified-app/shared'
-import { fromNodeHeaders } from 'better-auth/node'
+import { createAsyncRouter } from '../lib/async-router.js'
+import { asRequestString } from '../lib/validation.js'
+import type { AuthServiceContext } from '../context.js'
 import { cleanExit } from '../lib/clean-exit.js'
 import { getDidByEmail } from '../lib/get-did-by-email.js'
 import { pingParRequest } from '../lib/ping-par-request.js'
@@ -145,7 +147,7 @@ export function createCompleteRouter(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth instance has no exported type
   auth: any,
 ): Router {
-  const router = Router()
+  const router = createAsyncRouter()
 
   const { pdsUrl, internalSecret } = requireInternalEnv()
 
@@ -229,7 +231,7 @@ export function createCompleteRouter(
 
   router.get('/auth/complete', async (req: Request, res: Response) => {
     // Step 1: Get flow_id from cookie
-    const flowId = req.cookies[AUTH_FLOW_COOKIE] as string | undefined
+    const flowId = asRequestString(req.cookies[AUTH_FLOW_COOKIE])
     if (!flowId) {
       logger.warn('No epds_auth_flow cookie found on /auth/complete')
       // No clientId in scope (no cookie → no flow → no client), so the

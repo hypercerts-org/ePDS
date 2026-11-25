@@ -20,8 +20,10 @@
  * auth_flow row is gone, the ping returns `flow_expired` and the
  * browser stops pinging. No new tokens are issued.
  */
-import { Router, type Request, type Response } from 'express'
+import { type Router, type Request, type Response } from 'express'
 import { createLogger } from '@certified-app/shared'
+import { createAsyncRouter } from '../lib/async-router.js'
+import { asRequestString } from '../lib/validation.js'
 import type { AuthServiceContext } from '../context.js'
 import { cleanExit } from '../lib/clean-exit.js'
 import { pingParRequest } from '../lib/ping-par-request.js'
@@ -49,7 +51,7 @@ export type HeartbeatResponse =
     }
 
 export function createHeartbeatRouter(ctx: AuthServiceContext): Router {
-  const router = Router()
+  const router = createAsyncRouter()
   const { pdsUrl, internalSecret } = requireInternalEnv()
 
   router.get('/auth/ping', async (req: Request, res: Response) => {
@@ -57,7 +59,7 @@ export function createHeartbeatRouter(ctx: AuthServiceContext): Router {
     // user's response and serve it to a different in-flight flow.
     res.setHeader('Cache-Control', 'no-store')
 
-    const flowId = req.cookies[AUTH_FLOW_COOKIE] as string | undefined
+    const flowId = asRequestString(req.cookies[AUTH_FLOW_COOKIE])
     if (!flowId) {
       const body: HeartbeatResponse = { ok: false, reason: 'no_cookie' }
       res.status(200).json(body)
@@ -115,7 +117,7 @@ export function createHeartbeatRouter(ctx: AuthServiceContext): Router {
    * mislead the user into typing a code that will fail.
    */
   router.get('/auth/abort', async (req: Request, res: Response) => {
-    const flowId = req.cookies[AUTH_FLOW_COOKIE] as string | undefined
+    const flowId = asRequestString(req.cookies[AUTH_FLOW_COOKIE])
     const flow = flowId ? ctx.db.getAuthFlow(flowId) : undefined
     // Always clear the cookie — the flow is being abandoned.
     if (flowId) res.clearCookie(AUTH_FLOW_COOKIE)
