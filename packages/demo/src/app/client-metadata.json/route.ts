@@ -75,9 +75,12 @@ export async function GET() {
     email_subject_template: '{{code}} — your {{app_name}} code',
     // Opt in to the auth-service login page's "Sign in with Atmosphere"
     // button. Submitting a handle redirects here with
-    // ?handle=<value>, which our /api/oauth/login route already handles
-    // (resolves handle → PDS → fresh PAR against that PDS).
-    epds_handle_login_url: `${baseUrl}/api/oauth/login`,
+    // ?handle=<value>&iss=<issuer>&state=<state>. Our /api/oauth/handoff
+    // route checks that state belongs to a sign-in started in this browser
+    // and that iss is this PDS, then continues through /api/oauth/login
+    // (resolves handle → PDS → fresh PAR against that PDS). See
+    // docs/tutorial.md, "Optional: offer Atmosphere handle sign-in".
+    epds_handle_login_url: `${baseUrl}/api/oauth/handoff`,
     // Opt in to the "Sign in with Google" button; it renders only on an
     // auth service that has Google configured.
     epds_social_providers: ['google'],

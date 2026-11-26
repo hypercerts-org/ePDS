@@ -17,6 +17,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   token_failed: 'Login could not be completed — token exchange failed.',
   state_mismatch:
     'Login session expired or was tampered with. Please try again.',
+  handoff_refused:
+    "We couldn't verify that Atmosphere sign-in. It did not continue a sign-in started in this browser, or it was already used. Please start again from here.",
 }
 
 const dividerLineStyle: CSSProperties = {

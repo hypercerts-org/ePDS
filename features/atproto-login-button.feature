@@ -3,9 +3,10 @@ Feature: Atmosphere handle login button on the auth-service login page
   metadata, the auth-service login page renders a "Sign in with Atmosphere"
   button below the email form, after an "or" divider. The button toggles
   the email form into handle-entry mode; submitting a handle navigates the
-  browser to the client's declared URL with `?handle=<value>` appended, so
-  the client can resolve the handle to its PDS and start a fresh OAuth flow
-  against that PDS.
+  browser to the client's declared URL with `handle`, `iss` and the
+  client's own PAR `state` set, so the client can verify the hand-off,
+  resolve the handle to its PDS and start a fresh OAuth flow against that
+  PDS.
 
   Background:
     Given the ePDS test environment is running
@@ -35,4 +36,4 @@ Feature: Atmosphere handle login button on the auth-service login page
     When the demo client initiates an OAuth login via flow 2
     And the user clicks the ATProto handle login button
     And the user enters the handle "alice.bsky.social" and submits
-    Then the browser is navigated to the demo client's handle login URL with handle "alice.bsky.social"
+    Then the browser is navigated to the demo client's handle login URL with handle "alice.bsky.social", the PDS issuer and a state
