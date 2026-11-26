@@ -72,10 +72,13 @@ export interface ClientMetadata {
   /**
    * ePDS extension — when set, the auth-service login page renders an
    * "Sign in with Atmosphere" button. Submitting a handle
-   * navigates the browser to this URL with a `handle=<value>` query
-   * param added (via `URLSearchParams.set`, so any existing query
-   * string is preserved), letting the client resolve the handle to a
-   * PDS and start a fresh OAuth flow against that PDS. Off-PDS handles
+   * navigates the browser to this URL with `handle`, `iss` (this PDS's
+   * issuer) and, when the PAR is still live, `state` (the client's own
+   * PAR state) set as query params (via `URLSearchParams.set`, so other
+   * query params are preserved; these three names are reserved). The
+   * client checks `state` + `iss` against the sign-in it started in this
+   * browser, then resolves the handle to a PDS and starts a fresh OAuth
+   * flow against that PDS. Off-PDS handles
    * cannot be authenticated by this PDS, so this is the only path that
    * works for them.
    *

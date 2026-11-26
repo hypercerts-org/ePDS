@@ -95,41 +95,108 @@ export async function resolveLoginHint(
 }
 
 /**
+ * Fields pds-core's /_internal/par-login-hint returns for a stored PAR
+ * request. `issuer` is the OAuth issuer the PDS advertises, which can differ
+ * from PDS_PUBLIC_URL (e.g. `http` vs `https` on `*.localhost`).
+ */
+export interface ParFields {
+  login_hint?: string | null
+  state?: string | null
+  client_id?: string | null
+  issuer?: string | null
+}
+
+/** Memoised PAR lookup: one pds-core round trip per login-page request. */
+export type ParLookup = () => Promise<ParFields | null>
+
+/** Atmosphere hand-off values taken from the client's stored PAR request. */
+export interface ParHandoff {
+  state: string
+  issuer: string
+}
+
+/**
+ * Create a lazy, memoised lookup of the PAR request on pds-core. The first
+ * call fetches; later calls reuse the result (including a failed lookup, which
+ * resolves to null). Not called at all when no caller needs the fields.
+ */
+export function createParLookup(
+  pdsInternalUrl: string,
+  requestUri: string,
+  internalSecret: string,
+): ParLookup {
+  let pending: Promise<ParFields | null> | undefined
+  return () => {
+    pending ??= fetchParFields(
+      pdsInternalUrl,
+      requestUri,
+      internalSecret,
+    ).catch((err: unknown) => {
+      logger.warn({ err }, 'Failed to fetch fields from PAR request')
+      return null
+    })
+    return pending
+  }
+}
+
+/**
  * Retrieve the login_hint stored in a PAR request on pds-core.
  *
  * Third-party apps put the handle/DID in the PAR body but don't duplicate
- * it on the authorization redirect URL. This fetches it from pds-core's
- * /_internal/par-login-hint endpoint.
+ * it on the authorization redirect URL.
  *
  * Returns the login_hint string if found, or null on any error.
  */
 export async function fetchParLoginHint(
+  lookup: ParLookup,
+): Promise<string | null> {
+  const data = await lookup()
+  if (!data?.login_hint) return null
+  logger.debug(
+    { loginHint: data.login_hint },
+    'Retrieved login_hint from stored PAR request',
+  )
+  return data.login_hint
+}
+
+/**
+ * Retrieve the client's `state` and the PDS's OAuth issuer from the PAR
+ * request, for the Atmosphere hand-off back to the client.
+ *
+ * Returns null when the request is gone, has no state or issuer, or was
+ * pushed by a different client than `expectedClientId`. The issuer is never
+ * guessed from PDS_PUBLIC_URL: a wrong `iss` is rejected by the client anyway,
+ * so a null result makes the hand-off fail closed.
+ */
+export async function fetchParHandoff(
+  lookup: ParLookup,
+  expectedClientId: string,
+): Promise<ParHandoff | null> {
+  const data = await lookup()
+  if (!data?.state || data.client_id !== expectedClientId) return null
+  if (!data.issuer) {
+    logger.warn(
+      'pds-core returned no issuer for the PAR request, so the Atmosphere ' +
+        'hand-off is left without state and iss. pds-core is likely older ' +
+        'than auth-service: deploy pds-core first.',
+    )
+    return null
+  }
+  return { state: data.state, issuer: data.issuer }
+}
+
+async function fetchParFields(
   pdsInternalUrl: string,
   requestUri: string,
   internalSecret: string,
-): Promise<string | null> {
-  try {
-    const res = await fetch(
-      `${pdsInternalUrl}/_internal/par-login-hint?request_uri=${encodeURIComponent(requestUri)}`,
-      {
-        headers: { 'x-internal-secret': internalSecret },
-        signal: AbortSignal.timeout(RESOLVE_TIMEOUT_MS),
-      },
-    )
-    if (!res.ok) {
-      return null
-    }
-    const data = (await res.json()) as { login_hint: string | null }
-    if (data.login_hint) {
-      logger.debug(
-        { loginHint: data.login_hint },
-        'Retrieved login_hint from stored PAR request',
-      )
-      return data.login_hint
-    }
-    return null
-  } catch (err) {
-    logger.warn({ err }, 'Failed to fetch login_hint from PAR request')
-    return null
-  }
+): Promise<ParFields | null> {
+  const res = await fetch(
+    `${pdsInternalUrl}/_internal/par-login-hint?request_uri=${encodeURIComponent(requestUri)}`,
+    {
+      headers: { 'x-internal-secret': internalSecret },
+      signal: AbortSignal.timeout(RESOLVE_TIMEOUT_MS),
+    },
+  )
+  if (!res.ok) return null
+  return (await res.json()) as ParFields
 }

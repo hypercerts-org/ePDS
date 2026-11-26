@@ -23,7 +23,10 @@
  * client's `epds_handle_login_url` field (same gate the real
  * /oauth/authorize flow uses) — there's no preview-only override that
  * synthesises the field, so the button is only visible when iterating
- * against client metadata that already declares it.
+ * against client metadata that already declares it. There is no PAR
+ * behind a preview, so the hand-off carries `handle` and `iss` only and
+ * never `state`; a client that refuses a hand-off without `state` will
+ * refuse every preview hand-off.
  */
 import { randomBytes } from 'node:crypto'
 import { type Router, type Request, type Response } from 'express'
