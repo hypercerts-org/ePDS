@@ -38,6 +38,7 @@ import {
   canCheckHandle,
   canResolveHandle,
   isValidConstructedHandle,
+  isEmailAddress,
 } from './lib/identifier-guards.js'
 import {
   generateRandomHandle,
@@ -57,6 +58,7 @@ import {
   installCssInjectionMiddleware,
 } from './lib/client-css-injection.js'
 import express from 'express'
+import { issueConsentSkipRedirect } from './lib/consent-skip.js'
 import { createPreviewConsentHandler } from './lib/preview-consent.js'
 import { createPreviewChooserHandler } from './lib/preview-chooser.js'
 import {
@@ -214,6 +216,11 @@ async function main() {
       return
     }
 
+    if (!isEmailAddress(email)) {
+      res.status(400).json({ error: 'Invalid email parameter' })
+      return
+    }
+
     // Extract handle local part from verified callback params (tamper-proof — covered by HMAC).
     // The callback now carries only the local part (e.g. 'alice'); we append our own
     // trusted handleDomain here so there is no possibility of domain mismatch.
@@ -313,7 +320,9 @@ async function main() {
       if (did) {
         // Existing account
         const accountData = await provider.accountManager.getAccount(did)
-        account = accountData.account
+        // getAccount() is nullable since oauth-provider 0.27; a null leaves
+        // `account` unset and falls into the 500 guard below.
+        account = accountData?.account
       } else if (chosenHandle) {
         // chosenHandle is `${localPart}.${handleDomain}`, already validated via
         // validateLocalPart above. Brand it as HandleString for the strongly
@@ -349,7 +358,7 @@ async function main() {
         // collision (we just confirmed the handle is available), so log as error
         // and return 500 rather than silently redirecting to handle_taken.
         try {
-          account = await provider.accountManager.createAccount(
+          ;({ account } = await provider.accountManager.createAccount(
             deviceId,
             deviceMetadata,
             {
@@ -365,7 +374,7 @@ async function main() {
               // EPDS_INVITE_CODE should be a high-useCount code generated via the admin API.
               inviteCode: process.env.EPDS_INVITE_CODE,
             },
-          )
+          ))
           did = account.did
           logger.info(
             { did, email, handle: chosenHandle },
@@ -413,7 +422,7 @@ async function main() {
                 `generated handle failed validation: ${randomHandle}`,
               )
             }
-            account = await provider.accountManager.createAccount(
+            ;({ account } = await provider.accountManager.createAccount(
               deviceId,
               deviceMetadata,
               {
@@ -429,7 +438,7 @@ async function main() {
                 // EPDS_INVITE_CODE should be a high-useCount code generated via the admin API.
                 inviteCode: process.env.EPDS_INVITE_CODE,
               },
-            )
+            ))
             did = account.did
             logger.info({ did, email, handle: randomHandle }, 'Created account')
             break
@@ -445,12 +454,23 @@ async function main() {
 
       // Step 4: Bind account to device session (for future SSO).
       if (!account) {
-        // Unreachable: every branch above either assigns account or returns/throws.
+        // Reached when an existing account's getAccount() returned null
+        // (nullable since oauth-provider 0.27) or resolution otherwise failed.
         logger.error({ email }, 'account unexpectedly unset after resolution')
         res.status(500).send('Account resolution failed')
         return
       }
-      await provider.accountManager.upsertDeviceAccount(deviceId, account.did)
+      // `AccountManager.upsertDeviceAccount` is `protected` since
+      // oauth-provider 0.27. Upstream binds a device only inside
+      // sign-up/login, and the callback never runs login(), so returning
+      // users (existing account, new device or expired binding) would never
+      // be bound and SSO would break. Bracket access bypasses `protected` at
+      // compile time only. Catalogued in docs/design/pds-white-boxing.md
+      // item 2; recheck on every provider bump.
+      await provider.accountManager['upsertDeviceAccount'](
+        deviceId,
+        account.did,
+      )
 
       // Step 4b: Record that the email is confirmed, but only when
       // auth-service explicitly claims this sign-in proved control of
@@ -511,62 +531,23 @@ async function main() {
             client.info?.isTrusted &&
             clientMetadata.epds_skip_consent_on_signup === true
           ) {
-            // Bind device to the PAR request so setAuthorized() can proceed
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
-            const requestData = await (provider.requestManager as any).get(
-              requestUri,
-              deviceId,
-            )
-            const { parameters } = requestData
-
-            // Issue authorization code directly (bypasses /oauth/authorize)
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @atproto/oauth-provider requestManager not exported
-            const code = await (provider.requestManager as any).setAuthorized(
+            const result = await issueConsentSkipRedirect(provider, {
               requestUri,
               client,
               account,
               deviceId,
               deviceMetadata,
-            )
-
-            // Record the client as authorized so future logins can auto-approve
-            const scopeStr = parameters.scope as string | undefined
-            const scopes = scopeStr?.split(' ') ?? []
-            await provider.accountManager.setAuthorizedClient(account, client, {
-              authorizedScopes: scopes,
+              pdsUrl,
             })
-
-            // Build redirect URL and send user directly to client
-            const redirectUri = parameters.redirect_uri as string | undefined
-            if (!redirectUri) {
+            if (result.kind === 'missing-redirect-uri') {
               res
                 .status(400)
                 .json({ error: 'No redirect_uri in authorization request' })
               return
             }
 
-            const redirectUrl = new URL(redirectUri)
-            const responseMode = (parameters.response_mode as string) || 'query'
-            const redirectParams: [string, string][] = [
-              ['iss', pdsUrl],
-              ['code', code],
-            ]
-            if (parameters.state) {
-              redirectParams.push(['state', parameters.state as string])
-            }
-
-            if (responseMode === 'fragment') {
-              const fragmentParams = new URLSearchParams()
-              for (const [k, v] of redirectParams) fragmentParams.set(k, v)
-              redirectUrl.hash = fragmentParams.toString()
-            } else {
-              for (const [k, v] of redirectParams) {
-                redirectUrl.searchParams.set(k, v)
-              }
-            }
-
             res.setHeader('Cache-Control', 'no-store')
-            res.redirect(303, redirectUrl.toString())
+            res.redirect(303, result.url.toString())
 
             logger.info(
               { did, clientId },

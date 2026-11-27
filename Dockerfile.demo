@@ -3,6 +3,9 @@
 # with output: "standalone" and then runs the self-contained server.
 
 # -- Base --
+# Floating node:22 tag is intentional: it always resolves to the newest 22.x,
+# which is >= the 22.22.3 floor required by @atproto/pds (engines) and keeps
+# security patches flowing. Rebuild with --pull if a cached older base exists.
 FROM node:22-alpine AS base
 RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 WORKDIR /app
