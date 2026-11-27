@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "engines": {
-    "node": ">=22.19.0"
+    "node": "^22.22.3 || ^24.11.1 || >=25.1.0"
   },
   "scripts": {
     "build": "tsc --build",
@@ -17,9 +17,9 @@
   },
   "dependencies": {
     "@atproto/crypto": "^0.4.5",
-    "@atproto/oauth-provider": "0.22.8",
-    "@atproto/oauth-provider-ui": "0.10.3",
-    "@atproto/pds": "0.5.34",
+    "@atproto/oauth-provider": "0.27.3",
+    "@atproto/oauth-provider-ui": "0.11.2",
+    "@atproto/pds": "0.5.66",
     "@atproto/syntax": "^0.7.2",
     "@certified-app/shared": "workspace:*",
     "@did-plc/lib": "^0.0.4",

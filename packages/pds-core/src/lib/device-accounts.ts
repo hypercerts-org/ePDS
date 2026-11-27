@@ -96,6 +96,8 @@ export async function loadDeviceAccountEmails(
   if (!bindings) return null
   return bindings
     .map((b) => b.account.email)
-    .filter((e): e is string => typeof e === 'string' && e.length > 0)
+    .filter(
+      (e): e is NonNullable<typeof e> => typeof e === 'string' && e.length > 0,
+    )
     .map((e) => e.toLowerCase())
 }

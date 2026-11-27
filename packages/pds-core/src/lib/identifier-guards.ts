@@ -62,3 +62,14 @@ export function isValidConstructedHandle(
 ): handle is HandleString {
   return isValidHandle(handle)
 }
+
+/**
+ * Upstream's `createAccount` and `getAccountByEmail`-adjacent types require
+ * `${string}@${string}`. The callback email is HMAC-verified, so a `false`
+ * result means a buggy or hand-built caller; the callback answers 400 rather
+ * than casting.
+ */
+export function isEmailAddress(email: string): email is `${string}@${string}` {
+  const at = email.indexOf('@')
+  return at > 0 && at < email.length - 1
+}
