@@ -1,5 +1,79 @@
 # ePDS
 
+## 0.12.0
+
+### Who should read this release
+
+- **End users:**
+  - [Fixed a flaw that let someone guess a sign-in code faster than the five-attempt limit should allow.](#v0.12.0-fixed-a-flaw-that-let-someone-guess-a-sign-in-code-faster)
+- **Client app developers:**
+  - [Apps that offer "Sign in with Atmosphere" can now check that the sign-in came from the same browser that started it.](#v0.12.0-apps-that-offer-sign-in-with-atmosphere-can-now-check-that)
+  - [Signing in and account creation now run on the latest AT Protocol server release.](#v0.12.0-signing-in-and-account-creation-now-run-on-the-latest-at)
+  - [Preview diagnostics count only redirect URI entries that sign-in can read.](#v0.12.0-preview-diagnostics-count-only-redirect-uri-entries-that)
+- **Operators:**
+  - [Apps that offer "Sign in with Atmosphere" can now check that the sign-in came from the same browser that started it.](#v0.12.0-apps-that-offer-sign-in-with-atmosphere-can-now-check-that)
+  - [Signing in and account creation now run on the latest AT Protocol server release.](#v0.12.0-signing-in-and-account-creation-now-run-on-the-latest-at)
+  - [A single malformed request or malformed client metadata can no longer shut down the login service.](#v0.12.0-a-single-malformed-request-or-malformed-client-metadata-can)
+  - [Backup email checks process input in linear time without changing which addresses are accepted.](#v0.12.0-backup-email-checks-process-input-in-linear-time-without)
+  - [Fixed a flaw that let someone guess a sign-in code faster than the five-attempt limit should allow.](#v0.12.0-fixed-a-flaw-that-let-someone-guess-a-sign-in-code-faster)
+
+### Minor Changes
+
+- <a id="v0.12.0-apps-that-offer-sign-in-with-atmosphere-can-now-check-that"></a> [#306](https://github.com/hypercerts-org/ePDS/pull/306) [`cae3377`](https://github.com/hypercerts-org/ePDS/commit/cae3377a21ea5e010e62f045220b5a15e9946cd5) Thanks [@Kzoeps](https://github.com/Kzoeps)! - Apps that offer "Sign in with Atmosphere" can now check that the sign-in came from the same browser that started it.
+
+  **Affects:** Client app developers, Operators
+
+  **Client app developers:**
+  - The Atmosphere hand-off to your `epds_handle_login_url` now sets `iss` (this PDS's issuer) and `state` (the `state` from your own PAR request) alongside `handle`.
+  - `state` can be absent (for example, the PAR request expired or belongs to another client). Refuse the hand-off when it is.
+  - Before starting the Atmosphere sign-in, check that `state` matches a sign-in you started in this browser and that `iss` is this PDS. Do not rely on the `Referer` header.
+  - After a valid hand-off, delete the stored `state`. Refuse any later hand-off that reuses it.
+  - `handle`, `iss` and `state` are now reserved query params on that URL: values your URL already has for them are overwritten or, for `state`, removed.
+  - See [the tutorial](https://github.com/hypercerts-org/ePDS/blob/main/docs/tutorial.md#optional-offer-atmosphere-handle-sign-in).
+
+  **Operators:**
+  - The `iss` value is the OAuth issuer reported by pds-core (the same `issuer` as in `/.well-known/oauth-authorization-server`), no longer `PDS_PUBLIC_URL`. If pds-core does not report one, the hand-off omits `iss` and the client refuses it.
+  - Deploy the PDS before the auth service, otherwise `state` is left out until both are updated.
+  - The login page is now served with `Cache-Control: no-store`.
+
+- <a id="v0.12.0-signing-in-and-account-creation-now-run-on-the-latest-at"></a> [#307](https://github.com/hypercerts-org/ePDS/pull/307) [`2f403be`](https://github.com/hypercerts-org/ePDS/commit/2f403be189578ae42b47d19ae6d11f546f44c66d) Thanks [@Kzoeps](https://github.com/Kzoeps)! - Signing in and account creation now run on the latest AT Protocol server release.
+
+  **Affects:** Client app developers, Operators
+
+  **Client app developers:** The authorization endpoint now accepts only pushed authorization requests (`request_uri` from the PAR endpoint). Clients built on `@atproto/oauth-client-node` already do this; clients that send the parameters directly on the `/oauth/authorize` query string must switch to PAR.
+
+  **Operators:**
+  - Node.js must now satisfy `^22.22.3 || ^24.11.1 || >=25.1.0` (`engines` in the root and `pds-core` `package.json`; `.nvmrc` is 22.22.3). The Docker images use the floating `node:22-alpine` tag, which meets this.
+  - The upgrade runs migration `008-account-email-auth-factor` on `account.sqlite` at pds-core startup, and the previous image refuses the migrated database. Snapshot `account.sqlite` before cutover: stop pds-core first and copy `account.sqlite` together with any `-wal` and `-shm` files, or take the snapshot online with `sqlite3 account.sqlite ".backup 'account.snapshot.sqlite'"` (or `VACUUM INTO`). Rolling back means restoring that snapshot, which discards every account write made after it was taken, including writes between the snapshot and the cutover.
+  - Upgraded packages: `@atproto/pds` 0.5.66, `@atproto/oauth-provider` 0.27.3, `@atproto/oauth-provider-ui` 0.11.2, `@atproto-labs/fetch-node` 0.5.0 (patched undici).
+  - The upstream account page now offers users an email one-time-code toggle (`/oauth/api/enable-email-otp`, `/disable-email-otp`). ePDS does not hide or brand it; it does not affect ePDS sign-in, which does not use that factor.
+
+### Patch Changes
+
+- <a id="v0.12.0-a-single-malformed-request-or-malformed-client-metadata-can"></a> [#296](https://github.com/hypercerts-org/ePDS/pull/296) [`e0c9f70`](https://github.com/hypercerts-org/ePDS/commit/e0c9f70e15330250e02d05e0f9b7754b6b2b8173) Thanks [@Kzoeps](https://github.com/Kzoeps)! - A single malformed request or malformed client metadata can no longer shut down the login service.
+
+  **Affects:** Operators
+
+  **Operators:** Errors thrown inside auth-service route handlers (for example a repeated query parameter such as `?request_uri=a&request_uri=b`, or a client metadata document that is `null` or has a non-string `client_name`) now return a 500 response and are logged, instead of ending the process. Client metadata that is not a JSON object is treated as unavailable, and fields of the wrong type are ignored. `GET /auth/recover` returns 400 for a non-string `request_uri`. Unhandled promise rejections that still escape are now logged at error level. No configuration changes.
+
+- <a id="v0.12.0-backup-email-checks-process-input-in-linear-time-without"></a> [#296](https://github.com/hypercerts-org/ePDS/pull/296) [`487b5d7`](https://github.com/hypercerts-org/ePDS/commit/487b5d70f7154c5dcc294bfc5f266fe1e1f0218c) Thanks [@Kzoeps](https://github.com/Kzoeps)! - Backup email checks process input in linear time without changing which addresses are accepted.
+
+  **Affects:** Operators
+
+- <a id="v0.12.0-fixed-a-flaw-that-let-someone-guess-a-sign-in-code-faster"></a> [#294](https://github.com/hypercerts-org/ePDS/pull/294) [`8a8fc29`](https://github.com/hypercerts-org/ePDS/commit/8a8fc2991c952ee6d6980148fb2de78ff579c03d) Thanks [@Kzoeps](https://github.com/Kzoeps)! - Fixed a flaw that let someone guess a sign-in code faster than the five-attempt limit should allow.
+
+  **Affects:** End users, Operators
+
+  **End users:** Sign-in codes still allow five wrong tries and expire after 10 minutes. Guesses sent at the same moment are now refused instead of being counted as a single try.
+
+  **Operators:** Upgrades `better-auth` from 1.4.18 to 1.7.26, which fixes GHSA-2f9c-7xj7-gh55 (concurrent wrong email-OTP guesses were counted as one attempt). No configuration or environment variable changes. Better Auth's database migrations run automatically at startup as before. Two behaviour changes worth knowing: a failed Google sign-in redirect to `/auth/complete` for an unverified email now also carries an `error_description` query parameter, and a state-mismatch redirect now keeps `epds_social_provider=google`. `/account/verify-otp` now shows the "invalid or expired code" message for a wrong code instead of redirecting to `/account`.
+
+- <a id="v0.12.0-preview-diagnostics-count-only-redirect-uri-entries-that"></a> [#296](https://github.com/hypercerts-org/ePDS/pull/296) [`799abaf`](https://github.com/hypercerts-org/ePDS/commit/799abaf92d8dd4f6d375e387209cdb696b26711c) Thanks [@Kzoeps](https://github.com/Kzoeps)! - Preview diagnostics count only redirect URI entries that sign-in can read.
+
+  **Affects:** Client app developers
+
+  The preview reports an error if `redirect_uris` has no string entries, matching the live metadata resolver. It does not validate the URLs themselves.
+
 ## 0.11.1
 
 ### Who should read this release
