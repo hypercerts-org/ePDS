@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node.js >= 18.7.0
+- Node.js ^22.22.3, ^24.11.1 or >=25.1.0
 - pnpm 9+
 - OpenSSL (for key generation)
 - Docker and Docker Compose (optional, for running the full stack locally)

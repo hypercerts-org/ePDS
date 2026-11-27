@@ -9,7 +9,7 @@ and support files live here in `e2e/`.
 
 ## Prerequisites
 
-- Node.js >= 22.19 and pnpm 9+
+- Node.js ^22.22.3 (or ^24.11.1, >=25.1.0) and pnpm 9+
 - A running ePDS stack to test against (see [Setup](#setup))
 - Chromium browser (installed separately — see below)
 
