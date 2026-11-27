@@ -365,15 +365,53 @@ Atmosphere" button under the email form, after an "or" divider (and
 above "Sign in with Google" when the client also offers it). Clicking it
 switches the form into handle-entry mode (placeholder `you.bsky.social`)
 and relabels the button "Sign in with email"; submitting
-a handle navigates the browser to your declared URL with `?handle=<value>`
-appended. Your route is responsible for resolving the handle to its PDS
-and starting a fresh PAR against that PDS.
+a handle navigates the browser to your declared URL with these query
+params set (other params on your URL are kept):
 
-The reference demo client implements this at
-`packages/demo/src/app/api/oauth/login/route.ts` — the same route
-already accepts `?handle=` and resolves it dynamically, so the easiest
-opt-in is to point `epds_handle_login_url` at your existing OAuth
-login route.
+- `handle`: what the user typed.
+- `iss`: this PDS's OAuth issuer (for example `https://pds.example.com`).
+- `state`: the `state` from your own PAR request for this sign-in. It can
+  be absent (for example, the PAR request expired or belongs to a
+  different client); refuse the hand-off when it is.
+
+Your route should refuse the hand-off unless all of these hold, then
+resolve the handle to its PDS and start a fresh PAR against that PDS:
+
+1. `state` is present and matches a sign-in your app started **in this
+   browser** (for example, compare it with a cookie you set when you
+   started the sign-in). A `state` lookup in your server-side store alone
+   is not enough: anyone can start a sign-in to get a valid `state`. With
+   `@atproto/oauth-client-node`, the SDK generates the PAR `state` and it
+   is not in the URL `authorize()` returns, so pass a random browser nonce
+   as `authorize(url, { state: nonce })` (the SDK saves it as `appState`
+   under the PAR `state`) and compare that. See the epds-login skill, "Atmosphere
+   Hand-Off".
+2. `iss` equals this PDS's issuer, and the stored sign-in was started
+   against this PDS.
+3. The stored `state` has not been used. Delete it in the same step you
+   check it, and only after checks 1 and 2 pass.
+
+Do not rely on the `Referer` header: the login page sends
+`Referrer-Policy: no-referrer`. If your sign-in cookie is `SameSite`,
+use `Lax`; a `Strict` cookie is not sent on this cross-site redirect.
+
+The demo client implements this at
+`packages/demo/src/app/api/oauth/handoff/route.ts` (checks in
+`packages/demo/src/lib/handoff.ts`). It has no OAuth SDK and no server-side
+state store: its PAR `state` already lives in the signed, httpOnly
+`oauth_state` cookie, so check 1 compares `state` with that cookie directly
+and check 3 clears the cookie in the response that accepts the hand-off. That
+is not atomic: with no server-side store, two concurrent requests with the same
+valid cookie can both pass before the browser applies the deletion. Sequential
+replay fails. Use an atomic store delete if you need strict single use.
+After a valid hand-off it continues through its normal login route, which
+resolves the handle and starts the fresh PAR.
+
+The demo compares `iss` with its `PDS_URL`. On `*.localhost` the PDS can
+advertise a different scheme than you configured (for example `https`), so set
+`PDS_URL` to the `issuer` from `/.well-known/oauth-authorization-server`
+exactly. Real clients should compare `iss` with the issuer advertised there,
+not with a configured URL.
 
 Constraints:
 
@@ -382,6 +420,8 @@ Constraints:
   is not rendered.
 - If `epds_handle_login_url` is unset or invalid, the button is not
   rendered. Existing clients see no behaviour change.
+- `handle`, `iss` and `state` are reserved: the login page overwrites
+  (or, for `state`, removes) any values your URL already has for them.
 
 #### Optional: offer Google sign-in
 

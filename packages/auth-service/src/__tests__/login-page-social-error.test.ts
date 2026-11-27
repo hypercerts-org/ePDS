@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../lib/resolve-login-hint.js', () => ({
   fetchParLoginHint: mocks.fetchParLoginHint,
+  createParLookup: () => () => Promise.resolve(null),
   resolveLoginHint: mocks.resolveLoginHint,
 }))
 

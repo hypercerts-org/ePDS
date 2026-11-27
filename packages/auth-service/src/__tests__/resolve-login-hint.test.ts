@@ -11,6 +11,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   resolveLoginHint,
   fetchParLoginHint,
+  fetchParHandoff,
+  createParLookup,
 } from '../lib/resolve-login-hint.js'
 
 const PDS_URL = 'http://core:3000'
@@ -196,9 +198,11 @@ describe('fetchParLoginHint', () => {
     )
 
     const result = await fetchParLoginHint(
-      PDS_URL,
-      'urn:ietf:params:oauth:request_uri:req-abc123',
-      SECRET,
+      createParLookup(
+        PDS_URL,
+        'urn:ietf:params:oauth:request_uri:req-abc123',
+        SECRET,
+      ),
     )
     expect(result).toBe('alice.pds.example')
 
@@ -220,9 +224,11 @@ describe('fetchParLoginHint', () => {
     )
 
     const result = await fetchParLoginHint(
-      PDS_URL,
-      'urn:ietf:params:oauth:request_uri:req-nohint',
-      SECRET,
+      createParLookup(
+        PDS_URL,
+        'urn:ietf:params:oauth:request_uri:req-nohint',
+        SECRET,
+      ),
     )
     expect(result).toBeNull()
   })
@@ -237,9 +243,11 @@ describe('fetchParLoginHint', () => {
     )
 
     const result = await fetchParLoginHint(
-      PDS_URL,
-      'urn:ietf:params:oauth:request_uri:req-expired',
-      SECRET,
+      createParLookup(
+        PDS_URL,
+        'urn:ietf:params:oauth:request_uri:req-expired',
+        SECRET,
+      ),
     )
     expect(result).toBeNull()
   })
@@ -250,9 +258,11 @@ describe('fetchParLoginHint', () => {
     )
 
     const result = await fetchParLoginHint(
-      PDS_URL,
-      'urn:ietf:params:oauth:request_uri:req-abc123',
-      SECRET,
+      createParLookup(
+        PDS_URL,
+        'urn:ietf:params:oauth:request_uri:req-abc123',
+        SECRET,
+      ),
     )
     expect(result).toBeNull()
   })
@@ -261,9 +271,11 @@ describe('fetchParLoginHint', () => {
     fetchSpy.mockRejectedValueOnce(new Error('Connection refused'))
 
     const result = await fetchParLoginHint(
-      PDS_URL,
-      'urn:ietf:params:oauth:request_uri:req-abc123',
-      SECRET,
+      createParLookup(
+        PDS_URL,
+        'urn:ietf:params:oauth:request_uri:req-abc123',
+        SECRET,
+      ),
     )
     expect(result).toBeNull()
   })
@@ -277,10 +289,75 @@ describe('fetchParLoginHint', () => {
     )
 
     const result = await fetchParLoginHint(
-      PDS_URL,
-      'urn:ietf:params:oauth:request_uri:req-abc123',
-      SECRET,
+      createParLookup(
+        PDS_URL,
+        'urn:ietf:params:oauth:request_uri:req-abc123',
+        SECRET,
+      ),
     )
     expect(result).toBeNull()
+  })
+})
+
+describe('fetchParHandoff', () => {
+  const REQUEST_URI = 'urn:ietf:params:oauth:request_uri:req-abc123'
+  const CLIENT = 'https://app.example.com/client-metadata.json'
+  const ISSUER = 'http://pds.localhost:3000'
+  const lookup = () => createParLookup(PDS_URL, REQUEST_URI, SECRET)
+  const respond = (body: object) =>
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+  it('returns the state and issuer when the PAR belongs to the expected client', async () => {
+    respond({
+      login_hint: null,
+      state: 'st-123',
+      client_id: CLIENT,
+      issuer: ISSUER,
+    })
+    expect(await fetchParHandoff(lookup(), CLIENT)).toEqual({
+      state: 'st-123',
+      issuer: ISSUER,
+    })
+  })
+
+  it('returns null when the PAR was pushed by a different client', async () => {
+    respond({
+      login_hint: null,
+      state: 'st-123',
+      client_id: 'https://other.example/m.json',
+      issuer: ISSUER,
+    })
+    expect(await fetchParHandoff(lookup(), CLIENT)).toBeNull()
+  })
+
+  it('returns null rather than guessing when pds-core sends no issuer', async () => {
+    respond({ login_hint: null, state: 'st-123', client_id: CLIENT })
+    expect(await fetchParHandoff(lookup(), CLIENT)).toBeNull()
+  })
+
+  it('returns null when pds-core cannot be reached', async () => {
+    fetchSpy.mockRejectedValueOnce(new Error('Connection refused'))
+    expect(await fetchParHandoff(lookup(), CLIENT)).toBeNull()
+  })
+
+  it('shares one pds-core request between the hint and the hand-off', async () => {
+    respond({
+      login_hint: 'alice.pds.example',
+      state: 'st-123',
+      client_id: CLIENT,
+      issuer: ISSUER,
+    })
+    const shared = lookup()
+    expect(await fetchParLoginHint(shared)).toBe('alice.pds.example')
+    expect(await fetchParHandoff(shared, CLIENT)).toEqual({
+      state: 'st-123',
+      issuer: ISSUER,
+    })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 })

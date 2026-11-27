@@ -109,11 +109,12 @@ When(
   'the user enters the handle {string} and submits',
   async function (this: EpdsWorld, handle: string) {
     const page = getPage(this)
-    // Intercept the redirect to the demo client's /api/oauth/login route
-    // and abort it. The demo route does external handle resolution
-    // (handle → DID → PDS) which would either be flaky or require live
-    // Bluesky access; we only need to assert the redirect URL shape.
-    const expectedUrlPrefix = `${demoBaseUrl}/api/oauth/login`
+    // Intercept the redirect to the demo client's /api/oauth/handoff route
+    // and abort it. Past its checks the demo does external handle
+    // resolution (handle → DID → PDS) which would either be flaky or
+    // require live Bluesky access; we only need to assert the redirect
+    // URL shape.
+    const expectedUrlPrefix = `${demoBaseUrl}/api/oauth/handoff`
     this.handleLoginRedirectUrl = undefined
     await page.route(`${expectedUrlPrefix}**`, (route) => {
       this.handleLoginRedirectUrl = route.request().url()
@@ -125,7 +126,7 @@ When(
 )
 
 Then(
-  "the browser is navigated to the demo client's handle login URL with handle {string}",
+  "the browser is navigated to the demo client's handle login URL with handle {string}, the PDS issuer and a state",
   async function (this: EpdsWorld, handle: string) {
     const page = getPage(this)
     await expect
@@ -133,10 +134,30 @@ Then(
       .toBeDefined()
     const current = new URL(this.handleLoginRedirectUrl as string)
     expect(current.origin + current.pathname).toBe(
-      `${demoBaseUrl}/api/oauth/login`,
+      `${demoBaseUrl}/api/oauth/handoff`,
     )
     expect(current.searchParams.get('handle')).toBe(handle)
+    // The state must be the one the demo stored in its signed oauth_state
+    // cookie when this flow started (cookie value: base64url(JSON).hmac).
+    const cookies = await page.context().cookies(demoBaseUrl)
+    const oauthCookie = cookies.find((c) => c.name === 'oauth_state')
+    expect(oauthCookie, 'demo oauth_state cookie').toBeDefined()
+    const signed = decodeURIComponent((oauthCookie as { value: string }).value)
+    const payload = signed.substring(0, signed.lastIndexOf('.'))
+    const { state: expectedState } = JSON.parse(
+      Buffer.from(payload, 'base64url').toString(),
+    ) as { state: string }
+    expect(expectedState).toBeTruthy()
+    expect(current.searchParams.get('state')).toBe(expectedState)
+    // Clients compare iss exactly, so it must equal the PDS's advertised
+    // issuer verbatim (no origin normalisation).
+    const asMetadata = (await (
+      await fetch(
+        `${testEnv.pdsUrl.replace(/\/$/, '')}/.well-known/oauth-authorization-server`,
+      )
+    ).json()) as { issuer: string }
+    expect(current.searchParams.get('iss')).toBe(asMetadata.issuer)
     // Stop intercepting so subsequent steps in this scenario aren't affected.
-    await page.unroute(`${demoBaseUrl}/api/oauth/login**`)
+    await page.unroute(`${demoBaseUrl}/api/oauth/handoff**`)
   },
 )
