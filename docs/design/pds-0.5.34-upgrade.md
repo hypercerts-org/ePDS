@@ -534,3 +534,49 @@ This assessment did not verify:
 - deployed container Node and Undici versions.
 
 Treat these as validation work, not as established failures.
+
+## Follow-up: upgrade to @atproto/pds 0.5.66
+
+ePDS moved from 0.5.34 to `@atproto/pds` 0.5.66 with `@atproto/oauth-provider`
+0.27.3 (exact pin), `@atproto/oauth-provider-ui` 0.11.2 and
+`@atproto-labs/fetch-node` 0.5.0 in `packages/shared`. Each resolves to a single
+copy in the lockfile.
+
+### What broke and how it was handled
+
+| Change upstream                                                 | ePDS handling                                                                       |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `createAccount()` returns `{ account, remembered }`             | Destructure `account` at both call sites                                            |
+| `getAccount()` may return `null`                                | Treated as account-resolution failure (existing 500 guard)                          |
+| `email` typed `${string}@${string}`                             | `isEmailAddress()` guard in `lib/identifier-guards.ts`; callback returns 400 if bad |
+| `upsertDeviceAccount()` is `protected`                          | Bracket access in `lib/device-binding.ts` (returning users need it); white-boxing 2 |
+| `requestManager.setAuthorized()` returns `{ code, parameters }` | Consent-skip moved to `lib/consent-skip.ts`, typed so tsc checks the shape          |
+| `/oauth/authorize` accepts only PAR `request_uri`               | Clients using `@atproto/oauth-client-node` already use PAR; documented in changeset |
+| `/oauth/authorize` now allows `sec-fetch-site: same-site`       | ePDS rewrite is a no-op; removal deferred to a follow-up PR                         |
+| `@atproto/pds` engines `^22.22.3 \|\| ^24.11.1 \|\| >=25.1.0`   | Same range in root and `pds-core` `engines`; `.nvmrc` 22.22.3                       |
+
+`safeFetchWrap` in `@atproto-labs/fetch-node` 0.5.0 keeps the same options
+(`timeout`, `responseMaxSize`, `allowHttp`, `allowPrivateIps`,
+`allowImplicitRedirect`) that `packages/shared/src/safe-fetch.ts` uses. The
+0.5.0 breaking change only removes helper re-exports (`isIp`, `ifString`, ...)
+we do not import. The returned fetch is now `AsyncDisposable`; ePDS keeps one
+long-lived instance and does not dispose it.
+
+### Database migration is one-way
+
+0.5.66 adds the `008-account-email-auth-factor` migration to `account.sqlite`
+and runs it at startup. The previous image then refuses the database
+(`corrupted migrations: previously executed migration 008 is missing`).
+Rollback therefore means restoring a pre-cutover snapshot of `account.sqlite`,
+which loses every account write made after the snapshot was taken (including
+writes between the snapshot and the cutover). Snapshot before deploying: either
+stop pds-core, then copy `account.sqlite` together with any `-wal` and `-shm`
+files, or take an online snapshot with `sqlite3 account.sqlite ".backup
+'account.snapshot.sqlite'"` (or `VACUUM INTO`). A plain file copy of a running
+database can be inconsistent.
+
+### Not verified here
+
+Full AiaB e2e (including the trusted-client consent-skip scenario in
+`features/consent-screen.feature` and the chooser scenarios), Google sign-in,
+and real-browser chooser DOM behaviour were not run as part of the code change.

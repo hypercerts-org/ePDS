@@ -49,6 +49,11 @@ pds-core callback, full OAuth flow).
   without a real PDS instance.
 - `renderError()` — trivial HTML template, easy to extract and test.
 
+**Extracted and unit-tested:** the consent-skip redirect
+(`lib/consent-skip.ts`, fake provider returning `{ code, parameters }`). The
+callback route itself (including returning-user device binding), and the real
+provider behind it, remain integration/e2e territory.
+
 **Recommended strategy:**
 
 - Extract `verifyInternalSecret`, `checkHandleRoute`, and `renderError` into

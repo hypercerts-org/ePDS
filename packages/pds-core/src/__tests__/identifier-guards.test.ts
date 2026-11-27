@@ -4,6 +4,7 @@ import {
   canCheckHandle,
   canResolveHandle,
   isValidConstructedHandle,
+  isEmailAddress,
 } from '../lib/identifier-guards.js'
 
 describe('canLookUpAccountByHandle', () => {
@@ -79,5 +80,18 @@ describe('isValidConstructedHandle', () => {
 
   it('rejects a handle containing whitespace', () => {
     expect(isValidConstructedHandle('alice bob.example.com')).toBe(false)
+  })
+})
+
+describe('isEmailAddress', () => {
+  it.each(['a@b', 'alice@example.com', 'a+tag@sub.example.org'])(
+    'accepts %s',
+    (email) => {
+      expect(isEmailAddress(email)).toBe(true)
+    },
+  )
+
+  it.each(['', 'alice', '@example.com', 'alice@'])('rejects %j', (email) => {
+    expect(isEmailAddress(email)).toBe(false)
   })
 })

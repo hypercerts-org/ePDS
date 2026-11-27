@@ -36,36 +36,44 @@ Methods used:
 **Breakage scenario:** Method renamed, signature changed, or `requestManager`
 made private. The entire authorization code issuance flow stops working.
 
-### 2. `provider.accountManager.createAccount()` signature
+### 2. `provider.accountManager.createAccount()` signature and `upsertDeviceAccount`
 
-**File:** `packages/pds-core/src/index.ts` (2 call sites)
+**File:** `packages/pds-core/src/index.ts` (3 call sites)
 
 ```ts
-provider.accountManager.createAccount(deviceId, deviceMetadata, {
-  locale,
-  handle,
-  email,
-  password,
-  inviteCode,
-})
+const { account } = await provider.accountManager.createAccount(
+  deviceId,
+  deviceMetadata,
+  { locale, handle, email, password, inviteCode },
+)
+await provider.accountManager['upsertDeviceAccount'](deviceId, did)
 ```
 
 The call assumes:
 
 - `createAccount` takes `(deviceId, deviceMetadata, opts)` with those exact
-  option keys
+  option keys. `email` must be `${string}@${string}`; the callback validates it
+  with `isEmailAddress()` first.
 - A real password string is **required** — passing `undefined` skips
   `registerAccount()` internally, leaving the `account` table empty and
   breaking `upsertDeviceAccount()` FK constraints
-- Returns an `Account` object carrying the DID. **This has already broken
-  once:** the property was `.sub` up to `@atproto/pds` 0.4.x and is `.did`
-  as of 0.5.23. Call sites were updated in the upgrade; a future rename
-  would break them again.
+- Returns `{ account, remembered }` as of oauth-provider 0.27 (earlier: the
+  `Account` itself). We pass no `clientId`, so `remembered` defaults to true and
+  we ignore it. The account's DID property was `.sub` up to `@atproto/pds`
+  0.4.x and is `.did` as of 0.5.23. Renames have broken these call sites twice.
+- `accountManager.getAccount(did)` is nullable as of 0.27. A null is treated
+  as an account-resolution failure (500).
+- `upsertDeviceAccount` is `protected` as of 0.27. Upstream binds a device to an
+  account only inside sign-up and login; the epds-callback never runs login(),
+  so without our call a returning user (existing account, new device or expired
+  binding) is never bound and SSO breaks. We reach it with bracket access, which
+  bypasses `protected` at compile time only. Rejected alternative: writing
+  `account_device` rows ourselves (direct PDS table access). Long-term fix: ask
+  upstream for a public hook.
 
-The `Account` type is not exported, so the return value is typed `any`.
-
-**Breakage scenario:** Parameter reordering, new required fields, or password
-handling changes. Account creation fails entirely.
+**Breakage scenario:** Parameter reordering, new required fields, password
+handling changes, or the method being renamed/removed. Account creation or
+returning-user device binding fails.
 
 ### 3. `pds.ctx.oauthProvider`
 
@@ -121,6 +129,12 @@ or if additional endpoints gain the same validation, the middleware workaround
 would need updating. Also at risk if the upstream `@TODO` is resolved by
 adding `same-site` to the allowed list — the middleware would become a no-op
 (harmless but unnecessary).
+
+**Status as of oauth-provider 0.27:** the upstream allow-list is now
+`same-origin`, `same-site`, `cross-site`, `none`
+(`create-authorization-page-middleware.js`), so the rewrite is a no-op. It is
+kept for now and should be removed in a follow-up PR once the upgrade is
+deployed.
 
 ## High Risk (individual features break)
 
@@ -225,7 +239,12 @@ uses several provider internals to issue an authorization code directly:
 - `provider.requestManager.get(requestUri, deviceId)` — binds the device to
   the PAR request (same as item 1 above).
 - `provider.requestManager.setAuthorized(requestUri, client, account, deviceId, deviceMetadata)` —
-  issues the authorization code (same as item 1 above).
+  issues the authorization code (same as item 1 above). **Returns
+  `{ code, parameters }` as of oauth-provider 0.27** (earlier: the bare code).
+  An untyped `as any` call hid this and produced `code=[object Object]` in the
+  redirect. The call now lives in `packages/pds-core/src/lib/consent-skip.ts`
+  behind a structural `ConsentSkipProvider` type, so tsc checks the return
+  shape, with a unit test asserting the redirect `code` is the string.
 - `provider.accountManager.setAuthorizedClient(account, client, { authorizedScopes })` —
   records the client as authorized so future logins can auto-approve.
 
@@ -285,7 +304,7 @@ Middleware intercepts HTML responses for `GET /oauth/authorize` and
 (a) appends each bound account's email next to its handle in the chooser UI,
 (b) hides upstream's "Sign up" button on the chooser (ePDS routes signup
 through auth-service, not upstream), and (c) rebinds upstream's "Another
-account" control (a native `<button>` in provider UI 0.10.3, previously
+account" control (a native `<button>` in provider UI 0.10.3 and 0.11.2, previously
 `<div role="button">`) with a capture-phase click listener that hard-navigates to
 `auth.<host>/oauth/authorize?prompt=login&<orig params>`, beating React's
 delegated root-level click handler and preventing the SPA from swapping
@@ -337,6 +356,13 @@ the `/account` route. The enrichment silently fails — the page still
 renders because the script is fail-safe — and users see stock upstream
 handle-only rows again with no email disambiguation and no "Use a different
 account" escape hatch.
+
+**Provider UI 0.11.2 (static check only):** the strings "Another account",
+"Select another account" and "Sign up" still exist in the bundle, and the
+`__sessions` / `__deviceSessions` globals are unchanged. UI 0.11.2 also ships a
+"manage" page with an email one-time-code toggle backed by
+`/oauth/api/enable-email-otp` and `/disable-email-otp`; ePDS does not hide it.
+DOM behaviour needs an AiaB/browser run to confirm.
 
 ### 17. `dev-id` cookie detection on the auth-service side
 
