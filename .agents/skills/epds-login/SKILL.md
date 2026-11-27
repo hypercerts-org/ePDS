@@ -1,6 +1,6 @@
 ---
 name: epds-login
-description: Implement AT Protocol OAuth login against an ePDS instance with @atproto/oauth-client-node. Covers email-first OTP, hosted email entry, Google sign-in, handle/DID login, client metadata, callbacks, and debugging. Use when building passwordless login against ePDS, adding a "Sign in with Google" button, configuring confidential/public OAuth clients, or integrating NodeOAuthClient.
+description: Implement AT Protocol OAuth login against an ePDS instance with @atproto/oauth-client-node. Covers email-first OTP, hosted email entry, Google sign-in, handle/DID login, the Atmosphere hand-off (epds_handle_login_url with state + iss), client metadata, callbacks, and debugging. Use when building passwordless login against ePDS, adding a "Sign in with Google" button, configuring confidential/public OAuth clients, or integrating NodeOAuthClient.
 license: MIT OR Apache-2.0
 ---
 
@@ -320,6 +320,103 @@ What to expect:
   login page appears as usual.
 - **Fresh sign-in.** Choosing Google skips reuse of an existing ePDS browser
   session, as `prompt=login` does, because the user asked for Google.
+
+## Atmosphere Hand-Off
+
+Users whose account lives on another PDS (for example `alice.bsky.social`)
+cannot sign in on ePDS itself. With `epds_handle_login_url` in your client
+metadata, the ePDS login page shows "Sign in with Atmosphere"; when the user
+enters a handle, ePDS redirects the browser to that URL with:
+
+- `handle`: what the user typed
+- `iss`: the ePDS issuer, for example `https://pds.example.com`
+- `state`: the `state` from your own PAR for this sign-in. It can be absent
+  (for example, the PAR expired or belongs to another client); refuse the
+  hand-off when it is.
+
+Treat this as the start of a sign-in and refuse it unless it continues one
+you started **in this browser**. Do not rely on the `Referer` header; ePDS
+sends `Referrer-Policy: no-referrer`.
+
+`NodeOAuthClient` stores `{ iss, appState, ... }` in your `stateStore` under
+the `state` it sends in PAR. Bind that to the browser by passing a random
+`appState` and keeping the same value in a cookie. The example reads the store
+back, so hoist it out of the Quick Start constructor into a
+`const stateStore` and pass that same instance to `NodeOAuthClient`.
+
+`refuse`, `redirect`, `timingSafeEqualStr`, `normalizeHandle`,
+`newBrowserNonceAndCookie`, `setCookie` and `clearCookie` are app-specific
+helpers (your framework or your code), not part of the SDK.
+
+```typescript
+// Issuer from `issuer` in $EPDS_URL/.well-known/oauth-authorization-server
+const EPDS_ISSUER = 'https://pds.example.com'
+
+// Starting any ePDS sign-in
+const browserNonce = randomBytes(32).toString('base64url')
+const url = await client.authorize(EPDS_URL, { state: browserNonce })
+setCookie('epds_signin', browserNonce, {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'lax', // 'strict' is not sent on the cross-site hand-off
+  maxAge: 15 * 60,
+})
+// ...then redirect the browser to `url`
+
+// GET <epds_handle_login_url>?handle=&iss=&state=
+export async function handoff(query: URLSearchParams, cookieNonce?: string) {
+  const state = query.get('state')
+  const iss = query.get('iss')
+  const handle = query.get('handle')
+  if (!state || !iss || !handle || !cookieNonce) throw refuse()
+
+  const saved = await stateStore.get(state) // same store you gave NodeOAuthClient
+  if (!saved) throw refuse() // unknown, expired or already used
+  if (!timingSafeEqualStr(saved.appState ?? '', cookieNonce)) throw refuse()
+  if (iss !== EPDS_ISSUER || saved.iss !== EPDS_ISSUER) throw refuse()
+
+  // Single use. Delete only after the checks, so a request without the
+  // cookie cannot burn a real user's state. The delete must report whether
+  // it removed the row, so two concurrent requests cannot both succeed.
+  // `deleteIfPresent` is a helper on YOUR store (not part of SimpleStore).
+  if (!(await stateStore.deleteIfPresent(state))) throw refuse()
+  clearCookie('epds_signin')
+
+  const next = await client.authorize(normalizeHandle(handle), {
+    state: newBrowserNonceAndCookie(),
+  })
+  return redirect(next.toString())
+}
+```
+
+`SimpleStore.del()` returns nothing, so the SDK interface cannot tell you
+whether you won a race. `deleteIfPresent` is therefore a method you add to your
+own store: it deletes the row and returns whether it removed one (for example
+SQL `DELETE FROM oauth_state WHERE key = $1 RETURNING key`, true when a row
+came back). Refuse unless it returned true, as above. Do not delete before the checks: a request with the wrong cookie would
+then destroy a real user's pending sign-in.
+
+`packages/demo/src/app/api/oauth/handoff/route.ts` implements the same state
+and `iss` checks without the SDK: its PAR `state` is already in a signed,
+httpOnly cookie, so it compares `state` with that cookie and clears the cookie
+on accept. This is **not** atomic single use: the demo has no server-side
+store, so two concurrent requests carrying the same valid cookie can both pass
+before the browser applies the deletion, and each starts a new OAuth flow. A
+sequential replay fails once the cookie is gone. If you need strict single use,
+consume `state` atomically in a store, as in the snippet above.
+
+Why each check matters:
+
+- **Cookie match:** a lookup in your store alone is not enough. Anyone can
+  start a sign-in to get a valid `state` and send its hand-off link to a
+  victim, signing the victim in as the attacker.
+- **`iss`:** your store also holds pending sign-ins for other servers;
+  only accept states that were started against this ePDS.
+- **Single use:** stops the same link being replayed.
+
+Known limit: the handle is not bound to `state`. Someone who learns a
+victim's still-pending `state` could swap in another handle; keep `state`
+out of logs and analytics on this route, and redirect immediately.
 
 ## Verification
 

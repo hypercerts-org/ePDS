@@ -2,7 +2,9 @@
  * OAuth login initiator — starts the AT Protocol OAuth flow.
  *
  * Accepts ?email=... or ?handle=... query params. If neither is provided,
- * the auth server collects credentials itself (Flow 2).
+ * the auth server collects credentials itself (Flow 2). ?handle= is also
+ * where the Atmosphere hand-off ends up, after /api/oauth/handoff has
+ * verified it.
  *
  * Optional ?handle_mode=... (e.g. picker-with-random) is forwarded to the
  * auth server as epds_handle_mode, overriding the default handle assignment

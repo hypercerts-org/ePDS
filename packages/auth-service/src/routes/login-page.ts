@@ -14,7 +14,11 @@
  *      - Email OTP form (submits to better-auth /api/auth/* endpoints)
  *      - Under one "or" divider: "Sign in with Atmosphere" (clients that
  *        declare epds_handle_login_url), then "Sign in with Google"
- *        (clients that offer it); no divider when neither is offered
+ *        (clients that offer it); no divider when neither is offered.
+ *        For Atmosphere clients, the client's own PAR `state` is fetched
+ *        from pds-core (/_internal/par-login-hint) and inlined so the
+ *        hand-off can carry it. The page is served with
+ *        `Cache-Control: no-store` so that state is not cached.
  *      - A fixed error message when a social sign-in came back with
  *        ?epds_social_error= (see lib/social-sign-in-error.ts)
  *      - "Recover with backup email" link (shown by default; clients
@@ -63,6 +67,8 @@ import { buildOtpInputFilter, buildOtpInputProps } from '../otp-input.js'
 import {
   resolveLoginHint,
   fetchParLoginHint,
+  fetchParHandoff,
+  createParLookup,
 } from '../lib/resolve-login-hint.js'
 import { splitResolvedHint } from '../lib/login-hint.js'
 import { maskEmail } from '../lib/mask-email.js'
@@ -366,13 +372,17 @@ export function createLoginPageRouter(
     )
     const internalSecret = process.env.EPDS_INTERNAL_SECRET ?? ''
 
+    // One pds-core round trip serves both the login_hint and the hand-off
+    // state/issuer below.
+    const parLookup = createParLookup(
+      pdsInternalUrl,
+      requestUri,
+      internalSecret,
+    )
+
     let effectiveLoginHint = loginHint ?? null
     if (!skipParHint && !effectiveLoginHint && requestUri) {
-      effectiveLoginHint = await fetchParLoginHint(
-        pdsInternalUrl,
-        requestUri,
-        internalSecret,
-      )
+      effectiveLoginHint = await fetchParLoginHint(parLookup)
     }
     const resolvedEmail = effectiveLoginHint
       ? await resolveLoginHint(
@@ -460,6 +470,12 @@ export function createLoginPageRouter(
       asRequestString(req.query.epds_handle_mode),
       clientMeta,
     )
+    // Only clients offering the Atmosphere hand-off need their state back,
+    // so other clients don't pay for the extra pds-core call.
+    const handoff =
+      effectiveClientId && isSafeHttpUrl(clientMeta.epds_handle_login_url)
+        ? await fetchParHandoff(parLookup, effectiveClientId)
+        : null
 
     logger.debug(
       {
@@ -639,8 +655,13 @@ export function createLoginPageRouter(
       'Serving login page for auth_flow',
     )
 
+    // The page inlines the client's PAR state for the Atmosphere hand-off;
+    // keep it out of browser and proxy caches.
+    res.setHeader('Cache-Control', 'no-store')
     res.type('html').send(
       renderLoginPage({
+        handoffState: handoff?.state ?? null,
+        handoffIssuer: handoff?.issuer ?? null,
         flowId,
         clientId: effectiveClientId ?? '',
         clientName,
@@ -806,6 +827,15 @@ export function renderLoginPage(input: {
   csrfToken: string
   authBasePath: string
   pdsPublicUrl: string
+  /**
+   * The client's PAR `state`, sent back with `iss` on the Atmosphere
+   * hand-off so the client can check the hand-off belongs to a sign-in it
+   * started in this browser. Null when unavailable; the client must then
+   * refuse the hand-off.
+   */
+  handoffState?: string | null
+  /** OAuth issuer from pds-core; the hand-off omits `iss` without it. */
+  handoffIssuer?: string | null
   termsOfServiceUrl?: string
   privacyPolicyUrl?: string
   legalEntityName?: string
@@ -853,7 +883,8 @@ export function renderLoginPage(input: {
   // Only rendered when the OAuth client declares `epds_handle_login_url` in
   // its client metadata. The button toggles the email form into handle-entry
   // mode; submitting a handle navigates the browser to that URL with
-  // `?handle=<value>` appended. The client owns handle-to-PDS resolution
+  // `?handle=<value>&iss=<issuer>` appended, plus `&state=<client state>`
+  // when the PAR request still has one. The client owns handle-to-PDS resolution
   // and starts a fresh OAuth flow against whichever PDS the handle resolves
   // to — auth-service is bound to one PDS and cannot PAR on the client's
   // behalf, so off-PDS handles only work via this hand-off.
@@ -1040,6 +1071,8 @@ export function renderLoginPage(input: {
     (function() {
       var authBasePath = ${toScriptJson(opts.authBasePath)};
       var handleLoginUrl = ${toScriptJson(handleLoginUrl)};
+      var handoffState = ${toScriptJson(handleLoginUrl ? (opts.handoffState ?? '') : '')};
+      var handoffIss = ${toScriptJson(handleLoginUrl ? (opts.handoffIssuer ?? '') : '')};
       var requestUri = ${toScriptJson('')};  // not needed client-side; flow_id is in cookie
       var currentEmail = '';
       // True while the server holds this flow's email (handle/DID login_hint)
@@ -1745,13 +1778,21 @@ export function renderLoginPage(input: {
         btn.textContent = loginMode === 'handle' ? 'Signing in...' : 'Sending...';
 
         if (loginMode === 'handle') {
-          // Hand off to the client's handle-login URL with ?handle=<value>
-          // appended (preserving any existing query string the client put on
-          // the URL). The client resolves the handle to its PDS and starts a
-          // fresh PAR against that PDS. handleLoginUrl is server-validated
-          // as http(s) before being inlined here.
+          // Hand off to the client's handle-login URL with handle, iss and
+          // (when available) the client's own PAR state appended, preserving
+          // any other query params the client put on the URL. The client
+          // checks state + iss against the sign-in it started in this
+          // browser, then starts a fresh PAR against the handle's PDS.
+          // handleLoginUrl is server-validated as http(s) before being
+          // inlined here.
           var target = new URL(handleLoginUrl);
           target.searchParams.set('handle', raw);
+          // Without a verified issuer or state the client cannot verify the
+          // hand-off and refuses it, which is the intended fail-closed result.
+          if (handoffIss) target.searchParams.set('iss', handoffIss);
+          else target.searchParams.delete('iss');
+          if (handoffState) target.searchParams.set('state', handoffState);
+          else target.searchParams.delete('state');
           window.location.href = target.toString();
           return;
         }

@@ -20,6 +20,7 @@ dotenv.config()
 // PORT and uses it for healthchecks, so fall back to PORT when PDS_PORT is
 // not explicitly set.  This must happen before readEnv().
 import { applyPdsPortFallback } from './lib/resolve-port.js'
+import { buildParLookupResponse } from './lib/par-lookup-response.js'
 applyPdsPortFallback()
 
 import type * as http from 'node:http'
@@ -1130,10 +1131,13 @@ async function main() {
     }
   })
 
-  // Protected internal endpoint for auth service to retrieve the login_hint
-  // stored in a PAR request. Third-party apps put the handle/DID in the PAR body
-  // but don't duplicate it on the authorization redirect URL. The auth service
-  // needs to retrieve it to resolve the user's email for OTP.
+  // Protected internal endpoint for auth service to retrieve fields stored in
+  // a PAR request. Third-party apps put the handle/DID in the PAR body but
+  // don't duplicate it on the authorization redirect URL; the auth service
+  // needs it to resolve the user's email for OTP. `state` and `client_id` let
+  // the login page hand an Atmosphere sign-in back to the client with the
+  // client's own state, so the client can verify the hand-off; `issuer` is the
+  // exact OAuth issuer the PDS advertises, which `iss` must equal verbatim.
   pds.app.get('/_internal/par-login-hint', async (req, res) => {
     if (!verifyInternalSecret(req.headers['x-internal-secret'])) {
       res.status(401).json({ error: 'Unauthorized' })
@@ -1154,11 +1158,11 @@ async function main() {
       const request = await oauthProvider.requestManager.get(
         requestUri as `urn:ietf:params:oauth:request_uri:req-${string}`,
       )
-      res.json({ login_hint: request.parameters.login_hint ?? null })
+      res.json(buildParLookupResponse(request.parameters, oauthProvider.issuer))
     } catch (err) {
       logger.debug({ err, requestUri }, 'Failed to read PAR login_hint')
       // Not found or expired — not an error, just no hint available
-      res.json({ login_hint: null })
+      res.json(buildParLookupResponse(null, ''))
     }
   })
 

@@ -462,9 +462,9 @@ function checkHandleLoginUrl(metadata: ClientMetadata): PreviewCheck {
     id: 'handle-login-url',
     label,
     severity: 'ok',
-    detail: `epds_handle_login_url="${value}". Login page will render the "Sign in with Atmosphere" button and hand off to this URL with a handle=<value> query param.`,
+    detail: `epds_handle_login_url="${value}". Login page will render the "Sign in with Atmosphere" button and hand off to this URL with handle and iss query params, plus the client's PAR state when that request is still live and has one (the /preview/login page has no PAR, so it never sends state).`,
     labelHtml,
-    detailHtml: `${code('epds_handle_login_url')}=${code('"' + value + '"')}. Login page will render the "Sign in with Atmosphere" button and hand off to this URL with a ${code('handle=<value>')} query param.`,
+    detailHtml: `${code('epds_handle_login_url')}=${code('"' + value + '"')}. Login page will render the "Sign in with Atmosphere" button and hand off to this URL with ${code('handle')} and ${code('iss')} query params, plus the client's PAR ${code('state')} when that request is still live and has one (the ${code('/preview/login')} page has no PAR, so it never sends ${code('state')}).`,
   }
 }
 
